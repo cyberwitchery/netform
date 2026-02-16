@@ -347,7 +347,10 @@ impl DiffContext {
 
         let mut ambiguous_content_keys = HashMap::new();
         for (key, a_count) in &a_counts {
-            if *a_count > 1 && let Some(b_count) = b_counts.get(key) && *b_count > 1 {
+            if *a_count > 1
+                && let Some(b_count) = b_counts.get(key)
+                && *b_count > 1
+            {
                 ambiguous_content_keys.insert(*key, (*a_count, *b_count));
             }
         }
