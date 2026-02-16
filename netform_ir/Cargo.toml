@@ -3,6 +3,10 @@ name = "netform_ir"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "Lossless intermediate representation and parser for network configuration text"
+repository = "https://github.com/cyberwitchery/netform"
+homepage = "https://github.com/cyberwitchery/netform"
+documentation = "https://docs.rs/netform_ir"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

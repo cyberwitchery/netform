@@ -3,6 +3,10 @@ name = "netform_dialect_iosxe"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "IOS XE dialect profile for netform lossless config parsing"
+repository = "https://github.com/cyberwitchery/netform"
+homepage = "https://github.com/cyberwitchery/netform"
+documentation = "https://docs.rs/netform_dialect_iosxe"
 
 [dependencies]
 netform_ir = { version = "0.1.0", path = "../netform_ir" }

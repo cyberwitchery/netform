@@ -3,6 +3,10 @@ name = "netform_dialect_junos"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "Junos dialect profile for netform lossless config parsing"
+repository = "https://github.com/cyberwitchery/netform"
+homepage = "https://github.com/cyberwitchery/netform"
+documentation = "https://docs.rs/netform_dialect_junos"
 
 [dependencies]
 netform_ir = { version = "0.1.0", path = "../netform_ir" }

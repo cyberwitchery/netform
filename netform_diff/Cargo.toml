@@ -3,6 +3,10 @@ name = "netform_diff"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "Deterministic diff engine and CLI for lossless network config IR"
+repository = "https://github.com/cyberwitchery/netform"
+homepage = "https://github.com/cyberwitchery/netform"
+documentation = "https://docs.rs/netform_diff"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
