@@ -45,17 +45,23 @@ jobs:
         run: |
           for manifest in "$GITHUB_WORKSPACE"/netform_*/Cargo.toml; do
             crate="$(basename "$(dirname "$manifest")")"
-            (cd /tmp && cargo cyclonedx --manifest-path "$manifest" \
+            cargo cyclonedx --manifest-path "$manifest" \
               --format json \
               --override-filename "sbom-${{ github.ref_name }}-${crate}.cdx" \
-              --all-features)
+              --all-features
           done
 
       - name: upload sbom
         uses: actions/upload-artifact@v4
         with:
           name: sbom-${{ github.ref_name }}
-          path: "/tmp/sbom-${{ github.ref_name }}-*.cdx.json"
+          path: "${{ github.workspace }}/**/sbom-${{ github.ref_name }}-*.cdx.json"
+          if-no-files-found: error
+
+      - name: clean generated sbom files
+        run: |
+          set -euo pipefail
+          find "$GITHUB_WORKSPACE" -type f -name "sbom-${{ github.ref_name }}-*.cdx.json" -delete
 
       - name: verify clean tree before publish
         run: |
