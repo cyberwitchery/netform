@@ -278,26 +278,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "netform_cli"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "netform_dialect_eos",
+ "netform_dialect_iosxe",
+ "netform_dialect_junos",
+ "netform_diff",
+ "netform_ir",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "netform_dialect_eos"
+version = "0.2.0"
+dependencies = [
+ "netform_ir",
+]
+
+[[package]]
 name = "netform_dialect_iosxe"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "netform_ir",
 ]
 
 [[package]]
 name = "netform_dialect_junos"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "netform_ir",
 ]
 
 [[package]]
 name = "netform_diff"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
- "clap",
  "netform_dialect_iosxe",
- "netform_dialect_junos",
  "netform_ir",
  "proptest",
  "serde",
@@ -307,7 +326,7 @@ dependencies = [
 
 [[package]]
 name = "netform_ir"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
 ]

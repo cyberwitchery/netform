@@ -1,41 +1,41 @@
-//! IOS XE-oriented dialect profile for `netform_ir`.
+//! Arista EOS-oriented dialect profile for `netform_ir`.
 //!
-//! This crate provides a conservative IOS XE profile that customizes:
+//! This crate provides a conservative EOS profile that customizes:
 //! - comment classification (`!`, `#`)
 //! - tokenization with quoted-string preservation
 //!
 //! # Example
 //!
 //! ```rust
-//! use netform_dialect_iosxe::parse_iosxe;
+//! use netform_dialect_eos::parse_eos;
 //!
-//! let cfg = "interface Ethernet1\n  description \"WAN uplink\"\n";
-//! let doc = parse_iosxe(cfg);
+//! let cfg = "interface Ethernet1\n   description \"Uplink\"\n";
+//! let doc = parse_eos(cfg);
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
 use netform_ir::{Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, parse_with_dialect};
 
-/// Dialect implementation for IOS XE-like configuration text.
+/// Dialect implementation for EOS-like configuration text.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct IosxeDialect;
+pub struct EosDialect;
 
-/// Parse text using [`IosxeDialect`].
-pub fn parse_iosxe(input: &str) -> Document {
-    parse_with_dialect(input, &IosxeDialect)
+/// Parse text using [`EosDialect`].
+pub fn parse_eos(input: &str) -> Document {
+    parse_with_dialect(input, &EosDialect)
 }
 
-impl Dialect for IosxeDialect {
+impl Dialect for EosDialect {
     fn dialect_hint(&self) -> DialectHint {
-        DialectHint::Named("iosxe".to_string())
+        DialectHint::Named("eos".to_string())
     }
 
     fn classify_trivia(&self, raw: &str) -> TriviaKind {
-        classify_iosxe_trivia(raw)
+        classify_eos_trivia(raw)
     }
 
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_iosxe_parts(raw)
+        parse_eos_parts(raw)
     }
 
     fn key_hint(
@@ -47,11 +47,11 @@ impl Dialect for IosxeDialect {
         if trivia != TriviaKind::Content {
             return None;
         }
-        ios_like_key_hint(parsed)
+        eos_like_key_hint(parsed)
     }
 }
 
-fn classify_iosxe_trivia(raw: &str) -> TriviaKind {
+fn classify_eos_trivia(raw: &str) -> TriviaKind {
     if raw.trim().is_empty() {
         return TriviaKind::Blank;
     }
@@ -64,14 +64,14 @@ fn classify_iosxe_trivia(raw: &str) -> TriviaKind {
     TriviaKind::Content
 }
 
-fn parse_iosxe_parts(raw: &str) -> Option<ParsedLineParts> {
-    let tokens = tokenize_iosxe(raw);
+fn parse_eos_parts(raw: &str) -> Option<ParsedLineParts> {
+    let tokens = tokenize_eos(raw);
     let head = tokens.first()?.clone();
     let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
     Some(ParsedLineParts { head, args })
 }
 
-fn tokenize_iosxe(raw: &str) -> Vec<String> {
+fn tokenize_eos(raw: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut in_quote: Option<char> = None;
@@ -120,7 +120,7 @@ fn tokenize_iosxe(raw: &str) -> Vec<String> {
     tokens
 }
 
-fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+fn eos_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let parsed = parsed?;
     let head = parsed.head.as_str();
     let args = parsed.args.as_slice();
@@ -160,28 +160,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn iosxe_comment_classification_supports_bang_and_hash() {
-        assert_eq!(classify_iosxe_trivia("!"), TriviaKind::Comment);
-        assert_eq!(classify_iosxe_trivia("# generated"), TriviaKind::Comment);
-        assert_eq!(
-            classify_iosxe_trivia("interface Ethernet1"),
-            TriviaKind::Content
-        );
+    fn eos_comment_classification_supports_bang_and_hash() {
+        assert_eq!(classify_eos_trivia("!"), TriviaKind::Comment);
+        assert_eq!(classify_eos_trivia("# generated"), TriviaKind::Comment);
+        assert_eq!(classify_eos_trivia("vlan 10"), TriviaKind::Content);
     }
 
     #[test]
-    fn iosxe_tokenization_keeps_quoted_values_together() {
-        let parsed = parse_iosxe_parts("description \"WAN uplink\"").expect("content should parse");
+    fn eos_tokenization_keeps_quoted_values_together() {
+        let parsed =
+            parse_eos_parts("description \"Transit uplink\"").expect("content should parse");
         assert_eq!(parsed.head, "description");
-        assert_eq!(parsed.args, vec!["\"WAN uplink\""]);
+        assert_eq!(parsed.args, vec!["\"Transit uplink\""]);
     }
 
     #[test]
-    fn parse_iosxe_sets_named_dialect_hint() {
-        let doc = parse_iosxe("hostname edge-1\n");
-        assert_eq!(
-            doc.metadata.dialect_hint,
-            DialectHint::Named("iosxe".into())
-        );
+    fn parse_eos_sets_named_dialect_hint() {
+        let doc = parse_eos("hostname leaf-01\n");
+        assert_eq!(doc.metadata.dialect_hint, DialectHint::Named("eos".into()));
     }
 }

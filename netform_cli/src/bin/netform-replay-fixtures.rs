@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use netform_dialect_eos::parse_eos;
 use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_junos::parse_junos;
 use netform_diff::{NormalizeOptions, OrderPolicyConfig, diff_documents};
@@ -31,6 +32,7 @@ struct Expected {
 enum FixtureDialect {
     #[default]
     Generic,
+    Eos,
     Iosxe,
     Junos,
 }
@@ -115,6 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn parse_config(input: &str, dialect: FixtureDialect) -> Document {
     match dialect {
         FixtureDialect::Generic => parse_generic(input),
+        FixtureDialect::Eos => parse_eos(input),
         FixtureDialect::Iosxe => parse_iosxe(input),
         FixtureDialect::Junos => parse_junos(input),
     }

@@ -62,6 +62,7 @@ pub struct LineNode {
     pub line_ending: String,
     pub span: Span,
     pub parsed: Option<ParsedLineParts>,
+    pub key_hint: Option<String>,
     pub trivia: TriviaKind,
 }
 
@@ -209,6 +210,15 @@ pub trait Dialect {
     fn classify_trivia(&self, raw: &str) -> TriviaKind;
     /// Optionally tokenize a raw content line into `head` + `args`.
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts>;
+    /// Optionally derive a stable identity hint for this line.
+    fn key_hint(
+        &self,
+        _raw: &str,
+        _parsed: Option<&ParsedLineParts>,
+        _trivia: TriviaKind,
+    ) -> Option<String> {
+        None
+    }
 }
 
 /// Conservative default dialect for vendor-agnostic parsing.
@@ -303,6 +313,7 @@ struct LineCandidate {
     line_ending: String,
     span: Span,
     parsed: Option<ParsedLineParts>,
+    key_hint: Option<String>,
     trivia: TriviaKind,
     indent: usize,
 }
@@ -314,6 +325,7 @@ impl LineCandidate {
             line_ending: self.line_ending.clone(),
             span: self.span.clone(),
             parsed: self.parsed.clone(),
+            key_hint: self.key_hint.clone(),
             trivia: self.trivia,
         }
     }
@@ -350,6 +362,7 @@ fn collect_lines<D: Dialect>(
         } else {
             None
         };
+        let key_hint = dialect.key_hint(raw, parsed.as_ref(), trivia);
 
         if has_mixed_leading_whitespace(raw) {
             parse_findings.push(ParseFinding {
@@ -365,6 +378,7 @@ fn collect_lines<D: Dialect>(
             line_ending: line_ending.to_string(),
             span,
             parsed,
+            key_hint,
             trivia,
             indent: count_indent(raw),
         });

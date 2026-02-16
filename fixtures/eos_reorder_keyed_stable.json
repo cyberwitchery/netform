@@ -1,0 +1,21 @@
+{
+  "name": "eos_reorder_keyed_stable",
+  "dialect": "eos",
+  "intended": "interface Ethernet1\n   description uplink\n   speed forced 100gfull\n",
+  "actual": "interface Ethernet1\n   speed forced 100gfull\n   description uplink\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": [
+      {
+        "context_prefix": [0],
+        "policy": "keyed-stable"
+      }
+    ]
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": []
+  }
+}

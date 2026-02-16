@@ -37,6 +37,18 @@ impl Dialect for JunosDialect {
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
         parse_junos_parts(raw)
     }
+
+    fn key_hint(
+        &self,
+        _raw: &str,
+        parsed: Option<&ParsedLineParts>,
+        trivia: TriviaKind,
+    ) -> Option<String> {
+        if trivia != TriviaKind::Content {
+            return None;
+        }
+        junos_key_hint(parsed)
+    }
 }
 
 fn classify_junos_trivia(raw: &str) -> TriviaKind {
@@ -117,6 +129,33 @@ fn tokenize_junos(raw: &str) -> Vec<String> {
     }
 
     tokens
+}
+
+fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+    let parsed = parsed?;
+    let head = parsed.head.as_str();
+    let args = parsed.args.as_slice();
+
+    match head {
+        "interfaces" | "protocols" | "routing-instances" | "policy-options" => {
+            Some(head.to_string())
+        }
+        "set" => set_style_key_hint(args),
+        _ => None,
+    }
+}
+
+fn set_style_key_hint(args: &[String]) -> Option<String> {
+    match args {
+        [section, name, ..] if section == "interfaces" => Some(format!("set-interface:{name}")),
+        [section, name, ..] if section == "routing-instances" => {
+            Some(format!("set-routing-instance:{name}"))
+        }
+        [section, proto, asn, ..] if section == "protocols" && proto == "bgp" => {
+            Some(format!("set-protocols:bgp:{asn}"))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

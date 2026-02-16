@@ -1,0 +1,23 @@
+[package]
+name = "netform_cli"
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+description = "CLI for diffing lossless network configuration IR documents"
+repository = "https://github.com/cyberwitchery/netform"
+homepage = "https://github.com/cyberwitchery/netform"
+documentation = "https://docs.rs/netform_cli"
+
+[[bin]]
+name = "config-diff"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+netform_dialect_eos = { version = "0.2.0", path = "../netform_dialect_eos" }
+netform_dialect_iosxe = { version = "0.2.0", path = "../netform_dialect_iosxe" }
+netform_dialect_junos = { version = "0.2.0", path = "../netform_dialect_junos" }
+netform_diff = { version = "0.2.0", path = "../netform_diff" }
+netform_ir = { version = "0.2.0", path = "../netform_ir" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

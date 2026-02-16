@@ -1,0 +1,16 @@
+{
+  "name": "junos_heavy_reorder_keyed_stable",
+  "dialect": "junos",
+  "intended": "interfaces {\n    ge-0/0/0 {\n        description \"uplink-core-a\";\n        mtu 9216;\n        unit 0 {\n            family inet {\n                address 192.0.2.2/30;\n            }\n        }\n    }\n    ge-0/0/1 {\n        description \"server-lan\";\n        unit 0 {\n            family inet {\n                address 10.10.1.1/24;\n            }\n        }\n    }\n}\npolicy-options {\n    policy-statement EDGE-EXPORT {\n        term ALLOW-SUMMARY {\n            from {\n                route-filter 10.10.0.0/16 orlonger;\n            }\n            then accept;\n        }\n    }\n}\n",
+  "actual": "interfaces {\n    ge-0/0/1 {\n        unit 0 {\n            family inet {\n                address 10.10.1.1/24;\n            }\n        }\n        description \"server-lan\";\n    }\n    ge-0/0/0 {\n        mtu 9216;\n        description \"uplink-core-a\";\n        unit 0 {\n            family inet {\n                address 192.0.2.2/30;\n            }\n        }\n    }\n}\npolicy-options {\n    policy-statement EDGE-EXPORT {\n        term ALLOW-SUMMARY {\n            then accept;\n            from {\n                route-filter 10.10.0.0/16 orlonger;\n            }\n        }\n    }\n}\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": ["ambiguous_key_match", "ambiguous_key_match"]
+  }
+}

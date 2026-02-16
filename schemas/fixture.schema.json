@@ -16,7 +16,7 @@
     "name": { "type": "string" },
     "dialect": {
       "type": "string",
-      "enum": ["generic", "iosxe", "junos"],
+      "enum": ["generic", "eos", "iosxe", "junos"],
       "default": "generic"
     },
     "intended": { "type": "string" },

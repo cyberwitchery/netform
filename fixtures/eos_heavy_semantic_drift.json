@@ -1,0 +1,16 @@
+{
+  "name": "eos_heavy_semantic_drift",
+  "dialect": "eos",
+  "intended": "hostname leaf-01\ninterface Ethernet1\n   description uplink-spine-a\n   mtu 9214\n   ip address 192.0.2.2/31\n   no shutdown\nrouter bgp 65000\n   router-id 10.255.255.1\n   neighbor 192.0.2.1 remote-as 65100\n   neighbor 192.0.2.1 description spine-a\n   address-family ipv4\n      network 10.10.1.0/24\n      neighbor 192.0.2.1 activate\nip access-list ACL-EDGE-IN\n   10 permit tcp 10.10.1.0/24 any eq https\n   20 permit tcp 10.10.1.0/24 any eq ssh\n   90 deny ip any any log\n",
+  "actual": "hostname leaf-01\ninterface Ethernet1\n   ip address 192.0.2.2/31\n   mtu 9214\n   description uplink-spine-a\n   shutdown\nrouter bgp 65000\n   neighbor 192.0.2.1 description spine-a\n   router-id 10.255.255.1\n   neighbor 192.0.2.1 remote-as 65100\n   address-family ipv4\n      neighbor 192.0.2.1 activate\n      network 10.10.1.0/24\nip access-list ACL-EDGE-IN\n   20 permit tcp 10.10.1.0/24 any eq ssh\n   10 permit tcp 10.10.1.0/24 any eq https\n   90 deny ip any any log\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Replace"],
+    "finding_codes": []
+  }
+}

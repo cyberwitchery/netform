@@ -11,6 +11,7 @@
   - `line_ending`: `""`, `"\n"`, or `"\r\n"`
   - `span`: line number and byte offsets in source text
   - `parsed`: optional `head` + `args` tokenization
+  - `key_hint`: optional dialect-provided identity hint for keyed diffing
   - `trivia`: `Blank`, `Comment`, `Content`, or `Unknown`
 - `BlockNode`:
   - `header`: a `LineNode`
@@ -30,4 +31,3 @@
 
 renderer emits line `raw + line_ending` in original traversal order.
 for valid `Document` output from `parse_generic`, `parse(render(x)) == x` at text level.
-

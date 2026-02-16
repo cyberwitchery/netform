@@ -5,7 +5,9 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 ## structure
 
 - `netform_ir`: core config intermediate representation (ir), parser, and lossless renderer.
-- `netform_diff`: normalization, diff engine, report formatting, and `config-diff` cli.
+- `netform_diff`: normalization, diff engine, report formatting, and plan/report primitives.
+- `netform_cli`: `config-diff` and replay binaries.
+- `netform_dialect_eos`: eos profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_iosxe`: iosxe profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_junos`: junos profile for comment/token handling and dialect-aware parsing.
 
@@ -32,20 +34,21 @@ add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-netform_ir = "0.1.0"
-netform_diff = "0.1.0"
-netform_dialect_iosxe = "0.1.0"
-netform_dialect_junos = "0.1.0"
+netform_ir = "0.2.0"
+netform_diff = "0.2.0"
+netform_dialect_eos = "0.2.0"
+netform_dialect_iosxe = "0.2.0"
+netform_dialect_junos = "0.2.0"
 ```
 
 install the cli binary so you can run `config-diff` directly:
 
 ```bash
 # from this repo checkout
-cargo install --path netform_diff
+cargo install --path netform_cli
 
 # or from crates.io (after publish)
-cargo install netform_diff
+cargo install netform_cli
 ```
 
 ## quick start
@@ -85,7 +88,7 @@ config-diff [OPTIONS] <FILE_A> <FILE_B>
 
 options:
 
-- `--dialect <generic|iosxe|junos>`: parser profile to apply (default: `generic`)
+- `--dialect <generic|eos|iosxe|junos>`: parser profile to apply (default: `generic`)
 - `--order-policy <ordered|unordered|keyed-stable>`: sibling ordering semantics (default: `ordered`)
 - `--ignore-comments`: drop comment lines from comparison
 - `--ignore-blank-lines`: drop blank lines from comparison
@@ -96,12 +99,13 @@ options:
 examples:
 
 ```bash
-cargo run -p netform_diff --bin config-diff -- ./before.cfg ./after.cfg
-cargo run -p netform_diff --bin config-diff -- --dialect iosxe ./intended.conf ./actual.conf
-cargo run -p netform_diff --bin config-diff -- --dialect junos ./intended.conf ./actual.conf
-cargo run -p netform_diff --bin config-diff -- --order-policy keyed-stable ./intended.conf ./actual.conf
-cargo run -p netform_diff --bin config-diff -- --json ./before.cfg ./after.cfg
-cargo run -p netform_diff --bin config-diff -- --plan-json ./before.cfg ./after.cfg
+cargo run -p netform_cli --bin config-diff -- ./before.cfg ./after.cfg
+cargo run -p netform_cli --bin config-diff -- --dialect eos ./intended.conf ./actual.conf
+cargo run -p netform_cli --bin config-diff -- --dialect iosxe ./intended.conf ./actual.conf
+cargo run -p netform_cli --bin config-diff -- --dialect junos ./intended.conf ./actual.conf
+cargo run -p netform_cli --bin config-diff -- --order-policy keyed-stable ./intended.conf ./actual.conf
+cargo run -p netform_cli --bin config-diff -- --json ./before.cfg ./after.cfg
+cargo run -p netform_cli --bin config-diff -- --plan-json ./before.cfg ./after.cfg
 ```
 
 ## release

@@ -1,3 +1,3 @@
 [workspace]
-members = ["netform_ir", "netform_diff", "netform_dialect_junos", "netform_dialect_iosxe"]
+members = ["netform_ir", "netform_diff", "netform_cli", "netform_dialect_junos", "netform_dialect_iosxe", "netform_dialect_eos"]
 resolver = "2"

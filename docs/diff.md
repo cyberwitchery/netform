@@ -37,6 +37,7 @@ each comparable line carries:
 - `Path` (node path)
 - `Span` (line + byte offsets)
 - trivia classification
+- optional dialect-provided `key_hint` used for keyed-stable matching when available
 
 ## edits
 
@@ -70,9 +71,11 @@ changed lines also carry path/span references for diagnostics.
 
 ## cli output
 
+the `config-diff` binary is provided by `netform_cli`.
+
 `config-diff a.cfg b.cfg` prints markdown report.
 `config-diff --json a.cfg b.cfg` prints `diff.json`.
 `config-diff --plan-json a.cfg b.cfg` prints `plan.json`.
-`config-diff --dialect generic|iosxe|junos ...` selects parser profile.
+`config-diff --dialect generic|eos|iosxe|junos ...` selects parser profile.
 `config-diff --order-policy ordered|unordered|keyed-stable ...` controls line ordering semantics.
 `config-diff --ignore-comments --ignore-blank-lines --normalize-whitespace ...` enables normalization steps.

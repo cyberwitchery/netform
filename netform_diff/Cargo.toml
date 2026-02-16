@@ -1,21 +1,19 @@
 [package]
 name = "netform_diff"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
-description = "Deterministic diff engine and CLI for lossless network config IR"
+description = "Deterministic diff engine and reporting primitives for lossless network config IR"
 repository = "https://github.com/cyberwitchery/netform"
 homepage = "https://github.com/cyberwitchery/netform"
 documentation = "https://docs.rs/netform_diff"
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
-netform_dialect_iosxe = { version = "0.1.0", path = "../netform_dialect_iosxe" }
-netform_dialect_junos = { version = "0.1.0", path = "../netform_dialect_junos" }
-netform_ir = { version = "0.1.0", path = "../netform_ir" }
+netform_ir = { version = "0.2.0", path = "../netform_ir" }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [dev-dependencies]
+netform_dialect_iosxe = { version = "0.2.0", path = "../netform_dialect_iosxe" }
 proptest = "1.6"
+serde_json = "1.0"

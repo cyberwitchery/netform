@@ -16,6 +16,21 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features
 ```
 
+## release readiness
+
+one-command local gate:
+
+```bash
+./scripts/run_release_readiness.sh
+```
+
+optional extras:
+
+```bash
+./scripts/run_release_readiness.sh --with-miri
+./scripts/run_release_readiness.sh --with-publish-dry-run
+```
+
 ## miri
 
 run the local helper:
@@ -45,6 +60,8 @@ open locally:
 
 - `target/doc/netform_ir/index.html`
 - `target/doc/netform_diff/index.html`
+- `target/doc/netform_cli/index.html`
+- `target/doc/netform_dialect_eos/index.html`
 - `target/doc/netform_dialect_iosxe/index.html`
 - `target/doc/netform_dialect_junos/index.html`
 

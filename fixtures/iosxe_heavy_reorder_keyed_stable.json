@@ -1,0 +1,16 @@
+{
+  "name": "iosxe_heavy_reorder_keyed_stable",
+  "dialect": "iosxe",
+  "intended": "interface Ethernet1\n  description uplink-core-a\n  mtu 9216\n  ip address 192.0.2.2 255.255.255.252\n  no shutdown\nrouter bgp 65000\n  bgp log-neighbor-changes\n  neighbor 192.0.2.1 remote-as 65100\n  neighbor 192.0.2.1 route-map RM-EDGE-OUT out\n  address-family ipv4 unicast\n    network 10.10.1.0 mask 255.255.255.0\n    neighbor 192.0.2.1 activate\nip access-list extended ACL-EDGE-IN\n  permit tcp 10.10.1.0 0.0.0.255 any eq 443\n  permit tcp 10.10.1.0 0.0.0.255 any eq 22\n  deny ip any any log\n",
+  "actual": "interface Ethernet1\n  ip address 192.0.2.2 255.255.255.252\n  mtu 9216\n  description uplink-core-a\n  no shutdown\nrouter bgp 65000\n  neighbor 192.0.2.1 route-map RM-EDGE-OUT out\n  bgp log-neighbor-changes\n  neighbor 192.0.2.1 remote-as 65100\n  address-family ipv4 unicast\n    neighbor 192.0.2.1 activate\n    network 10.10.1.0 mask 255.255.255.0\nip access-list extended ACL-EDGE-IN\n  permit tcp 10.10.1.0 0.0.0.255 any eq 22\n  permit tcp 10.10.1.0 0.0.0.255 any eq 443\n  deny ip any any log\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": []
+  }
+}

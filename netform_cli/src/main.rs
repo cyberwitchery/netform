@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
+use netform_dialect_eos::parse_eos;
 use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_junos::parse_junos;
 use netform_diff::{
@@ -49,6 +50,7 @@ enum CliOrderPolicy {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum CliDialect {
     Generic,
+    Eos,
     Iosxe,
     Junos,
 }
@@ -106,6 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn parse_config(input: &str, dialect: CliDialect) -> Document {
     match dialect {
         CliDialect::Generic => parse_generic(input),
+        CliDialect::Eos => parse_eos(input),
         CliDialect::Iosxe => parse_iosxe(input),
         CliDialect::Junos => parse_junos(input),
     }
