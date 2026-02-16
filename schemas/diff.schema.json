@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netform.local/schemas/diff.schema.json",
+  "title": "Netform Diff",
+  "type": "object",
+  "required": ["normalization_steps", "order_policy", "has_changes", "edits", "stats", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "normalization_steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/normalization_step" }
+    },
+    "order_policy": { "$ref": "#/$defs/order_policy" },
+    "has_changes": { "type": "boolean" },
+    "edits": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edit" }
+    },
+    "stats": { "$ref": "#/$defs/stats" },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "$defs": {
+    "normalization_step": {
+      "type": "string",
+      "enum": [
+        "ignore_comments",
+        "ignore_blank_lines",
+        "trim_trailing_whitespace",
+        "normalize_leading_whitespace",
+        "collapse_internal_whitespace"
+      ]
+    },
+    "order_policy_mode": {
+      "type": "string",
+      "enum": ["ordered", "unordered", "keyed-stable"]
+    },
+    "order_policy": {
+      "type": "object",
+      "required": ["default", "overrides"],
+      "additionalProperties": false,
+      "properties": {
+        "default": { "$ref": "#/$defs/order_policy_mode" },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["context_prefix", "policy"],
+            "additionalProperties": false,
+            "properties": {
+              "context_prefix": {
+                "type": "array",
+                "items": { "type": "integer", "minimum": 0 }
+              },
+              "policy": { "$ref": "#/$defs/order_policy_mode" }
+            }
+          }
+        }
+      }
+    },
+    "path": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "span": {
+      "type": "object",
+      "required": ["line", "start_byte", "end_byte"],
+      "additionalProperties": false,
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "start_byte": { "type": "integer", "minimum": 0 },
+        "end_byte": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "diff_line": {
+      "type": "object",
+      "required": ["content_key", "occurrence_key", "text", "path", "span"],
+      "additionalProperties": false,
+      "properties": {
+        "content_key": { "type": "integer", "minimum": 0 },
+        "occurrence_key": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" },
+        "path": { "$ref": "#/$defs/path" },
+        "span": { "$ref": "#/$defs/span" }
+      }
+    },
+    "edit_anchor": {
+      "type": "object",
+      "required": ["path", "span"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "span": { "$ref": "#/$defs/span" }
+      }
+    },
+    "insert_edit": {
+      "type": "object",
+      "required": ["type", "at_key", "left_anchor", "right_anchor", "lines"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "Insert" },
+        "at_key": { "type": ["integer", "null"], "minimum": 0 },
+        "left_anchor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/edit_anchor" }] },
+        "right_anchor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/edit_anchor" }] },
+        "lines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diff_line" }
+        }
+      }
+    },
+    "delete_edit": {
+      "type": "object",
+      "required": ["type", "at_key", "left_anchor", "right_anchor", "lines"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "Delete" },
+        "at_key": { "type": ["integer", "null"], "minimum": 0 },
+        "left_anchor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/edit_anchor" }] },
+        "right_anchor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/edit_anchor" }] },
+        "lines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diff_line" }
+        }
+      }
+    },
+    "replace_edit": {
+      "type": "object",
+      "required": ["type", "old_at_key", "new_at_key", "left_anchor", "right_anchor", "old_lines", "new_lines"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "Replace" },
+        "old_at_key": { "type": ["integer", "null"], "minimum": 0 },
+        "new_at_key": { "type": ["integer", "null"], "minimum": 0 },
+        "left_anchor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/edit_anchor" }] },
+        "right_anchor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/edit_anchor" }] },
+        "old_lines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diff_line" }
+        },
+        "new_lines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diff_line" }
+        }
+      }
+    },
+    "edit": {
+      "oneOf": [
+        { "$ref": "#/$defs/insert_edit" },
+        { "$ref": "#/$defs/delete_edit" },
+        { "$ref": "#/$defs/replace_edit" }
+      ]
+    },
+    "stats": {
+      "type": "object",
+      "required": [
+        "inserts",
+        "deletes",
+        "replaces",
+        "inserted_lines",
+        "deleted_lines",
+        "replaced_old_lines",
+        "replaced_new_lines"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "inserts": { "type": "integer", "minimum": 0 },
+        "deletes": { "type": "integer", "minimum": 0 },
+        "replaces": { "type": "integer", "minimum": 0 },
+        "inserted_lines": { "type": "integer", "minimum": 0 },
+        "deleted_lines": { "type": "integer", "minimum": 0 },
+        "replaced_old_lines": { "type": "integer", "minimum": 0 },
+        "replaced_new_lines": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["code", "level", "message", "path", "span"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "unknown_unparsed_construct",
+            "ambiguous_key_match",
+            "diff_unreliable_region"
+          ]
+        },
+        "level": {
+          "type": "string",
+          "enum": ["warning", "info"]
+        },
+        "message": { "type": "string" },
+        "path": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/path" }
+          ]
+        },
+        "span": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/span" }
+          ]
+        }
+      }
+    }
+  }
+}

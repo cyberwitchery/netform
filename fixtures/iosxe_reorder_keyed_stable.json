@@ -1,0 +1,21 @@
+{
+  "name": "iosxe_reorder_keyed_stable",
+  "dialect": "iosxe",
+  "intended": "interface Ethernet1\n  description uplink\n  mtu 9000\n",
+  "actual": "interface Ethernet1\n  mtu 9000\n  description uplink\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": [
+      {
+        "context_prefix": [0],
+        "policy": "keyed-stable"
+      }
+    ]
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": []
+  }
+}

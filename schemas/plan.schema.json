@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netform.local/schemas/plan.schema.json",
+  "title": "Netform Plan",
+  "type": "object",
+  "required": ["version", "actions", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string" },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "span": {
+      "type": "object",
+      "required": ["line", "start_byte", "end_byte"],
+      "additionalProperties": false,
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "start_byte": { "type": "integer", "minimum": 0 },
+        "end_byte": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "replace_block_action": {
+      "type": "object",
+      "required": ["type", "target_path", "target_span", "intended_lines"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "replace_block" },
+        "target_path": { "$ref": "#/$defs/path" },
+        "target_span": { "$ref": "#/$defs/span" },
+        "intended_lines": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "apply_line_edits_action": {
+      "type": "object",
+      "required": ["type", "context_path", "line_edits"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "apply_line_edits_under_context" },
+        "context_path": { "$ref": "#/$defs/path" },
+        "line_edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "text"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["insert", "delete", "replace"]
+              },
+              "text": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "action": {
+      "oneOf": [
+        { "$ref": "#/$defs/replace_block_action" },
+        { "$ref": "#/$defs/apply_line_edits_action" }
+      ]
+    },
+    "finding": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

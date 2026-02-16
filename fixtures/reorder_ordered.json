@@ -1,0 +1,15 @@
+{
+  "name": "reorder_ordered",
+  "intended": "interface Ethernet1\n  description uplink\n  mtu 9000\n",
+  "actual": "interface Ethernet1\n  mtu 9000\n  description uplink\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Delete", "Insert"],
+    "finding_codes": []
+  }
+}

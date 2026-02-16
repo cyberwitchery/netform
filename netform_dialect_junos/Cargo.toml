@@ -1,0 +1,8 @@
+[package]
+name = "netform_dialect_junos"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+netform_ir = { version = "0.1.0", path = "../netform_ir" }

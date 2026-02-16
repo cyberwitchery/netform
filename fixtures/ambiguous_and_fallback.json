@@ -1,0 +1,17 @@
+{
+  "name": "ambiguous_and_fallback",
+  "intended": "line\nline\nline\n",
+  "actual": "interface Ethernet1\n  description x\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Replace"],
+    "finding_codes": [
+      "diff_unreliable_region"
+    ]
+  }
+}

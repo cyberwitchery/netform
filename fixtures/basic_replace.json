@@ -1,0 +1,15 @@
+{
+  "name": "basic_replace",
+  "intended": "interface Ethernet1\n  description intended\n",
+  "actual": "interface Ethernet1\n  description actual\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Replace"],
+    "finding_codes": []
+  }
+}

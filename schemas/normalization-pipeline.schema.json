@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netform.local/schemas/normalization-pipeline.schema.json",
+  "title": "Netform Normalization Pipeline",
+  "type": "object",
+  "required": ["steps"],
+  "additionalProperties": false,
+  "properties": {
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ignore_comments",
+              "ignore_blank_lines",
+              "trim_trailing_whitespace",
+              "normalize_leading_whitespace",
+              "collapse_internal_whitespace"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

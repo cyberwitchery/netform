@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netform.local/schemas/fixture.schema.json",
+  "title": "Netform Replay Fixture",
+  "type": "object",
+  "required": [
+    "name",
+    "intended",
+    "actual",
+    "normalization_steps",
+    "order_policy",
+    "expected"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string" },
+    "dialect": {
+      "type": "string",
+      "enum": ["generic", "iosxe", "junos"],
+      "default": "generic"
+    },
+    "intended": { "type": "string" },
+    "actual": { "type": "string" },
+    "normalization_steps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ignore_comments",
+          "ignore_blank_lines",
+          "trim_trailing_whitespace",
+          "normalize_leading_whitespace",
+          "collapse_internal_whitespace"
+        ]
+      }
+    },
+    "order_policy": { "$ref": "order-policy.schema.json" },
+    "expected": {
+      "type": "object",
+      "required": ["has_changes", "edit_types", "finding_codes"],
+      "additionalProperties": false,
+      "properties": {
+        "has_changes": { "type": "boolean" },
+        "edit_types": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["Insert", "Delete", "Replace"] }
+        },
+        "finding_codes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "unknown_unparsed_construct",
+              "ambiguous_key_match",
+              "diff_unreliable_region"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

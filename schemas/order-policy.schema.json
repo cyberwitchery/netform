@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netform.local/schemas/order-policy.schema.json",
+  "title": "Netform Order Policy",
+  "type": "object",
+  "required": ["default", "overrides"],
+  "additionalProperties": false,
+  "properties": {
+    "default": {
+      "type": "string",
+      "enum": ["ordered", "unordered", "keyed-stable"]
+    },
+    "overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["context_prefix", "policy"],
+        "additionalProperties": false,
+        "properties": {
+          "context_prefix": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0 }
+          },
+          "policy": {
+            "type": "string",
+            "enum": ["ordered", "unordered", "keyed-stable"]
+          }
+        }
+      }
+    }
+  }
+}

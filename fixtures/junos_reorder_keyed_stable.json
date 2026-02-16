@@ -1,0 +1,21 @@
+{
+  "name": "junos_reorder_keyed_stable",
+  "dialect": "junos",
+  "intended": "interfaces {\n    ge-0/0/0 {\n        description \"uplink-a\";\n    }\n    ge-0/0/1 {\n        description \"uplink-b\";\n    }\n}\n",
+  "actual": "interfaces {\n    ge-0/0/1 {\n        description \"uplink-b\";\n    }\n    ge-0/0/0 {\n        description \"uplink-a\";\n    }\n}\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": [
+      {
+        "context_prefix": [0],
+        "policy": "keyed-stable"
+      }
+    ]
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": ["ambiguous_key_match"]
+  }
+}
