@@ -40,4 +40,4 @@ jobs:
         run: cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 80
 
       - name: Replay fixtures
-        run: cargo run -q -p netform_diff --bin netform-replay-fixtures
+        run: cargo run -q -p netform_cli --bin netform-replay-fixtures
