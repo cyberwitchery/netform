@@ -2,7 +2,7 @@
 
 ## [unreleased]
 
-## [0.2.0] - 2026-02-16
+## [0.2.0] - 2026-02-17
 
 - added `netform_cli` crate for binaries (`config-diff`, `netform-replay-fixtures`)
 - split `netform_diff` into focused modules (`model`, `normalize`, `flatten`, `engine`, `findings`, `report`, `plan`, `util`)
