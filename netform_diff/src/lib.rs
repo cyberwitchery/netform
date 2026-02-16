@@ -38,7 +38,7 @@ pub enum NormalizationStep {
 }
 
 /// Options controlling normalization and ordering semantics for diffing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NormalizeOptions {
     pub steps: Vec<NormalizationStep>,
     pub order_policy: OrderPolicyConfig,
@@ -61,16 +61,6 @@ impl NormalizeOptions {
 
     fn policy_for_path(&self, path: &Path) -> OrderPolicy {
         self.order_policy.policy_for_path(path)
-    }
-}
-
-impl Default for NormalizeOptions {
-    fn default() -> Self {
-        // Conservative default for drift detection: compare exact rendered text.
-        Self {
-            steps: Vec::new(),
-            order_policy: OrderPolicyConfig::default(),
-        }
     }
 }
 
@@ -357,12 +347,8 @@ impl DiffContext {
 
         let mut ambiguous_content_keys = HashMap::new();
         for (key, a_count) in &a_counts {
-            if *a_count > 1 {
-                if let Some(b_count) = b_counts.get(key) {
-                    if *b_count > 1 {
-                        ambiguous_content_keys.insert(*key, (*a_count, *b_count));
-                    }
-                }
+            if *a_count > 1 && let Some(b_count) = b_counts.get(key) && *b_count > 1 {
+                ambiguous_content_keys.insert(*key, (*a_count, *b_count));
             }
         }
 

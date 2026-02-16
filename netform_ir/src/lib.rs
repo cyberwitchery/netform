@@ -92,18 +92,13 @@ pub struct DocumentMetadata {
 }
 
 /// Declared parser dialect used for this document.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DialectHint {
+    #[default]
     Generic,
     Unknown,
     Named(String),
-}
-
-impl Default for DialectHint {
-    fn default() -> Self {
-        Self::Generic
-    }
 }
 
 /// Parser-level uncertainty note attached to a source span.

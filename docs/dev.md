@@ -16,6 +16,25 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features
 ```
 
+## miri
+
+run the local helper:
+
+```bash
+./scripts/run_miri.sh
+```
+
+optional full pass:
+
+```bash
+MIRIFLAGS='-Zmiri-disable-isolation' ./scripts/run_miri.sh --full
+```
+
+note:
+- `--full` excludes subprocess-based CLI smoke tests because Miri on macOS does not support `std::process` spawning.
+- tune property-test runtime under Miri with `MIRI_PROPTEST_CASES` (default `8`), for example:
+  `MIRI_PROPTEST_CASES=4 MIRIFLAGS='-Zmiri-disable-isolation' ./scripts/run_miri.sh --full`
+
 ## docs build
 
 ```bash

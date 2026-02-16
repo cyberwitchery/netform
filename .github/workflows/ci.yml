@@ -17,7 +17,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
@@ -27,6 +27,9 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Install coverage tool
         uses: taiki-e/install-action@v2
