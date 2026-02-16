@@ -3,6 +3,7 @@
 entrypoints:
 - [ir model](model.md)
 - [diff model](diff.md)
+- [heavy config example](heavy-example.md)
 - [dev guide](dev.md)
 - top-level readme: `README.md`
 

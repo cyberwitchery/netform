@@ -23,6 +23,7 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 - [docs index](docs/index.md)
 - [ir model](docs/model.md)
 - [diff model](docs/diff.md)
+- [heavy config example](docs/heavy-example.md)
 - [dev guide](docs/dev.md)
 
 ## install
