@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::process;
 
 use clap::{Parser, ValueEnum};
 use netform_dialect_eos::parse_eos;
@@ -38,6 +39,12 @@ struct Cli {
 
     #[arg(long, value_enum, default_value_t = CliDialect::Generic)]
     dialect: CliDialect,
+
+    /// Exit with code 1 when the configs differ (like `diff`).
+    /// Useful for CI gating: combine with `--quiet` or redirect output to
+    /// /dev/null if you only care about the exit code.
+    #[arg(long)]
+    exit_code: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -100,6 +107,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &cli.file_b.display().to_string(),
             )
         );
+    }
+
+    if cli.exit_code && diff.has_changes {
+        process::exit(1);
     }
 
     Ok(())
