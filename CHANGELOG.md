@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+- `config-diff` now exits 1 when configs differ by default (like `diff(1)`); use `--no-exit-code` to suppress
+
 ## [0.2.0] - 2026-02-17
 
 - added `netform_cli` crate for binaries (`config-diff`, `netform-replay-fixtures`)

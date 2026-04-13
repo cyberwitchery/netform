@@ -95,6 +95,7 @@ options:
 - `--normalize-whitespace`: collapse internal whitespace in comparison view
 - `--json`: print machine-readable `Diff` json instead of markdown
 - `--plan-json`: print machine-readable `Plan` json instead of markdown
+- `--no-exit-code`: suppress the default exit-code behaviour (by default, config-diff exits 1 when configs differ, like `diff(1)`)
 
 examples:
 
@@ -106,6 +107,8 @@ cargo run -p netform_cli --bin config-diff -- --dialect junos ./intended.conf ./
 cargo run -p netform_cli --bin config-diff -- --order-policy keyed-stable ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --json ./before.cfg ./after.cfg
 cargo run -p netform_cli --bin config-diff -- --plan-json ./before.cfg ./after.cfg
+# always exit 0, even when configs have drifted
+cargo run -p netform_cli --bin config-diff -- --no-exit-code ./intended.conf ./actual.conf
 ```
 
 ## release
