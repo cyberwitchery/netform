@@ -19,6 +19,7 @@ fn config_diff_cli_prints_markdown_report() {
     fs::write(&right, "hostname new\n").expect("write right");
 
     let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
         .arg(&left)
         .arg(&right)
         .output()
@@ -38,6 +39,7 @@ fn config_diff_cli_emits_json_and_plan_json() {
     fs::write(&right, "interface Ethernet1\n  description new\n").expect("write right");
 
     let diff_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
         .arg("--json")
         .arg(&left)
         .arg(&right)
@@ -50,6 +52,7 @@ fn config_diff_cli_emits_json_and_plan_json() {
     assert!(diff_json.get("edits").is_some());
 
     let plan_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
         .arg("--plan-json")
         .arg(&left)
         .arg(&right)
@@ -78,6 +81,7 @@ fn config_diff_cli_accepts_dialect_flag() {
     .expect("write right");
 
     let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
         .arg("--dialect")
         .arg("junos")
         .arg("--json")
@@ -103,35 +107,54 @@ fn config_diff_cli_fails_for_missing_file() {
 }
 
 #[test]
-fn config_diff_exit_code_zero_when_no_changes() {
+fn config_diff_exits_zero_when_no_changes() {
     let path = temp_file_path("exit-code-same");
     fs::write(&path, "hostname router\n").expect("write file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
-        .arg("--exit-code")
         .arg(&path)
         .arg(&path)
         .output()
-        .expect("run config-diff --exit-code");
+        .expect("run config-diff");
 
     assert_eq!(output.status.code(), Some(0), "identical files → exit 0");
 }
 
 #[test]
-fn config_diff_exit_code_one_when_changes_detected() {
+fn config_diff_exits_one_when_changes_detected() {
     let left = temp_file_path("exit-code-left");
     let right = temp_file_path("exit-code-right");
     fs::write(&left, "hostname old\n").expect("write left");
     fs::write(&right, "hostname new\n").expect("write right");
 
     let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
-        .arg("--exit-code")
         .arg(&left)
         .arg(&right)
         .output()
-        .expect("run config-diff --exit-code");
+        .expect("run config-diff");
 
     assert_eq!(output.status.code(), Some(1), "differing files → exit 1");
+}
+
+#[test]
+fn config_diff_no_exit_code_suppresses_exit_one() {
+    let left = temp_file_path("no-exit-code-left");
+    let right = temp_file_path("no-exit-code-right");
+    fs::write(&left, "hostname old\n").expect("write left");
+    fs::write(&right, "hostname new\n").expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --no-exit-code");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "--no-exit-code suppresses exit 1"
+    );
 }
 
 #[test]

@@ -40,11 +40,11 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = CliDialect::Generic)]
     dialect: CliDialect,
 
-    /// Exit with code 1 when the configs differ (like `diff`).
-    /// Useful for CI gating: combine with `--quiet` or redirect output to
-    /// /dev/null if you only care about the exit code.
+    /// Suppress the default exit-code behaviour.  By default config-diff
+    /// exits 1 when the configs differ (like `diff(1)`).  Pass this flag
+    /// to always exit 0 regardless of whether changes were detected.
     #[arg(long)]
-    exit_code: bool,
+    no_exit_code: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    if cli.exit_code && diff.has_changes {
+    if !cli.no_exit_code && diff.has_changes {
         process::exit(1);
     }
 
