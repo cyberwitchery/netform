@@ -41,3 +41,9 @@ jobs:
 
       - name: Replay fixtures
         run: cargo run -q -p netform_cli --bin netform-replay-fixtures
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: cargo-deny
+        run: cargo deny check
