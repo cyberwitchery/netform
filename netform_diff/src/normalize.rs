@@ -56,6 +56,15 @@ fn count_indent_columns(raw: &str) -> usize {
     width
 }
 
+pub(crate) fn trivia_tag(kind: TriviaKind) -> &'static str {
+    match kind {
+        TriviaKind::Blank => "blank",
+        TriviaKind::Comment => "comment",
+        TriviaKind::Content => "content",
+        TriviaKind::Unknown => "unknown",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,14 +101,5 @@ mod tests {
             collapse("  description   uplink   port"),
             "  description uplink port"
         );
-    }
-}
-
-pub(crate) fn trivia_tag(kind: TriviaKind) -> &'static str {
-    match kind {
-        TriviaKind::Blank => "blank",
-        TriviaKind::Comment => "comment",
-        TriviaKind::Content => "content",
-        TriviaKind::Unknown => "unknown",
     }
 }
