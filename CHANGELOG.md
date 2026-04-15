@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- fixed `CollapseInternalWhitespace` stripping leading indentation — hierarchical configs no longer produce spurious matches between lines at different nesting levels
 - `config-diff` now exits 1 when configs differ by default (like `diff(1)`); use `--no-exit-code` to suppress
 
 ## [0.2.0] - 2026-02-17
