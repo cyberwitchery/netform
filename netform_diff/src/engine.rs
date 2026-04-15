@@ -491,3 +491,618 @@ fn backtrack_ops(a: &[u64], b: &[u64], trace: &[Vec<isize>], offset: isize) -> V
     rev_ops.reverse();
     rev_ops
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use netform_ir::{Path, Span, TriviaKind};
+
+    fn span(line: usize) -> Span {
+        Span {
+            line,
+            start_byte: 0,
+            end_byte: 10,
+        }
+    }
+
+    fn cline(text: &str, content_key: u64, path: Vec<usize>) -> ComparisonLine {
+        let occurrence_key = crate::model::derive_occurrence_key(content_key, 1);
+        ComparisonLine {
+            content_key,
+            occurrence_key,
+            key_hint: None,
+            normalized: text.to_string(),
+            original: text.to_string(),
+            path: Path(path.clone()),
+            span: span(path.last().copied().unwrap_or(0)),
+            trivia: TriviaKind::Content,
+        }
+    }
+
+    fn view(lines: Vec<ComparisonLine>) -> ComparisonView {
+        ComparisonView { lines }
+    }
+
+    fn default_options() -> NormalizeOptions {
+        NormalizeOptions::default()
+    }
+
+    // ── compute_ops ──
+
+    #[test]
+    fn compute_ops_identical_sequences() {
+        let ops = compute_ops(&[1, 2, 3], &[1, 2, 3]);
+        assert_eq!(ops, vec![Op::Equal, Op::Equal, Op::Equal]);
+    }
+
+    #[test]
+    fn compute_ops_empty_left_yields_all_inserts() {
+        let ops = compute_ops(&[], &[1, 2]);
+        assert_eq!(ops, vec![Op::Insert, Op::Insert]);
+    }
+
+    #[test]
+    fn compute_ops_empty_right_yields_all_deletes() {
+        let ops = compute_ops(&[1, 2], &[]);
+        assert_eq!(ops, vec![Op::Delete, Op::Delete]);
+    }
+
+    #[test]
+    fn compute_ops_both_empty() {
+        let ops = compute_ops(&[], &[]);
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn compute_ops_single_insertion() {
+        let ops = compute_ops(&[1, 3], &[1, 2, 3]);
+        let inserts = ops.iter().filter(|o| **o == Op::Insert).count();
+        let equals = ops.iter().filter(|o| **o == Op::Equal).count();
+        assert_eq!(inserts, 1);
+        assert_eq!(equals, 2);
+    }
+
+    #[test]
+    fn compute_ops_single_deletion() {
+        let ops = compute_ops(&[1, 2, 3], &[1, 3]);
+        let deletes = ops.iter().filter(|o| **o == Op::Delete).count();
+        let equals = ops.iter().filter(|o| **o == Op::Equal).count();
+        assert_eq!(deletes, 1);
+        assert_eq!(equals, 2);
+    }
+
+    #[test]
+    fn compute_ops_complete_replacement() {
+        let ops = compute_ops(&[1, 2], &[3, 4]);
+        let deletes = ops.iter().filter(|o| **o == Op::Delete).count();
+        let inserts = ops.iter().filter(|o| **o == Op::Insert).count();
+        assert_eq!(deletes, 2);
+        assert_eq!(inserts, 2);
+    }
+
+    #[test]
+    fn compute_ops_preserves_length_invariant() {
+        let a = [10, 20, 30, 40];
+        let b = [10, 25, 30, 50];
+        let ops = compute_ops(&a, &b);
+        let mut ai = 0usize;
+        let mut bi = 0usize;
+        for op in &ops {
+            match op {
+                Op::Equal => {
+                    ai += 1;
+                    bi += 1;
+                }
+                Op::Delete => ai += 1,
+                Op::Insert => bi += 1,
+            }
+        }
+        assert_eq!(ai, a.len());
+        assert_eq!(bi, b.len());
+    }
+
+    // ── build_stats ──
+
+    #[test]
+    fn build_stats_empty_edits() {
+        let stats = build_stats(&[]);
+        assert_eq!(stats, DiffStats::default());
+    }
+
+    #[test]
+    fn build_stats_counts_inserts() {
+        let edits = vec![Edit::Insert {
+            at_key: Some(1),
+            left_anchor: None,
+            right_anchor: None,
+            lines: vec![
+                DiffLine {
+                    content_key: 1,
+                    occurrence_key: 1,
+                    text: "a".into(),
+                    path: Path(vec![0]),
+                    span: span(0),
+                },
+                DiffLine {
+                    content_key: 2,
+                    occurrence_key: 2,
+                    text: "b".into(),
+                    path: Path(vec![1]),
+                    span: span(1),
+                },
+            ],
+        }];
+        let stats = build_stats(&edits);
+        assert_eq!(stats.inserts, 1);
+        assert_eq!(stats.inserted_lines, 2);
+        assert_eq!(stats.deletes, 0);
+    }
+
+    #[test]
+    fn build_stats_counts_deletes() {
+        let edits = vec![Edit::Delete {
+            at_key: Some(1),
+            left_anchor: None,
+            right_anchor: None,
+            lines: vec![DiffLine {
+                content_key: 1,
+                occurrence_key: 1,
+                text: "x".into(),
+                path: Path(vec![0]),
+                span: span(0),
+            }],
+        }];
+        let stats = build_stats(&edits);
+        assert_eq!(stats.deletes, 1);
+        assert_eq!(stats.deleted_lines, 1);
+    }
+
+    #[test]
+    fn build_stats_counts_replaces() {
+        let edits = vec![Edit::Replace {
+            old_at_key: Some(1),
+            new_at_key: Some(2),
+            left_anchor: None,
+            right_anchor: None,
+            old_lines: vec![DiffLine {
+                content_key: 1,
+                occurrence_key: 1,
+                text: "old".into(),
+                path: Path(vec![0]),
+                span: span(0),
+            }],
+            new_lines: vec![
+                DiffLine {
+                    content_key: 2,
+                    occurrence_key: 2,
+                    text: "new1".into(),
+                    path: Path(vec![0]),
+                    span: span(0),
+                },
+                DiffLine {
+                    content_key: 3,
+                    occurrence_key: 3,
+                    text: "new2".into(),
+                    path: Path(vec![1]),
+                    span: span(1),
+                },
+            ],
+        }];
+        let stats = build_stats(&edits);
+        assert_eq!(stats.replaces, 1);
+        assert_eq!(stats.replaced_old_lines, 1);
+        assert_eq!(stats.replaced_new_lines, 2);
+    }
+
+    #[test]
+    fn build_stats_accumulates_mixed_edits() {
+        let edits = vec![
+            Edit::Insert {
+                at_key: Some(1),
+                left_anchor: None,
+                right_anchor: None,
+                lines: vec![DiffLine {
+                    content_key: 1,
+                    occurrence_key: 1,
+                    text: "i".into(),
+                    path: Path(vec![0]),
+                    span: span(0),
+                }],
+            },
+            Edit::Delete {
+                at_key: Some(2),
+                left_anchor: None,
+                right_anchor: None,
+                lines: vec![DiffLine {
+                    content_key: 2,
+                    occurrence_key: 2,
+                    text: "d".into(),
+                    path: Path(vec![1]),
+                    span: span(1),
+                }],
+            },
+            Edit::Insert {
+                at_key: Some(3),
+                left_anchor: None,
+                right_anchor: None,
+                lines: vec![DiffLine {
+                    content_key: 3,
+                    occurrence_key: 3,
+                    text: "i2".into(),
+                    path: Path(vec![2]),
+                    span: span(2),
+                }],
+            },
+        ];
+        let stats = build_stats(&edits);
+        assert_eq!(stats.inserts, 2);
+        assert_eq!(stats.deletes, 1);
+        assert_eq!(stats.inserted_lines, 2);
+        assert_eq!(stats.deleted_lines, 1);
+    }
+
+    // ── build_segments ──
+
+    #[test]
+    fn build_segments_empty_view() {
+        let v = view(vec![]);
+        let segs = build_segments(&v);
+        assert!(segs.is_empty());
+    }
+
+    #[test]
+    fn build_segments_single_line() {
+        let v = view(vec![cline("hostname router1", 100, vec![0])]);
+        let segs = build_segments(&v);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].lines.len(), 1);
+        assert!(!segs[0].is_block);
+    }
+
+    #[test]
+    fn build_segments_groups_same_root() {
+        let v = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description foo", 101, vec![0, 0]),
+            cline("  mtu 9000", 102, vec![0, 1]),
+        ]);
+        let segs = build_segments(&v);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].lines.len(), 3);
+        assert!(segs[0].is_block);
+    }
+
+    #[test]
+    fn build_segments_splits_different_roots() {
+        let v = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description foo", 101, vec![0, 0]),
+            cline("interface Eth2", 200, vec![1]),
+            cline("  description bar", 201, vec![1, 0]),
+        ]);
+        let segs = build_segments(&v);
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].segment_key, 100);
+        assert_eq!(segs[1].segment_key, 200);
+    }
+
+    #[test]
+    fn build_segments_flat_lines_are_not_blocks() {
+        let v = view(vec![
+            cline("hostname a", 100, vec![0]),
+            cline("hostname b", 200, vec![1]),
+        ]);
+        let segs = build_segments(&v);
+        assert_eq!(segs.len(), 2);
+        assert!(!segs[0].is_block);
+        assert!(!segs[1].is_block);
+    }
+
+    // ── diff_views ──
+
+    #[test]
+    fn diff_views_identical_flat_lines() {
+        let a = view(vec![
+            cline("hostname router1", 100, vec![0]),
+            cline("ip route 0.0.0.0/0 10.0.0.1", 200, vec![1]),
+        ]);
+        let b = a.clone();
+        let result = diff_views(&a, &b, &default_options());
+        assert!(result.edits.is_empty());
+    }
+
+    #[test]
+    fn diff_views_detects_flat_insertion() {
+        let a = view(vec![cline("hostname router1", 100, vec![0])]);
+        let b = view(vec![
+            cline("hostname router1", 100, vec![0]),
+            cline("ip route default", 200, vec![1]),
+        ]);
+        let result = diff_views(&a, &b, &default_options());
+        assert!(!result.edits.is_empty());
+        assert!(
+            result
+                .edits
+                .iter()
+                .any(|e| matches!(e, Edit::Insert { .. }))
+        );
+    }
+
+    #[test]
+    fn diff_views_detects_flat_deletion() {
+        let a = view(vec![
+            cline("hostname router1", 100, vec![0]),
+            cline("ip route default", 200, vec![1]),
+        ]);
+        let b = view(vec![cline("hostname router1", 100, vec![0])]);
+        let result = diff_views(&a, &b, &default_options());
+        assert!(!result.edits.is_empty());
+        assert!(
+            result
+                .edits
+                .iter()
+                .any(|e| matches!(e, Edit::Delete { .. }))
+        );
+    }
+
+    #[test]
+    fn diff_views_both_empty() {
+        let a = view(vec![]);
+        let b = view(vec![]);
+        let result = diff_views(&a, &b, &default_options());
+        assert!(result.edits.is_empty());
+    }
+
+    #[test]
+    fn diff_views_block_children_diffed_when_headers_match() {
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description old", 101, vec![0, 0]),
+            cline("  mtu 9000", 102, vec![0, 1]),
+        ]);
+        let b = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description new", 201, vec![0, 0]),
+            cline("  mtu 9000", 102, vec![0, 1]),
+        ]);
+        let result = diff_views(&a, &b, &default_options());
+        assert!(!result.edits.is_empty());
+        match &result.edits[0] {
+            Edit::Replace {
+                old_lines,
+                new_lines,
+                ..
+            } => {
+                assert_eq!(old_lines[0].text, "  description old");
+                assert_eq!(new_lines[0].text, "  description new");
+            }
+            _ => panic!("expected Replace"),
+        }
+    }
+
+    #[test]
+    fn diff_views_segment_replacement_uses_fallback() {
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description a", 101, vec![0, 0]),
+        ]);
+        let b = view(vec![
+            cline("router bgp 65000", 200, vec![0]),
+            cline("  neighbor 10.0.0.1", 201, vec![0, 0]),
+        ]);
+        let result = diff_views(&a, &b, &default_options());
+        assert!(!result.edits.is_empty());
+        assert!(!result.fallback_contexts.is_empty());
+    }
+
+    // ── line_diff (ordered) ──
+
+    #[test]
+    fn line_diff_ordered_no_changes() {
+        let lines = vec![
+            cline("  description uplink", 10, vec![0, 0]),
+            cline("  mtu 9000", 20, vec![0, 1]),
+        ];
+        let edits = line_diff(&lines, &lines, OrderPolicy::Ordered);
+        assert!(edits.is_empty());
+    }
+
+    #[test]
+    fn line_diff_ordered_detects_replacement() {
+        let a = vec![cline("  description old", 10, vec![0, 0])];
+        let b = vec![cline("  description new", 20, vec![0, 0])];
+        let edits = line_diff(&a, &b, OrderPolicy::Ordered);
+        assert_eq!(edits.len(), 1);
+        assert!(matches!(edits[0], Edit::Replace { .. }));
+    }
+
+    #[test]
+    fn line_diff_ordered_insertion_at_end() {
+        let a = vec![cline("  mtu 9000", 10, vec![0, 0])];
+        let b = vec![
+            cline("  mtu 9000", 10, vec![0, 0]),
+            cline("  no shutdown", 20, vec![0, 1]),
+        ];
+        let edits = line_diff(&a, &b, OrderPolicy::Ordered);
+        assert_eq!(edits.len(), 1);
+        assert!(matches!(edits[0], Edit::Insert { .. }));
+    }
+
+    #[test]
+    fn line_diff_ordered_deletion() {
+        let a = vec![
+            cline("  mtu 9000", 10, vec![0, 0]),
+            cline("  no shutdown", 20, vec![0, 1]),
+        ];
+        let b = vec![cline("  mtu 9000", 10, vec![0, 0])];
+        let edits = line_diff(&a, &b, OrderPolicy::Ordered);
+        assert_eq!(edits.len(), 1);
+        assert!(matches!(edits[0], Edit::Delete { .. }));
+    }
+
+    #[test]
+    fn line_diff_ordered_reorder_is_a_change() {
+        let a = vec![
+            cline("  description uplink", 10, vec![0, 0]),
+            cline("  mtu 9000", 20, vec![0, 1]),
+        ];
+        let b = vec![
+            cline("  mtu 9000", 20, vec![0, 0]),
+            cline("  description uplink", 10, vec![0, 1]),
+        ];
+        let edits = line_diff(&a, &b, OrderPolicy::Ordered);
+        assert!(!edits.is_empty());
+    }
+
+    // ── line_diff (unordered) ──
+
+    #[test]
+    fn line_diff_unordered_ignores_reorder() {
+        let a = vec![
+            cline("  description uplink", 10, vec![0, 0]),
+            cline("  mtu 9000", 20, vec![0, 1]),
+        ];
+        let b = vec![
+            cline("  mtu 9000", 20, vec![0, 0]),
+            cline("  description uplink", 10, vec![0, 1]),
+        ];
+        let edits = line_diff(&a, &b, OrderPolicy::Unordered);
+        assert!(edits.is_empty());
+    }
+
+    #[test]
+    fn line_diff_unordered_detects_extra_line() {
+        let a = vec![cline("  mtu 9000", 10, vec![0, 0])];
+        let b = vec![
+            cline("  mtu 9000", 10, vec![0, 0]),
+            cline("  no shutdown", 20, vec![0, 1]),
+        ];
+        let edits = line_diff(&a, &b, OrderPolicy::Unordered);
+        assert_eq!(edits.len(), 1);
+        assert!(matches!(edits[0], Edit::Insert { .. }));
+    }
+
+    #[test]
+    fn line_diff_unordered_detects_removed_line() {
+        let a = vec![
+            cline("  mtu 9000", 10, vec![0, 0]),
+            cline("  no shutdown", 20, vec![0, 1]),
+        ];
+        let b = vec![cline("  mtu 9000", 10, vec![0, 0])];
+        let edits = line_diff(&a, &b, OrderPolicy::Unordered);
+        assert_eq!(edits.len(), 1);
+        assert!(matches!(edits[0], Edit::Delete { .. }));
+    }
+
+    // ── line_diff (keyed_stable) ──
+
+    #[test]
+    fn line_diff_keyed_stable_ignores_reorder() {
+        let a = vec![
+            cline("  description uplink", 10, vec![0, 0]),
+            cline("  mtu 9000", 20, vec![0, 1]),
+        ];
+        let b = vec![
+            cline("  mtu 9000", 20, vec![0, 0]),
+            cline("  description uplink", 10, vec![0, 1]),
+        ];
+        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        assert!(edits.is_empty());
+    }
+
+    #[test]
+    fn line_diff_keyed_stable_detects_content_change() {
+        let a = vec![cline("  description old", 10, vec![0, 0])];
+        let b = vec![cline("  description new", 20, vec![0, 0])];
+        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        assert!(!edits.is_empty());
+    }
+
+    // ── finalize_chunked_edits ──
+
+    #[test]
+    fn finalize_chunked_edits_both_empty() {
+        let result = finalize_chunked_edits(vec![], vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn finalize_chunked_edits_only_deletes() {
+        let deletes = vec![DiffLine {
+            content_key: 1,
+            occurrence_key: 1,
+            text: "removed".into(),
+            path: Path(vec![0]),
+            span: span(0),
+        }];
+        let result = finalize_chunked_edits(deletes, vec![]);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], Edit::Delete { .. }));
+    }
+
+    #[test]
+    fn finalize_chunked_edits_only_inserts() {
+        let inserts = vec![DiffLine {
+            content_key: 1,
+            occurrence_key: 1,
+            text: "added".into(),
+            path: Path(vec![0]),
+            span: span(0),
+        }];
+        let result = finalize_chunked_edits(vec![], inserts);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], Edit::Insert { .. }));
+    }
+
+    #[test]
+    fn finalize_chunked_edits_both_present_yields_replace() {
+        let deletes = vec![DiffLine {
+            content_key: 1,
+            occurrence_key: 1,
+            text: "old".into(),
+            path: Path(vec![0]),
+            span: span(0),
+        }];
+        let inserts = vec![DiffLine {
+            content_key: 2,
+            occurrence_key: 2,
+            text: "new".into(),
+            path: Path(vec![0]),
+            span: span(0),
+        }];
+        let result = finalize_chunked_edits(deletes, inserts);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], Edit::Replace { .. }));
+    }
+
+    // ── to_diff_line / to_anchor ──
+
+    #[test]
+    fn to_diff_line_preserves_fields() {
+        let cl = cline("  mtu 9000", 42, vec![0, 1]);
+        let dl = to_diff_line(&cl);
+        assert_eq!(dl.content_key, cl.content_key);
+        assert_eq!(dl.occurrence_key, cl.occurrence_key);
+        assert_eq!(dl.text, cl.original);
+        assert_eq!(dl.path, cl.path);
+        assert_eq!(dl.span, cl.span);
+    }
+
+    #[test]
+    fn to_anchor_extracts_path_and_span() {
+        let dl = DiffLine {
+            content_key: 1,
+            occurrence_key: 1,
+            text: "test".into(),
+            path: Path(vec![2, 3]),
+            span: Span {
+                line: 5,
+                start_byte: 10,
+                end_byte: 20,
+            },
+        };
+        let anchor = to_anchor(&dl);
+        assert_eq!(anchor.path, dl.path);
+        assert_eq!(anchor.span, dl.span);
+    }
+}
