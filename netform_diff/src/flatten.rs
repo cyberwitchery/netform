@@ -212,3 +212,291 @@ pub(crate) fn extracted_key_counts(view: &ComparisonView) -> HashMap<String, usi
     }
     counts
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NormalizationStep;
+    use netform_ir::{BlockNode, Document, LineNode, Node, Span, TriviaKind, parse_generic};
+
+    fn default_opts() -> NormalizeOptions {
+        NormalizeOptions::default()
+    }
+
+    fn dummy_span(line: usize) -> Span {
+        Span {
+            line,
+            start_byte: 0,
+            end_byte: 0,
+        }
+    }
+
+    #[test]
+    fn single_line_produces_one_comparison_line() {
+        let doc = parse_generic("hostname edge-01\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 1);
+        assert_eq!(view.lines[0].normalized, "hostname edge-01");
+        assert_eq!(view.lines[0].original, "hostname edge-01");
+        assert_eq!(view.lines[0].path, Path(vec![0]));
+        assert_eq!(view.lines[0].trivia, TriviaKind::Content);
+    }
+
+    #[test]
+    fn multiple_roots_have_sequential_paths() {
+        let doc = parse_generic("line a\nline b\nline c\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 3);
+        assert_eq!(view.lines[0].path, Path(vec![0]));
+        assert_eq!(view.lines[1].path, Path(vec![1]));
+        assert_eq!(view.lines[2].path, Path(vec![2]));
+    }
+
+    #[test]
+    fn block_flattens_header_then_children() {
+        let doc = parse_generic("interface Eth1\n  description foo\n  mtu 9000\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 3);
+        assert_eq!(view.lines[0].normalized, "interface Eth1");
+        assert_eq!(view.lines[0].path, Path(vec![0]));
+        assert_eq!(view.lines[1].normalized, "  description foo");
+        assert_eq!(view.lines[1].path, Path(vec![0, 0]));
+        assert_eq!(view.lines[2].normalized, "  mtu 9000");
+        assert_eq!(view.lines[2].path, Path(vec![0, 1]));
+    }
+
+    #[test]
+    fn nested_blocks_flatten_recursively() {
+        let doc = parse_generic("a\n  b\n    c\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 3);
+        assert_eq!(view.lines[0].path, Path(vec![0]));
+        assert_eq!(view.lines[1].path, Path(vec![0, 0]));
+        assert_eq!(view.lines[2].path, Path(vec![0, 0, 0]));
+    }
+
+    #[test]
+    fn mixed_roots_and_blocks() {
+        let doc = parse_generic("standalone\nparent\n  child\nanother\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 4);
+        assert_eq!(view.lines[0].path, Path(vec![0]));
+        assert_eq!(view.lines[1].path, Path(vec![1]));
+        assert_eq!(view.lines[2].path, Path(vec![1, 0]));
+        assert_eq!(view.lines[3].path, Path(vec![2]));
+    }
+
+    #[test]
+    fn comment_lines_included_by_default() {
+        let doc = parse_generic("! a comment\nhostname foo\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 2);
+        assert_eq!(view.lines[0].trivia, TriviaKind::Comment);
+        assert_eq!(view.lines[1].trivia, TriviaKind::Content);
+    }
+
+    #[test]
+    fn comment_lines_dropped_with_ignore_comments() {
+        let doc = parse_generic("! a comment\nhostname foo\n# another\n");
+        let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
+        let view = build_comparison_view(&doc, &opts);
+
+        assert_eq!(view.lines.len(), 1);
+        assert_eq!(view.lines[0].normalized, "hostname foo");
+    }
+
+    #[test]
+    fn blank_lines_dropped_with_ignore_blank_lines() {
+        let doc = parse_generic("line a\n\nline b\n");
+        let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreBlankLines]);
+        let view = build_comparison_view(&doc, &opts);
+
+        assert_eq!(view.lines.len(), 2);
+        assert_eq!(view.lines[0].normalized, "line a");
+        assert_eq!(view.lines[1].normalized, "line b");
+    }
+
+    #[test]
+    fn duplicate_lines_share_content_key_but_differ_in_occurrence_key() {
+        let doc = parse_generic("permit any\npermit any\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 2);
+        assert_eq!(view.lines[0].content_key, view.lines[1].content_key);
+        assert_ne!(view.lines[0].occurrence_key, view.lines[1].occurrence_key);
+    }
+
+    #[test]
+    fn different_lines_have_different_content_keys() {
+        let doc = parse_generic("line a\nline b\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 2);
+        assert_ne!(view.lines[0].content_key, view.lines[1].content_key);
+    }
+
+    #[test]
+    fn children_keyed_relative_to_parent_block() {
+        let doc = parse_generic("block A\n  child x\nblock B\n  child x\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        let child_a = &view.lines[1];
+        let child_b = &view.lines[3];
+        assert_eq!(child_a.normalized, "  child x");
+        assert_eq!(child_b.normalized, "  child x");
+        assert_ne!(
+            child_a.content_key, child_b.content_key,
+            "same text under different parents should produce different content keys"
+        );
+    }
+
+    #[test]
+    fn block_with_footer_flattens_all_three_parts() {
+        let mut doc = Document::default();
+
+        let child_id = doc.insert_node(Node::Line(LineNode {
+            raw: "  child line".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(2),
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        }));
+
+        let block_id = doc.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "begin".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            },
+            children: vec![child_id],
+            footer: Some(LineNode {
+                raw: "end".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(3),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            }),
+            kind_label: None,
+        }));
+
+        let _ = block_id;
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 3);
+        assert_eq!(view.lines[0].normalized, "begin");
+        assert_eq!(view.lines[0].path, Path(vec![0]));
+        assert_eq!(view.lines[1].normalized, "  child line");
+        assert_eq!(view.lines[1].path, Path(vec![0, 0]));
+        assert_eq!(view.lines[2].normalized, "end");
+        assert_eq!(view.lines[2].path, Path(vec![0, 1]));
+    }
+
+    #[test]
+    fn content_counts_aggregates_correctly() {
+        let doc = parse_generic("permit any\npermit any\ndeny all\n");
+        let view = build_comparison_view(&doc, &default_opts());
+        let counts = content_counts(&view);
+
+        let permit_key = view.lines[0].content_key;
+        let deny_key = view.lines[2].content_key;
+
+        assert_eq!(counts[&permit_key], 2);
+        assert_eq!(counts[&deny_key], 1);
+    }
+
+    #[test]
+    fn extracted_key_counts_aggregates_hints() {
+        let mut doc = Document::default();
+
+        for i in 0..3 {
+            doc.insert_root(Node::Block(BlockNode {
+                header: LineNode {
+                    raw: format!("block {i}"),
+                    line_ending: "\n".to_string(),
+                    span: dummy_span(i + 1),
+                    parsed: None,
+                    key_hint: Some("stanza:X".to_string()),
+                    trivia: TriviaKind::Content,
+                },
+                children: Vec::new(),
+                footer: None,
+                kind_label: None,
+            }));
+        }
+
+        doc.insert_root(Node::Line(LineNode {
+            raw: "no hint".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(4),
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        }));
+
+        let view = build_comparison_view(&doc, &default_opts());
+        let counts = extracted_key_counts(&view);
+
+        assert_eq!(counts.len(), 1);
+        assert_eq!(counts["stanza:X"], 3);
+    }
+
+    #[test]
+    fn empty_document_produces_empty_view() {
+        let doc = parse_generic("");
+        let view = build_comparison_view(&doc, &default_opts());
+        assert!(view.lines.is_empty());
+    }
+
+    #[test]
+    fn whitespace_normalization_affects_keys() {
+        let doc_a = parse_generic("line  a\n");
+        let doc_b = parse_generic("line  a\n");
+
+        let plain = build_comparison_view(&doc_a, &default_opts());
+        let collapsed = build_comparison_view(
+            &doc_b,
+            &NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]),
+        );
+
+        assert_eq!(plain.lines[0].normalized, "line  a");
+        assert_eq!(collapsed.lines[0].normalized, "line a");
+        assert_ne!(plain.lines[0].content_key, collapsed.lines[0].content_key);
+    }
+
+    #[test]
+    fn key_hint_on_block_header_uses_stanza_prefix() {
+        let mut doc = Document::default();
+        doc.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "interface Ethernet1".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: Some("interface:Ethernet1".to_string()),
+                trivia: TriviaKind::Content,
+            },
+            children: Vec::new(),
+            footer: None,
+            kind_label: None,
+        }));
+
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 1);
+        assert_eq!(
+            view.lines[0].key_hint.as_deref(),
+            Some("interface:Ethernet1")
+        );
+    }
+}
