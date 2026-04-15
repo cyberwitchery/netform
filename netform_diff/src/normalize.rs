@@ -30,7 +30,13 @@ pub(crate) fn normalize_for_compare(
                 output = format!("{}{}", " ".repeat(indent), body);
             }
             NormalizationStep::CollapseInternalWhitespace => {
-                output = output.split_whitespace().collect::<Vec<_>>().join(" ");
+                let leading_len = output.len() - output.trim_start().len();
+                let prefix = output[..leading_len].to_string();
+                let collapsed = output[leading_len..]
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                output = format!("{prefix}{collapsed}");
             }
         }
     }
@@ -56,5 +62,44 @@ pub(crate) fn trivia_tag(kind: TriviaKind) -> &'static str {
         TriviaKind::Comment => "comment",
         TriviaKind::Content => "content",
         TriviaKind::Unknown => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{NormalizationStep, NormalizeOptions};
+
+    fn collapse(input: &str) -> String {
+        let opts = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
+        normalize_for_compare(input, TriviaKind::Content, &opts).unwrap()
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_preserves_leading_indent() {
+        assert_eq!(collapse("    hello   world"), "    hello world");
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_preserves_tab_indent() {
+        assert_eq!(collapse("\thello   world"), "\thello world");
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_no_indent() {
+        assert_eq!(collapse("hello   world"), "hello world");
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_only_indent() {
+        assert_eq!(collapse("    "), "    ");
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_mixed_indent_and_runs() {
+        assert_eq!(
+            collapse("  description   uplink   port"),
+            "  description uplink port"
+        );
     }
 }
