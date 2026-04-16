@@ -158,6 +158,104 @@ fn config_diff_no_exit_code_suppresses_exit_one() {
 }
 
 #[test]
+fn config_diff_unordered_policy_ignores_reordered_siblings() {
+    let left = temp_file_path("left-unordered");
+    let right = temp_file_path("right-unordered");
+    fs::write(
+        &left,
+        "router bgp 65000\n  neighbor 10.0.0.1\n  neighbor 10.0.0.2\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "router bgp 65000\n  neighbor 10.0.0.2\n  neighbor 10.0.0.1\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--order-policy")
+        .arg("unordered")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --order-policy unordered");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert_eq!(
+        diff_json["has_changes"], false,
+        "unordered policy should ignore sibling reordering"
+    );
+}
+
+#[test]
+fn config_diff_keyed_stable_policy_ignores_reordered_children() {
+    let left = temp_file_path("left-keyed-stable");
+    let right = temp_file_path("right-keyed-stable");
+    fs::write(
+        &left,
+        "interface Ethernet1\n  description uplink\n  mtu 9000\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "interface Ethernet1\n  mtu 9000\n  description uplink\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--order-policy")
+        .arg("keyed-stable")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --order-policy keyed-stable");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert_eq!(
+        diff_json["has_changes"], false,
+        "keyed-stable policy should ignore reordered block children"
+    );
+}
+
+#[test]
+fn config_diff_junos_dialect_with_keyed_stable_policy() {
+    let left = temp_file_path("left-junos-keyed");
+    let right = temp_file_path("right-junos-keyed");
+    fs::write(
+        &left,
+        "interfaces {\n    ge-0/0/0 {\n        description \"uplink\";\n        mtu 9000;\n    }\n}\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "interfaces {\n    ge-0/0/0 {\n        mtu 9000;\n        description \"uplink\";\n    }\n}\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("junos")
+        .arg("--order-policy")
+        .arg("keyed-stable")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect junos --order-policy keyed-stable");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert_eq!(
+        diff_json["has_changes"], false,
+        "junos + keyed-stable should ignore reordered children within a keyed block"
+    );
+}
+
+#[test]
 fn replay_fixtures_cli_runs_successfully() {
     let output = Command::new(env!("CARGO_BIN_EXE_netform-replay-fixtures"))
         .output()
