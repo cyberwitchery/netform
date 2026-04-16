@@ -14,7 +14,9 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::{Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, parse_with_dialect};
+use netform_ir::{
+    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, parse_with_dialect, tokenize,
+};
 
 /// Dialect implementation for Junos-like configuration text.
 #[derive(Debug, Default, Clone, Copy)]
@@ -69,66 +71,10 @@ fn classify_junos_trivia(raw: &str) -> TriviaKind {
 }
 
 fn parse_junos_parts(raw: &str) -> Option<ParsedLineParts> {
-    let tokens = tokenize_junos(raw);
+    let tokens = tokenize(raw, &['{', '}', ';']);
     let head = tokens.first()?.clone();
     let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
     Some(ParsedLineParts { head, args })
-}
-
-fn tokenize_junos(raw: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_quote: Option<char> = None;
-    let mut escape = false;
-
-    for ch in raw.chars() {
-        if let Some(q) = in_quote {
-            if escape {
-                current.push(ch);
-                escape = false;
-                continue;
-            }
-
-            if ch == '\\' {
-                current.push(ch);
-                escape = true;
-                continue;
-            }
-
-            current.push(ch);
-            if ch == q {
-                in_quote = None;
-            }
-            continue;
-        }
-
-        match ch {
-            '"' | '\'' => {
-                current.push(ch);
-                in_quote = Some(ch);
-            }
-            '{' | '}' | ';' => {
-                if !current.trim().is_empty() {
-                    tokens.push(current.trim().to_string());
-                }
-                current.clear();
-                tokens.push(ch.to_string());
-            }
-            c if c.is_whitespace() => {
-                if !current.trim().is_empty() {
-                    tokens.push(current.trim().to_string());
-                    current.clear();
-                }
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    if !current.trim().is_empty() {
-        tokens.push(current.trim().to_string());
-    }
-
-    tokens
 }
 
 fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {

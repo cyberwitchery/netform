@@ -14,7 +14,9 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::{Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, parse_with_dialect};
+use netform_ir::{
+    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, parse_with_dialect, tokenize,
+};
 
 /// Dialect implementation for EOS-like configuration text.
 #[derive(Debug, Default, Clone, Copy)]
@@ -65,59 +67,10 @@ fn classify_eos_trivia(raw: &str) -> TriviaKind {
 }
 
 fn parse_eos_parts(raw: &str) -> Option<ParsedLineParts> {
-    let tokens = tokenize_eos(raw);
+    let tokens = tokenize(raw, &[]);
     let head = tokens.first()?.clone();
     let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
     Some(ParsedLineParts { head, args })
-}
-
-fn tokenize_eos(raw: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_quote: Option<char> = None;
-    let mut escape = false;
-
-    for ch in raw.chars() {
-        if let Some(q) = in_quote {
-            if escape {
-                current.push(ch);
-                escape = false;
-                continue;
-            }
-
-            if ch == '\\' {
-                current.push(ch);
-                escape = true;
-                continue;
-            }
-
-            current.push(ch);
-            if ch == q {
-                in_quote = None;
-            }
-            continue;
-        }
-
-        match ch {
-            '"' | '\'' => {
-                current.push(ch);
-                in_quote = Some(ch);
-            }
-            c if c.is_whitespace() => {
-                if !current.trim().is_empty() {
-                    tokens.push(current.trim().to_string());
-                    current.clear();
-                }
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    if !current.trim().is_empty() {
-        tokens.push(current.trim().to_string());
-    }
-
-    tokens
 }
 
 fn eos_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {

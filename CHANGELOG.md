@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- added `netform_ir::tokenize` — shared quote-aware tokenizer parameterized by punctuation characters, replacing identical state machines in the EOS, Junos, and IOS XE dialect crates
 - fixed `CollapseInternalWhitespace` stripping leading indentation — hierarchical configs no longer produce spurious matches between lines at different nesting levels
 - `config-diff` now exits 1 when configs differ by default (like `diff(1)`); use `--no-exit-code` to suppress
 
