@@ -446,6 +446,69 @@ fn parse_parts(raw: &str) -> Option<ParsedLineParts> {
     })
 }
 
+/// Tokenize a raw configuration line, splitting on whitespace while preserving
+/// quoted strings. Characters in `punctuation` are emitted as their own tokens
+/// (flushing any accumulated word first), matching the Junos-style brace/semicolon
+/// handling.
+///
+/// Pass an empty slice for flat-line dialects (EOS, IOS XE) or `&['{', '}', ';']`
+/// for hierarchical-brace dialects (Junos).
+pub fn tokenize(raw: &str, punctuation: &[char]) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quote: Option<char> = None;
+    let mut escape = false;
+
+    for ch in raw.chars() {
+        if let Some(q) = in_quote {
+            if escape {
+                current.push(ch);
+                escape = false;
+                continue;
+            }
+
+            if ch == '\\' {
+                current.push(ch);
+                escape = true;
+                continue;
+            }
+
+            current.push(ch);
+            if ch == q {
+                in_quote = None;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => {
+                current.push(ch);
+                in_quote = Some(ch);
+            }
+            c if punctuation.contains(&c) => {
+                if !current.trim().is_empty() {
+                    tokens.push(current.trim().to_string());
+                }
+                current.clear();
+                tokens.push(ch.to_string());
+            }
+            c if c.is_whitespace() => {
+                if !current.trim().is_empty() {
+                    tokens.push(current.trim().to_string());
+                    current.clear();
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        tokens.push(current.trim().to_string());
+    }
+
+    tokens
+}
+
 fn count_indent(raw: &str) -> usize {
     let mut width = 0usize;
     for ch in raw.chars() {
