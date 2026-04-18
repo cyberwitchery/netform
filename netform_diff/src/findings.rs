@@ -62,9 +62,9 @@ pub(crate) fn collect_findings(
     collect_extracted_key_ambiguity_findings(a_view, b_view, ctx, &mut findings);
     collect_fallback_alignment_findings(fallback_contexts, &mut findings);
     findings.sort_by(|a, b| {
-        let ap = a.path.as_ref().map(|p| p.0.clone()).unwrap_or_default();
-        let bp = b.path.as_ref().map(|p| p.0.clone()).unwrap_or_default();
-        (a.message.clone(), ap).cmp(&(b.message.clone(), bp))
+        let ap = a.path.as_ref().map(|p| p.0.as_slice()).unwrap_or(&[]);
+        let bp = b.path.as_ref().map(|p| p.0.as_slice()).unwrap_or(&[]);
+        (a.message.as_str(), ap).cmp(&(b.message.as_str(), bp))
     });
     findings
 }
