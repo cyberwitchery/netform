@@ -548,7 +548,39 @@ pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     }
 }
 
-fn count_indent(raw: &str) -> usize {
+/// Classify trivia for IOS-like dialects (EOS, IOS XE).
+///
+/// Lines starting with `!` or `#` (after leading whitespace) are comments;
+/// blank/whitespace-only lines are blank; everything else is content.
+pub fn classify_ios_like_trivia(raw: &str) -> TriviaKind {
+    if raw.trim().is_empty() {
+        return TriviaKind::Blank;
+    }
+
+    let trimmed = raw.trim_start();
+    if trimmed.starts_with('!') || trimmed.starts_with('#') {
+        return TriviaKind::Comment;
+    }
+
+    TriviaKind::Content
+}
+
+/// Tokenize a content line for IOS-like dialects (EOS, IOS XE).
+///
+/// Uses [`tokenize`] with no punctuation characters, then splits the result
+/// into a `head` keyword and trailing `args`.
+pub fn parse_ios_like_parts(raw: &str) -> Option<ParsedLineParts> {
+    let tokens = tokenize(raw, &[]);
+    let head = tokens.first()?.clone();
+    let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
+    Some(ParsedLineParts { head, args })
+}
+
+/// Count the visual indentation width of a line, treating tabs as 4 spaces.
+///
+/// Used by the parser to determine nesting depth; also useful for
+/// normalization passes that need to re-indent mixed-whitespace lines.
+pub fn count_indent(raw: &str) -> usize {
     let mut width = 0usize;
     for ch in raw.chars() {
         match ch {

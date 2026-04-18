@@ -1,4 +1,4 @@
-use netform_ir::TriviaKind;
+use netform_ir::{TriviaKind, count_indent};
 
 use crate::model::{NormalizationStep, NormalizeOptions};
 
@@ -25,7 +25,7 @@ pub(crate) fn normalize_for_compare(
                 output = output.trim_end().to_string();
             }
             NormalizationStep::NormalizeLeadingWhitespace => {
-                let indent = count_indent_columns(&output);
+                let indent = count_indent(&output);
                 let body = output.trim_start_matches([' ', '\t']).to_string();
                 output = format!("{}{}", " ".repeat(indent), body);
             }
@@ -42,18 +42,6 @@ pub(crate) fn normalize_for_compare(
     }
 
     Some(output)
-}
-
-fn count_indent_columns(raw: &str) -> usize {
-    let mut width = 0usize;
-    for ch in raw.chars() {
-        match ch {
-            ' ' => width += 1,
-            '\t' => width += 4,
-            _ => break,
-        }
-    }
-    width
 }
 
 pub(crate) fn trivia_tag(kind: TriviaKind) -> &'static str {
