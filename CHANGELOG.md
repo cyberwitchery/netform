@@ -3,6 +3,7 @@
 ## [unreleased]
 
 - added `netform_ir::ios_like_key_hint` — shared key-hint derivation for IOS-like dialects, replacing identical copies in the EOS and IOS XE dialect crates
+- `config-diff` now uses differentiated exit codes following `diff(1)` convention: 0 = no differences, 1 = differences found, 2 = error (I/O, serialization); `--no-exit-code` suppresses exit 1 but not exit 2
 
 ## [0.3.0] - 2026-04-16
 
