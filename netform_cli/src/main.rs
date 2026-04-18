@@ -40,9 +40,10 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = CliDialect::Generic)]
     dialect: CliDialect,
 
-    /// Suppress the default exit-code behaviour.  By default config-diff
+    /// Suppress exit code 1 when configs differ.  By default config-diff
     /// exits 1 when the configs differ (like `diff(1)`).  Pass this flag
-    /// to always exit 0 regardless of whether changes were detected.
+    /// to exit 0 instead.  Exit code 2 (I/O or serialization error) is
+    /// never suppressed.
     #[arg(long)]
     no_exit_code: bool,
 }
@@ -62,11 +63,23 @@ enum CliDialect {
     Junos,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     let cli = Cli::parse();
 
-    let a_text = fs::read_to_string(&cli.file_a)?;
-    let b_text = fs::read_to_string(&cli.file_b)?;
+    let a_text = match fs::read_to_string(&cli.file_a) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("config-diff: {}: {e}", cli.file_a.display());
+            process::exit(2);
+        }
+    };
+    let b_text = match fs::read_to_string(&cli.file_b) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("config-diff: {}: {e}", cli.file_b.display());
+            process::exit(2);
+        }
+    };
 
     let a_doc = parse_config(&a_text, cli.dialect);
     let b_doc = parse_config(&b_text, cli.dialect);
@@ -95,9 +108,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if cli.plan_json {
         let plan = build_plan(&diff);
-        println!("{}", serde_json::to_string_pretty(&plan)?);
+        match serde_json::to_string_pretty(&plan) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("config-diff: {e}");
+                process::exit(2);
+            }
+        }
     } else if cli.json {
-        println!("{}", serde_json::to_string_pretty(&diff)?);
+        match serde_json::to_string_pretty(&diff) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("config-diff: {e}");
+                process::exit(2);
+            }
+        }
     } else {
         println!(
             "{}",
@@ -112,8 +137,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !cli.no_exit_code && diff.has_changes {
         process::exit(1);
     }
-
-    Ok(())
 }
 
 fn parse_config(input: &str, dialect: CliDialect) -> Document {

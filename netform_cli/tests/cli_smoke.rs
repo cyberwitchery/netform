@@ -96,14 +96,35 @@ fn config_diff_cli_accepts_dialect_flag() {
 }
 
 #[test]
-fn config_diff_cli_fails_for_missing_file() {
+fn config_diff_cli_exits_two_for_missing_file() {
     let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
         .arg("/definitely/missing-left.cfg")
         .arg("/definitely/missing-right.cfg")
         .output()
         .expect("run config-diff");
 
-    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(2), "I/O error → exit 2");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("missing-left.cfg"),
+        "stderr should name the missing file"
+    );
+}
+
+#[test]
+fn config_diff_no_exit_code_does_not_suppress_exit_two() {
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("/definitely/missing-left.cfg")
+        .arg("/definitely/missing-right.cfg")
+        .output()
+        .expect("run config-diff --no-exit-code");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--no-exit-code must not suppress exit 2 (error)"
+    );
 }
 
 #[test]
