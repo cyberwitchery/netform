@@ -509,6 +509,45 @@ pub fn tokenize(raw: &str, punctuation: &[char]) -> Vec<String> {
     tokens
 }
 
+/// Derive a stable identity key for IOS-like configuration lines.
+///
+/// Shared between EOS and IOS XE dialects (both use the same flat-line
+/// command grammar for structural headings like `interface`, `vlan`, etc.).
+pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+    let parsed = parsed?;
+    let head = parsed.head.as_str();
+    let args = parsed.args.as_slice();
+
+    match head {
+        "interface" => args.first().map(|name| format!("interface:{name}")),
+        "vlan" => args.first().map(|id| format!("vlan:{id}")),
+        "vrf" => args.first().map(|name| format!("vrf:{name}")),
+        "router" => match args {
+            [proto, asn, ..] if proto == "bgp" => Some(format!("router:bgp:{asn}")),
+            [proto, ..] => Some(format!("router:{proto}")),
+            _ => None,
+        },
+        "route-map" => match args {
+            [name, action, seq, ..] => Some(format!("route-map:{name}:{action}:{seq}")),
+            [name, action] => Some(format!("route-map:{name}:{action}")),
+            _ => None,
+        },
+        "ip" => match args {
+            [next, kind, name, ..] if next == "access-list" => {
+                Some(format!("ip-access-list:{kind}:{name}"))
+            }
+            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
+            _ => None,
+        },
+        "line" => match args {
+            [kind, from, to, ..] => Some(format!("line:{kind}:{from}:{to}")),
+            [kind, one, ..] => Some(format!("line:{kind}:{one}")),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn count_indent(raw: &str) -> usize {
     let mut width = 0usize;
     for ch in raw.chars() {

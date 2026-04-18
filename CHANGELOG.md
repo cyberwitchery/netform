@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+- added `netform_ir::ios_like_key_hint` — shared key-hint derivation for IOS-like dialects, replacing identical copies in the EOS and IOS XE dialect crates
+
 ## [0.3.0] - 2026-04-16
 
 - added `netform_ir::tokenize` — shared quote-aware tokenizer parameterized by punctuation characters, replacing identical state machines in the EOS, Junos, and IOS XE dialect crates

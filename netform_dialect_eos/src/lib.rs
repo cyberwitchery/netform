@@ -15,7 +15,8 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, parse_with_dialect, tokenize,
+    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, ios_like_key_hint,
+    parse_with_dialect, tokenize,
 };
 
 /// Dialect implementation for EOS-like configuration text.
@@ -49,7 +50,7 @@ impl Dialect for EosDialect {
         if trivia != TriviaKind::Content {
             return None;
         }
-        eos_like_key_hint(parsed)
+        ios_like_key_hint(parsed)
     }
 }
 
@@ -71,41 +72,6 @@ fn parse_eos_parts(raw: &str) -> Option<ParsedLineParts> {
     let head = tokens.first()?.clone();
     let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
     Some(ParsedLineParts { head, args })
-}
-
-fn eos_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
-    let parsed = parsed?;
-    let head = parsed.head.as_str();
-    let args = parsed.args.as_slice();
-
-    match head {
-        "interface" => args.first().map(|name| format!("interface:{name}")),
-        "vlan" => args.first().map(|id| format!("vlan:{id}")),
-        "vrf" => args.first().map(|name| format!("vrf:{name}")),
-        "router" => match args {
-            [proto, asn, ..] if proto == "bgp" => Some(format!("router:bgp:{asn}")),
-            [proto, ..] => Some(format!("router:{proto}")),
-            _ => None,
-        },
-        "route-map" => match args {
-            [name, action, seq, ..] => Some(format!("route-map:{name}:{action}:{seq}")),
-            [name, action] => Some(format!("route-map:{name}:{action}")),
-            _ => None,
-        },
-        "ip" => match args {
-            [next, kind, name, ..] if next == "access-list" => {
-                Some(format!("ip-access-list:{kind}:{name}"))
-            }
-            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
-            _ => None,
-        },
-        "line" => match args {
-            [kind, from, to, ..] => Some(format!("line:{kind}:{from}:{to}")),
-            [kind, one, ..] => Some(format!("line:{kind}:{one}")),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 #[cfg(test)]
