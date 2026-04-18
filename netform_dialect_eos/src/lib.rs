@@ -15,8 +15,8 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, ios_like_key_hint,
-    parse_with_dialect, tokenize,
+    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
+    ios_like_key_hint, parse_ios_like_parts, parse_with_dialect,
 };
 
 /// Dialect implementation for EOS-like configuration text.
@@ -34,11 +34,11 @@ impl Dialect for EosDialect {
     }
 
     fn classify_trivia(&self, raw: &str) -> TriviaKind {
-        classify_eos_trivia(raw)
+        classify_ios_like_trivia(raw)
     }
 
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_eos_parts(raw)
+        parse_ios_like_parts(raw)
     }
 
     fn key_hint(
@@ -54,41 +54,21 @@ impl Dialect for EosDialect {
     }
 }
 
-fn classify_eos_trivia(raw: &str) -> TriviaKind {
-    if raw.trim().is_empty() {
-        return TriviaKind::Blank;
-    }
-
-    let trimmed = raw.trim_start();
-    if trimmed.starts_with('!') || trimmed.starts_with('#') {
-        return TriviaKind::Comment;
-    }
-
-    TriviaKind::Content
-}
-
-fn parse_eos_parts(raw: &str) -> Option<ParsedLineParts> {
-    let tokens = tokenize(raw, &[]);
-    let head = tokens.first()?.clone();
-    let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
-    Some(ParsedLineParts { head, args })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn eos_comment_classification_supports_bang_and_hash() {
-        assert_eq!(classify_eos_trivia("!"), TriviaKind::Comment);
-        assert_eq!(classify_eos_trivia("# generated"), TriviaKind::Comment);
-        assert_eq!(classify_eos_trivia("vlan 10"), TriviaKind::Content);
+        assert_eq!(classify_ios_like_trivia("!"), TriviaKind::Comment);
+        assert_eq!(classify_ios_like_trivia("# generated"), TriviaKind::Comment);
+        assert_eq!(classify_ios_like_trivia("vlan 10"), TriviaKind::Content);
     }
 
     #[test]
     fn eos_tokenization_keeps_quoted_values_together() {
         let parsed =
-            parse_eos_parts("description \"Transit uplink\"").expect("content should parse");
+            parse_ios_like_parts("description \"Transit uplink\"").expect("content should parse");
         assert_eq!(parsed.head, "description");
         assert_eq!(parsed.args, vec!["\"Transit uplink\""]);
     }
