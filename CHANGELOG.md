@@ -4,6 +4,7 @@
 
 - added `--trim-trailing-whitespace` and `--normalize-leading-whitespace` CLI flags — two implemented normalization steps that were previously unreachable from the command line
 - implemented `Display` for `FindingLevel` so text report output uses lowercase `warning`/`info` consistent with JSON output
+- expanded `junos_key_hint` to cover firewall, security, snmp, vlans, chassis, class-of-service, forwarding-options, applications, and groups stanzas, plus set-style equivalents — reduces spurious ambiguous-key findings for Junos configs
 - expanded `ios_like_key_hint` to cover class-map, policy-map, ip community-list, numbered access-lists, crypto constructs (isakmp, map, ikev2, ipsec), and spanning-tree vlan — reduces spurious ambiguous-key findings for configs with multiple instances of these blocks
 - added `netform_ir::classify_ios_like_trivia` and `netform_ir::parse_ios_like_parts` — shared trivia classification and line tokenization for IOS-like dialects, replacing identical copies in the EOS and IOS XE dialect crates
 - made `netform_ir::count_indent` public so `netform_diff` can reuse it instead of maintaining a duplicate `count_indent_columns`
