@@ -34,7 +34,7 @@ pub fn format_markdown_report(diff: &Diff, left_label: &str, right_label: &str) 
         out.push_str("\n## Findings\n\n");
         for finding in &diff.findings {
             out.push_str(&format!(
-                "- {:?} [{}]: {}\n",
+                "- {} [{}]: {}\n",
                 finding.level, finding.code, finding.message
             ));
         }
