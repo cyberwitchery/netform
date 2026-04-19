@@ -532,11 +532,32 @@ pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             [name, action] => Some(format!("route-map:{name}:{action}")),
             _ => None,
         },
+        "class-map" => match args {
+            [_match_kind, name, ..] => Some(format!("class-map:{name}")),
+            [name] => Some(format!("class-map:{name}")),
+            _ => None,
+        },
+        "policy-map" => args.first().map(|name| format!("policy-map:{name}")),
         "ip" => match args {
             [next, kind, name, ..] if next == "access-list" => {
                 Some(format!("ip-access-list:{kind}:{name}"))
             }
             [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
+            [next, kind, name, ..] if next == "community-list" => {
+                Some(format!("ip-community-list:{kind}:{name}"))
+            }
+            _ => None,
+        },
+        "access-list" => args.first().map(|num| format!("access-list:{num}")),
+        "crypto" => match args {
+            [kind, sub, name, ..] if kind == "ikev2" => Some(format!("crypto:ikev2:{sub}:{name}")),
+            [kind, sub, name, ..] if kind == "ipsec" => Some(format!("crypto:ipsec:{sub}:{name}")),
+            [kind, name, ..] if kind == "map" => Some(format!("crypto:map:{name}")),
+            [kind, num, ..] if kind == "isakmp" => Some(format!("crypto:isakmp:{num}")),
+            _ => None,
+        },
+        "spanning-tree" => match args {
+            [next, id, ..] if next == "vlan" => Some(format!("spanning-tree:vlan:{id}")),
             _ => None,
         },
         "line" => match args {
@@ -608,5 +629,207 @@ fn has_mixed_leading_whitespace(raw: &str) -> bool {
 impl fmt::Display for Document {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.render())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: parse an IOS-like line and return the key hint.
+    fn hint(line: &str) -> Option<String> {
+        let parsed = parse_ios_like_parts(line);
+        ios_like_key_hint(parsed.as_ref())
+    }
+
+    // -- existing constructs (regression) --
+
+    #[test]
+    fn key_hint_interface() {
+        assert_eq!(
+            hint("interface Ethernet1"),
+            Some("interface:Ethernet1".into())
+        );
+    }
+
+    #[test]
+    fn key_hint_vlan() {
+        assert_eq!(hint("vlan 100"), Some("vlan:100".into()));
+    }
+
+    #[test]
+    fn key_hint_vrf() {
+        assert_eq!(hint("vrf MGMT"), Some("vrf:MGMT".into()));
+    }
+
+    #[test]
+    fn key_hint_router_bgp() {
+        assert_eq!(hint("router bgp 65001"), Some("router:bgp:65001".into()));
+    }
+
+    #[test]
+    fn key_hint_router_ospf() {
+        assert_eq!(hint("router ospf"), Some("router:ospf".into()));
+    }
+
+    #[test]
+    fn key_hint_route_map() {
+        assert_eq!(
+            hint("route-map REDISTRIBUTE permit 10"),
+            Some("route-map:REDISTRIBUTE:permit:10".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ip_access_list() {
+        assert_eq!(
+            hint("ip access-list extended BLOCK-RFC1918"),
+            Some("ip-access-list:extended:BLOCK-RFC1918".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ip_prefix_list() {
+        assert_eq!(
+            hint("ip prefix-list DEFAULT-ONLY"),
+            Some("prefix-list:DEFAULT-ONLY".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_line() {
+        assert_eq!(hint("line vty 0 4"), Some("line:vty:0:4".into()));
+        assert_eq!(hint("line con 0"), Some("line:con:0".into()));
+    }
+
+    // -- new constructs --
+
+    #[test]
+    fn key_hint_class_map_match_all() {
+        assert_eq!(
+            hint("class-map match-all VOICE"),
+            Some("class-map:VOICE".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_class_map_match_any() {
+        assert_eq!(
+            hint("class-map match-any WEB-TRAFFIC"),
+            Some("class-map:WEB-TRAFFIC".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_class_map_bare() {
+        assert_eq!(hint("class-map SIMPLE"), Some("class-map:SIMPLE".into()));
+    }
+
+    #[test]
+    fn key_hint_policy_map() {
+        assert_eq!(
+            hint("policy-map QOS-POLICY"),
+            Some("policy-map:QOS-POLICY".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ip_community_list() {
+        assert_eq!(
+            hint("ip community-list standard COMM-LOCAL"),
+            Some("ip-community-list:standard:COMM-LOCAL".into()),
+        );
+        assert_eq!(
+            hint("ip community-list expanded COMM-TRANSIT"),
+            Some("ip-community-list:expanded:COMM-TRANSIT".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_numbered_access_list() {
+        assert_eq!(
+            hint("access-list 100 permit ip any any"),
+            Some("access-list:100".into()),
+        );
+        assert_eq!(
+            hint("access-list 10 deny 10.0.0.0 0.255.255.255"),
+            Some("access-list:10".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_crypto_map() {
+        assert_eq!(
+            hint("crypto map VPN-MAP 10 ipsec-isakmp"),
+            Some("crypto:map:VPN-MAP".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_crypto_isakmp() {
+        assert_eq!(
+            hint("crypto isakmp policy 10"),
+            Some("crypto:isakmp:policy".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_crypto_ikev2_proposal() {
+        assert_eq!(
+            hint("crypto ikev2 proposal PROP-1"),
+            Some("crypto:ikev2:proposal:PROP-1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_crypto_ikev2_policy() {
+        assert_eq!(
+            hint("crypto ikev2 policy POL-1"),
+            Some("crypto:ikev2:policy:POL-1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_crypto_ikev2_profile() {
+        assert_eq!(
+            hint("crypto ikev2 profile REMOTE-SITE"),
+            Some("crypto:ikev2:profile:REMOTE-SITE".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_crypto_ipsec_transform_set() {
+        assert_eq!(
+            hint("crypto ipsec transform-set AES-SHA esp-aes esp-sha-hmac"),
+            Some("crypto:ipsec:transform-set:AES-SHA".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_spanning_tree_vlan() {
+        assert_eq!(
+            hint("spanning-tree vlan 1-100 priority 4096"),
+            Some("spanning-tree:vlan:1-100".into()),
+        );
+        assert_eq!(
+            hint("spanning-tree vlan 200"),
+            Some("spanning-tree:vlan:200".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_spanning_tree_no_match() {
+        // Non-vlan spanning-tree commands should not produce a hint.
+        assert_eq!(hint("spanning-tree mode rapid-pvst"), None);
+    }
+
+    #[test]
+    fn key_hint_none_for_unknown() {
+        assert_eq!(hint("hostname ROUTER-1"), None);
+    }
+
+    #[test]
+    fn key_hint_none_on_empty() {
+        assert_eq!(ios_like_key_hint(None), None);
     }
 }
