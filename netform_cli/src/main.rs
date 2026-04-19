@@ -34,6 +34,12 @@ struct Cli {
     #[arg(long)]
     normalize_whitespace: bool,
 
+    #[arg(long)]
+    trim_trailing_whitespace: bool,
+
+    #[arg(long)]
+    normalize_leading_whitespace: bool,
+
     #[arg(long, value_enum, default_value_t = CliOrderPolicy::Ordered)]
     order_policy: CliOrderPolicy,
 
@@ -93,6 +99,12 @@ fn main() {
     }
     if cli.normalize_whitespace {
         steps.push(NormalizationStep::CollapseInternalWhitespace);
+    }
+    if cli.trim_trailing_whitespace {
+        steps.push(NormalizationStep::TrimTrailingWhitespace);
+    }
+    if cli.normalize_leading_whitespace {
+        steps.push(NormalizationStep::NormalizeLeadingWhitespace);
     }
     let policy = match cli.order_policy {
         CliOrderPolicy::Ordered => OrderPolicy::Ordered,
