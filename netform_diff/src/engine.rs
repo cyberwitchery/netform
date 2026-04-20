@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::model::{
     ComparisonLine, ComparisonView, DiffLine, DiffStats, Edit, EditAnchor, NormalizeOptions,
@@ -309,12 +309,13 @@ where
         b_buckets.entry(key_fn(line)).or_default().push(line);
     }
 
-    let mut all_keys = a_buckets.keys().copied().collect::<Vec<_>>();
-    for key in b_buckets.keys().copied() {
-        if !all_keys.contains(&key) {
-            all_keys.push(key);
-        }
-    }
+    let mut all_keys = a_buckets
+        .keys()
+        .copied()
+        .chain(b_buckets.keys().copied())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     all_keys.sort_unstable();
 
     let mut deletes = Vec::new();
