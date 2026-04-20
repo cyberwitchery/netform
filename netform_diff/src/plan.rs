@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use crate::model::{Diff, Edit, Plan, PlanAction, PlanFinding, PlanLineEdit, PlanLineEditKind};
 
 /// Convert a [`Diff`] into a transport-neutral action plan.
 pub fn build_plan(diff: &Diff) -> Plan {
     let mut actions = Vec::new();
-    let mut grouped_line_action_indices: Vec<(netform_ir::Path, usize)> = Vec::new();
+    let mut grouped_line_action_indices: HashMap<netform_ir::Path, usize> = HashMap::new();
     let mut findings = Vec::new();
 
     for edit in &diff.edits {
@@ -108,15 +110,11 @@ pub fn build_plan(diff: &Diff) -> Plan {
 
 fn push_or_append_grouped_line_action(
     actions: &mut Vec<PlanAction>,
-    grouped_indices: &mut Vec<(netform_ir::Path, usize)>,
+    grouped_indices: &mut HashMap<netform_ir::Path, usize>,
     context_path: netform_ir::Path,
     mut line_edits: Vec<PlanLineEdit>,
 ) {
-    if let Some((_, idx)) = grouped_indices
-        .iter()
-        .find(|(path, _)| *path == context_path)
-        .cloned()
-    {
+    if let Some(&idx) = grouped_indices.get(&context_path) {
         if let Some(PlanAction::ApplyLineEditsUnderContext {
             line_edits: existing,
             ..
@@ -128,7 +126,7 @@ fn push_or_append_grouped_line_action(
     }
 
     let idx = actions.len();
-    grouped_indices.push((context_path.clone(), idx));
+    grouped_indices.insert(context_path.clone(), idx);
     actions.push(PlanAction::ApplyLineEditsUnderContext {
         context_path,
         line_edits,

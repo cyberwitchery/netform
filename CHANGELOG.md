@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- replaced O(n²) linear scans in diff engine with hash-based lookups: `HashMap` for context-path grouping in plan builder, `HashSet` for key-union dedup in multiset diff — improves performance on large configs
 - added `--trim-trailing-whitespace` and `--normalize-leading-whitespace` CLI flags — two implemented normalization steps that were previously unreachable from the command line
 - implemented `Display` for `FindingLevel` so text report output uses lowercase `warning`/`info` consistent with JSON output
 - expanded `junos_key_hint` to cover firewall, security, snmp, vlans, chassis, class-of-service, forwarding-options, applications, and groups stanzas, plus set-style equivalents — reduces spurious ambiguous-key findings for Junos configs

@@ -28,7 +28,7 @@ use std::fmt;
 pub struct NodeId(pub usize);
 
 /// Location path used by diffs and diagnostics (`root_index`, then child indices).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Path(pub Vec<usize>);
 
 /// Source span pointing to a single line and byte range in the original input.
