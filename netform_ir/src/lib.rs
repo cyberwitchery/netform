@@ -221,6 +221,55 @@ pub trait Dialect {
     }
 }
 
+/// Parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
+///
+/// All IOS-like dialects share the same trivia classification, tokenization,
+/// and key-hint derivation — the only thing that varies is the hint name stored
+/// in [`DocumentMetadata`].  Construct with [`IosLikeDialect::new`]:
+///
+/// ```rust
+/// use netform_ir::{IosLikeDialect, parse_with_dialect};
+///
+/// let doc = parse_with_dialect("hostname edge-1\n", &IosLikeDialect::new("iosxe"));
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct IosLikeDialect {
+    name: &'static str,
+}
+
+impl IosLikeDialect {
+    /// Create a dialect instance tagged with the given hint name.
+    pub const fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+}
+
+impl Dialect for IosLikeDialect {
+    fn dialect_hint(&self) -> DialectHint {
+        DialectHint::Named(self.name.to_string())
+    }
+
+    fn classify_trivia(&self, raw: &str) -> TriviaKind {
+        classify_ios_like_trivia(raw)
+    }
+
+    fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
+        parse_ios_like_parts(raw)
+    }
+
+    fn key_hint(
+        &self,
+        _raw: &str,
+        parsed: Option<&ParsedLineParts>,
+        trivia: TriviaKind,
+    ) -> Option<String> {
+        if trivia != TriviaKind::Content {
+            return None;
+        }
+        ios_like_key_hint(parsed)
+    }
+}
+
 /// Conservative default dialect for vendor-agnostic parsing.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GenericDialect;
