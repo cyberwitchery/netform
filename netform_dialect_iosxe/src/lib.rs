@@ -1,8 +1,7 @@
 //! IOS XE-oriented dialect profile for `netform_ir`.
 //!
-//! This crate provides a conservative IOS XE profile that customizes:
-//! - comment classification (`!`, `#`)
-//! - tokenization with quoted-string preservation
+//! This crate re-exports [`IosLikeDialect`] parameterised to `"iosxe"` and
+//! provides the [`parse_iosxe`] convenience function.
 //!
 //! # Example
 //!
@@ -14,49 +13,23 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
-    ios_like_key_hint, parse_ios_like_parts, parse_with_dialect,
-};
+use netform_ir::{Document, IosLikeDialect, parse_with_dialect};
 
-/// Dialect implementation for IOS XE-like configuration text.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct IosxeDialect;
+/// Pre-built IOS XE dialect instance.
+pub const IOSXE_DIALECT: IosLikeDialect = IosLikeDialect::new("iosxe");
 
-/// Parse text using [`IosxeDialect`].
+/// Backward-compatible type alias for the IOS XE dialect.
+pub type IosxeDialect = IosLikeDialect;
+
+/// Parse text using the IOS XE dialect.
 pub fn parse_iosxe(input: &str) -> Document {
-    parse_with_dialect(input, &IosxeDialect)
-}
-
-impl Dialect for IosxeDialect {
-    fn dialect_hint(&self) -> DialectHint {
-        DialectHint::Named("iosxe".to_string())
-    }
-
-    fn classify_trivia(&self, raw: &str) -> TriviaKind {
-        classify_ios_like_trivia(raw)
-    }
-
-    fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_ios_like_parts(raw)
-    }
-
-    fn key_hint(
-        &self,
-        _raw: &str,
-        parsed: Option<&ParsedLineParts>,
-        trivia: TriviaKind,
-    ) -> Option<String> {
-        if trivia != TriviaKind::Content {
-            return None;
-        }
-        ios_like_key_hint(parsed)
-    }
+    parse_with_dialect(input, &IOSXE_DIALECT)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use netform_ir::{DialectHint, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts};
 
     #[test]
     fn iosxe_comment_classification_supports_bang_and_hash() {
