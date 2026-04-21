@@ -69,6 +69,28 @@ pub(crate) fn collect_findings(
     findings
 }
 
+fn push_ambiguity_finding(
+    a_view: &ComparisonView,
+    b_view: &ComparisonView,
+    anchor_predicate: impl Fn(&crate::model::ComparisonLine) -> bool,
+    message: String,
+    out: &mut Vec<Finding>,
+) {
+    let anchor = a_view
+        .lines
+        .iter()
+        .find(|line| anchor_predicate(line))
+        .or_else(|| b_view.lines.iter().find(|line| anchor_predicate(line)));
+
+    out.push(Finding {
+        code: "ambiguous_key_match".to_string(),
+        level: FindingLevel::Warning,
+        message,
+        path: anchor.map(|line| line.path.clone()),
+        span: anchor.map(|line| line.span.clone()),
+    });
+}
+
 fn collect_extracted_key_ambiguity_findings(
     a_view: &ComparisonView,
     b_view: &ComparisonView,
@@ -86,27 +108,16 @@ fn collect_extracted_key_ambiguity_findings(
             .ambiguous_extracted_keys
             .get(&key)
             .expect("key from map iteration");
-        let anchor = a_view
-            .lines
-            .iter()
-            .find(|line| line.key_hint.as_deref() == Some(key.as_str()))
-            .or_else(|| {
-                b_view
-                    .lines
-                    .iter()
-                    .find(|line| line.key_hint.as_deref() == Some(key.as_str()))
-            });
-
-        out.push(Finding {
-            code: "ambiguous_key_match".to_string(),
-            level: FindingLevel::Warning,
-            message: format!(
+        push_ambiguity_finding(
+            a_view,
+            b_view,
+            |line| line.key_hint.as_deref() == Some(key.as_str()),
+            format!(
                 "ambiguous extracted key `{}` appears {}x on left and {}x on right",
                 key, left_count, right_count
             ),
-            path: anchor.map(|line| line.path.clone()),
-            span: anchor.map(|line| line.span.clone()),
-        });
+            out,
+        );
     }
 }
 
@@ -185,24 +196,18 @@ fn collect_ambiguity_findings(
             .ambiguous_content_keys
             .get(&key)
             .expect("key from map iteration");
-        let anchor = a_view
-            .lines
-            .iter()
-            .find(|line| line.content_key == key)
-            .or_else(|| b_view.lines.iter().find(|line| line.content_key == key));
-
-        out.push(Finding {
-            code: "ambiguous_key_match".to_string(),
-            level: FindingLevel::Warning,
-            message: format!(
+        push_ambiguity_finding(
+            a_view,
+            b_view,
+            |line| line.content_key == key,
+            format!(
                 "ambiguous content key {} appears {}x on left and {}x on right",
                 crate::util::key_label(Some(key)),
                 left_count,
                 right_count
             ),
-            path: anchor.map(|line| line.path.clone()),
-            span: anchor.map(|line| line.span.clone()),
-        });
+            out,
+        );
     }
 }
 
