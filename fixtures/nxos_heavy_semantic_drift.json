@@ -1,0 +1,16 @@
+{
+  "name": "nxos_heavy_semantic_drift",
+  "dialect": "nxos",
+  "intended": "hostname n9k-leaf-01\n!\nfeature bgp\nfeature interface-vlan\nfeature lacp\n!\nvlan 10\n  name SERVERS\nvlan 20\n  name MGMT\n!\ninterface Ethernet1/1\n  description uplink-spine-a\n  mtu 9216\n  ip address 192.0.2.2/31\n  no shutdown\ninterface Ethernet1/2\n  description uplink-spine-b\n  mtu 9216\n  ip address 192.0.2.4/31\n  no shutdown\n!\nrouter bgp 65001\n  router-id 10.255.255.1\n  neighbor 192.0.2.1 remote-as 65100\n  neighbor 192.0.2.3 remote-as 65100\n  address-family ipv4 unicast\n    network 10.10.1.0/24\n    network 10.10.2.0/24\n",
+  "actual": "hostname n9k-leaf-01\n!\nfeature bgp\nfeature interface-vlan\nfeature lacp\n!\nvlan 10\n  name SERVERS\nvlan 20\n  name MGMT\n!\ninterface Ethernet1/1\n  ip address 192.0.2.2/31\n  mtu 9216\n  description uplink-spine-a\n  no shutdown\ninterface Ethernet1/2\n  description uplink-spine-b\n  ip address 192.0.2.4/31\n  no shutdown\n  mtu 9216\n!\nrouter bgp 65001\n  neighbor 192.0.2.1 remote-as 65100\n  router-id 10.255.255.1\n  neighbor 192.0.2.3 remote-as 65100\n  address-family ipv4 unicast\n    network 10.10.2.0/24\n    network 10.10.1.0/24\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": ["ambiguous_key_match"]
+  }
+}

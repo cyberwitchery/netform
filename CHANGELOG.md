@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- added `netform_dialect_nxos` crate — Cisco NX-OS dialect using `IosLikeDialect`, wired into the CLI as `--dialect nxos`
 - `format_markdown_report` now shows actual config line text under each edit (with `+`/`-` diff markers), so `config-diff` default output reveals what changed — not just how many lines and at which key
 - added `netform_ir::IosLikeDialect` — parameterized dialect struct shared by all IOS-like dialect crates; `EosDialect` and `IosxeDialect` are now type aliases, and adding a new IOS-like dialect requires only `IosLikeDialect::new("name")`
 - replaced O(n²) linear scans in diff engine with hash-based lookups: `HashMap` for context-path grouping in plan builder, `HashSet` for key-union dedup in multiset diff — improves performance on large configs

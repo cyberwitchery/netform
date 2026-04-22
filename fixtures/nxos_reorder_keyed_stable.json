@@ -1,0 +1,21 @@
+{
+  "name": "nxos_reorder_keyed_stable",
+  "dialect": "nxos",
+  "intended": "interface Ethernet1/1\n  description uplink-spine\n  mtu 9216\n  no shutdown\n",
+  "actual": "interface Ethernet1/1\n  no shutdown\n  mtu 9216\n  description uplink-spine\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": [
+      {
+        "context_prefix": [0],
+        "policy": "keyed-stable"
+      }
+    ]
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": []
+  }
+}

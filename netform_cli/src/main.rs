@@ -6,6 +6,7 @@ use clap::{Parser, ValueEnum};
 use netform_dialect_eos::parse_eos;
 use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_junos::parse_junos;
+use netform_dialect_nxos::parse_nxos;
 use netform_diff::{
     NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig, build_plan,
     diff_documents, format_markdown_report,
@@ -67,6 +68,7 @@ enum CliDialect {
     Eos,
     Iosxe,
     Junos,
+    Nxos,
 }
 
 fn main() {
@@ -157,5 +159,6 @@ fn parse_config(input: &str, dialect: CliDialect) -> Document {
         CliDialect::Eos => parse_eos(input),
         CliDialect::Iosxe => parse_iosxe(input),
         CliDialect::Junos => parse_junos(input),
+        CliDialect::Nxos => parse_nxos(input),
     }
 }
