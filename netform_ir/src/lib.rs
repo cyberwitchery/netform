@@ -468,21 +468,26 @@ fn split_line_ending(segment: &str) -> (&str, &str) {
     }
 }
 
-fn classify_trivia(raw: &str) -> TriviaKind {
+/// Classify a line as blank, comment, or content based on the given comment
+/// prefixes.
+///
+/// Dialect-specific `classify_trivia` helpers delegate here so the
+/// blank/comment/content logic lives in one place.
+pub fn classify_trivia_with_prefixes(raw: &str, comment_prefixes: &[&str]) -> TriviaKind {
     if raw.trim().is_empty() {
         return TriviaKind::Blank;
     }
 
     let trimmed = raw.trim_start();
-    if trimmed.starts_with('#') || trimmed.starts_with('!') || trimmed.starts_with("//") {
+    if comment_prefixes.iter().any(|p| trimmed.starts_with(p)) {
         return TriviaKind::Comment;
     }
 
-    if raw.is_empty() {
-        TriviaKind::Unknown
-    } else {
-        TriviaKind::Content
-    }
+    TriviaKind::Content
+}
+
+fn classify_trivia(raw: &str) -> TriviaKind {
+    classify_trivia_with_prefixes(raw, &["#", "!", "//"])
 }
 
 fn parse_parts(raw: &str) -> Option<ParsedLineParts> {
@@ -647,16 +652,7 @@ pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 /// Lines starting with `!` or `#` (after leading whitespace) are comments;
 /// blank/whitespace-only lines are blank; everything else is content.
 pub fn classify_ios_like_trivia(raw: &str) -> TriviaKind {
-    if raw.trim().is_empty() {
-        return TriviaKind::Blank;
-    }
-
-    let trimmed = raw.trim_start();
-    if trimmed.starts_with('!') || trimmed.starts_with('#') {
-        return TriviaKind::Comment;
-    }
-
-    TriviaKind::Content
+    classify_trivia_with_prefixes(raw, &["!", "#"])
 }
 
 /// Tokenize a content line for IOS-like dialects (EOS, IOS XE).
