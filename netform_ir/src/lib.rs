@@ -614,6 +614,30 @@ pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             [kind, one, ..] => Some(format!("line:{kind}:{one}")),
             _ => None,
         },
+        // NX-OS-specific constructs
+        "feature" => args.first().map(|name| format!("feature:{name}")),
+        "vpc" => match args {
+            [sub, id, ..] if sub == "domain" => Some(format!("vpc-domain:{id}")),
+            _ => None,
+        },
+        "role" => match args {
+            [sub, name, ..] if sub == "name" => Some(format!("role:{name}")),
+            _ => None,
+        },
+        "monitor" => match args {
+            [sub, id, ..] if sub == "session" => Some(format!("monitor-session:{id}")),
+            _ => None,
+        },
+        "ntp" => match args {
+            [kind, addr, ..] if kind == "server" || kind == "peer" => {
+                Some(format!("ntp:{kind}:{addr}"))
+            }
+            _ => None,
+        },
+        "system" => match args {
+            [sub, ..] => Some(format!("system:{sub}")),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -870,6 +894,94 @@ mod tests {
     fn key_hint_spanning_tree_no_match() {
         // Non-vlan spanning-tree commands should not produce a hint.
         assert_eq!(hint("spanning-tree mode rapid-pvst"), None);
+    }
+
+    // -- NX-OS-specific constructs --
+
+    #[test]
+    fn key_hint_feature() {
+        assert_eq!(hint("feature ospf"), Some("feature:ospf".into()));
+        assert_eq!(hint("feature bgp"), Some("feature:bgp".into()));
+        assert_eq!(hint("feature vpc"), Some("feature:vpc".into()));
+    }
+
+    #[test]
+    fn key_hint_vpc_domain() {
+        assert_eq!(hint("vpc domain 10"), Some("vpc-domain:10".into()));
+        assert_eq!(hint("vpc domain 100"), Some("vpc-domain:100".into()));
+    }
+
+    #[test]
+    fn key_hint_vpc_no_domain() {
+        // Bare vpc subcommands without "domain" should not produce a hint.
+        assert_eq!(hint("vpc orphan-ports suspend"), None);
+    }
+
+    #[test]
+    fn key_hint_role_name() {
+        assert_eq!(
+            hint("role name custom-admin"),
+            Some("role:custom-admin".into()),
+        );
+        assert_eq!(
+            hint("role name network-operator"),
+            Some("role:network-operator".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_role_no_name() {
+        assert_eq!(hint("role feature-group name"), None);
+    }
+
+    #[test]
+    fn key_hint_monitor_session() {
+        assert_eq!(hint("monitor session 1"), Some("monitor-session:1".into()),);
+        assert_eq!(
+            hint("monitor session 5 type erspan-source"),
+            Some("monitor-session:5".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_monitor_no_session() {
+        assert_eq!(hint("monitor copp-system-p-policy"), None);
+    }
+
+    #[test]
+    fn key_hint_ntp_server() {
+        assert_eq!(
+            hint("ntp server 10.0.0.1"),
+            Some("ntp:server:10.0.0.1".into()),
+        );
+        assert_eq!(
+            hint("ntp server 2001:db8::1 prefer"),
+            Some("ntp:server:2001:db8::1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ntp_peer() {
+        assert_eq!(hint("ntp peer 10.0.0.2"), Some("ntp:peer:10.0.0.2".into()),);
+    }
+
+    #[test]
+    fn key_hint_ntp_no_match() {
+        // Other ntp subcommands should not produce a hint.
+        assert_eq!(hint("ntp source-interface mgmt0"), None);
+    }
+
+    #[test]
+    fn key_hint_system() {
+        assert_eq!(hint("system jumbomtu 9216"), Some("system:jumbomtu".into()),);
+        assert_eq!(
+            hint("system nve infra-vlans 100"),
+            Some("system:nve".into()),
+        );
+        assert_eq!(
+            hint("system default switchport"),
+            Some("system:default".into()),
+        );
     }
 
     #[test]

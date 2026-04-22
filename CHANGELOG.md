@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- expanded `ios_like_key_hint` with NX-OS-specific stanza types: `feature`, `vpc domain`, `role name`, `monitor session`, `ntp server`/`peer`, and `system` — NX-OS config diffs now correctly match these constructs instead of flagging them as ambiguous
 - added `netform_dialect_nxos` crate — Cisco NX-OS dialect using `IosLikeDialect`, wired into the CLI as `--dialect nxos`
 - `format_markdown_report` now shows actual config line text under each edit (with `+`/`-` diff markers), so `config-diff` default output reveals what changed — not just how many lines and at which key
 - added `netform_ir::IosLikeDialect` — parameterized dialect struct shared by all IOS-like dialect crates; `EosDialect` and `IosxeDialect` are now type aliases, and adding a new IOS-like dialect requires only `IosLikeDialect::new("name")`
