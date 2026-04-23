@@ -37,9 +37,12 @@ impl KeyAllocator {
 pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> ComparisonView {
     let mut out = Vec::new();
     let mut keys = KeyAllocator::default();
+    let mut path = Vec::new();
 
     for (idx, root) in doc.roots.iter().copied().enumerate() {
-        flatten_node(doc, root, 0, vec![idx], &mut out, &mut keys, options);
+        path.clear();
+        path.push(idx);
+        flatten_node(doc, root, 0, &mut path, &mut out, &mut keys, options);
     }
 
     ComparisonView { lines: out }
@@ -49,7 +52,7 @@ fn flatten_node(
     doc: &Document,
     node_id: NodeId,
     parent_signature: u64,
-    path: Vec<usize>,
+    path: &mut Vec<usize>,
     out: &mut Vec<ComparisonLine>,
     keys: &mut KeyAllocator,
     options: &NormalizeOptions,
@@ -80,7 +83,7 @@ fn flatten_node(
                     key_hint: key_material.hint,
                     normalized,
                     original: line.raw.clone(),
-                    path: Path(path),
+                    path: Path(path.clone()),
                     span: line.span.clone(),
                     trivia: line.trivia,
                 });
@@ -115,22 +118,13 @@ fn flatten_node(
                 });
 
                 for (child_idx, child_id) in block.children.iter().copied().enumerate() {
-                    let mut child_path = path.clone();
-                    child_path.push(child_idx);
-                    flatten_node(
-                        doc,
-                        child_id,
-                        header_content_key,
-                        child_path,
-                        out,
-                        keys,
-                        options,
-                    );
+                    path.push(child_idx);
+                    flatten_node(doc, child_id, header_content_key, path, out, keys, options);
+                    path.pop();
                 }
 
                 if let Some(footer) = &block.footer {
-                    let mut footer_path = path;
-                    footer_path.push(block.children.len());
+                    path.push(block.children.len());
 
                     if let Some(footer_normalized) =
                         normalize_for_compare(&footer.raw, footer.trivia, options)
@@ -154,11 +148,13 @@ fn flatten_node(
                             key_hint: key_material.hint,
                             normalized: footer_normalized,
                             original: footer.raw.clone(),
-                            path: Path(footer_path),
+                            path: Path(path.clone()),
                             span: footer.span.clone(),
                             trivia: footer.trivia,
                         });
                     }
+
+                    path.pop();
                 }
             }
         }

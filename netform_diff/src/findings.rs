@@ -144,15 +144,18 @@ fn collect_parse_findings(
 }
 
 fn collect_unknown_block_findings(doc: &Document, side: &str, out: &mut Vec<Finding>) {
+    let mut path = Vec::new();
     for (idx, root) in doc.roots.iter().copied().enumerate() {
-        walk_findings(doc, root, vec![idx], side, out);
+        path.clear();
+        path.push(idx);
+        walk_findings(doc, root, &mut path, side, out);
     }
 }
 
 fn walk_findings(
     doc: &Document,
     node_id: NodeId,
-    path: Vec<usize>,
+    path: &mut Vec<usize>,
     side: &str,
     out: &mut Vec<Finding>,
 ) {
@@ -172,9 +175,9 @@ fn walk_findings(
         }
 
         for (child_idx, child_id) in block.children.iter().copied().enumerate() {
-            let mut child_path = path.clone();
-            child_path.push(child_idx);
-            walk_findings(doc, child_id, child_path, side, out);
+            path.push(child_idx);
+            walk_findings(doc, child_id, path, side, out);
+            path.pop();
         }
     }
 }
