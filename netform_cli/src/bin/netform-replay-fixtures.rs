@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use netform_dialect_eos::parse_eos;
+use netform_dialect_fortios::parse_fortios;
 use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
@@ -34,6 +35,7 @@ enum FixtureDialect {
     #[default]
     Generic,
     Eos,
+    Fortios,
     Iosxe,
     Junos,
     Nxos,
@@ -120,6 +122,7 @@ fn parse_config(input: &str, dialect: FixtureDialect) -> Document {
     match dialect {
         FixtureDialect::Generic => parse_generic(input),
         FixtureDialect::Eos => parse_eos(input),
+        FixtureDialect::Fortios => parse_fortios(input),
         FixtureDialect::Iosxe => parse_iosxe(input),
         FixtureDialect::Junos => parse_junos(input),
         FixtureDialect::Nxos => parse_nxos(input),
