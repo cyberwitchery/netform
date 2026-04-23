@@ -46,8 +46,8 @@ pub(crate) fn diff_views(
 
     let mut edits = Vec::new();
     let mut fallback_contexts = Vec::new();
-    let mut i = 0usize;
-    let mut j = 0usize;
+    let mut a_iter = a_segments.into_iter();
+    let mut b_iter = b_segments.into_iter();
     let mut pending_deleted_segments: Vec<Segment> = Vec::new();
     let mut pending_inserted_segments: Vec<Segment> = Vec::new();
 
@@ -58,15 +58,13 @@ pub(crate) fn diff_views(
             }
 
             let deleted_lines = deleted
-                .iter()
-                .flat_map(|segment| segment.lines.clone())
+                .drain(..)
+                .flat_map(|segment| segment.lines)
                 .collect::<Vec<_>>();
             let inserted_lines = inserted
-                .iter()
-                .flat_map(|segment| segment.lines.clone())
+                .drain(..)
+                .flat_map(|segment| segment.lines)
                 .collect::<Vec<_>>();
-            deleted.clear();
-            inserted.clear();
 
             let mut fallback = line_diff(
                 &deleted_lines,
@@ -98,8 +96,8 @@ pub(crate) fn diff_views(
                     &mut pending_inserted_segments,
                 );
 
-                let left = &a_segments[i];
-                let right = &b_segments[j];
+                let left = a_iter.next().unwrap();
+                let right = b_iter.next().unwrap();
                 if left.is_block && right.is_block {
                     let left_children = if left.lines.len() > 1 {
                         &left.lines[1..]
@@ -119,17 +117,12 @@ pub(crate) fn diff_views(
                     );
                     edits.append(&mut child_edits);
                 }
-
-                i += 1;
-                j += 1;
             }
             Op::Delete => {
-                pending_deleted_segments.push(a_segments[i].clone());
-                i += 1;
+                pending_deleted_segments.push(a_iter.next().unwrap());
             }
             Op::Insert => {
-                pending_inserted_segments.push(b_segments[j].clone());
-                j += 1;
+                pending_inserted_segments.push(b_iter.next().unwrap());
             }
         }
     }
