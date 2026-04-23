@@ -311,9 +311,15 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     );
     let mut parent_stack: Vec<(usize, NodeId)> = Vec::new();
 
-    for idx in 0..lines.len() {
-        let line = &lines[idx];
+    // Pre-compute block-opening decisions while we still need lookahead.
+    let opens_block: Vec<bool> = (0..lines.len())
+        .map(|idx| {
+            lines[idx].trivia == TriviaKind::Content
+                && next_content_indent(&lines, idx).is_some_and(|next| next > lines[idx].indent)
+        })
+        .collect();
 
+    for (idx, line) in lines.into_iter().enumerate() {
         if line.trivia == TriviaKind::Content && line.indent > 0 && parent_stack.is_empty() {
             doc.metadata.parse_findings.push(ParseFinding {
                 code: "orphan-indentation".to_string(),
@@ -334,21 +340,20 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
             }
         }
 
-        let opens_block = line.trivia == TriviaKind::Content
-            && next_content_indent(&lines, idx).is_some_and(|next| next > line.indent);
+        let indent = line.indent;
 
-        if opens_block {
+        if opens_block[idx] {
             let block = Node::Block(BlockNode {
-                header: line.as_line_node(),
+                header: line.into_line_node(),
                 children: Vec::new(),
                 footer: None,
                 kind_label: None,
             });
             let id = doc.insert_node(block);
             attach_node(&mut doc, &parent_stack, id);
-            parent_stack.push((line.indent, id));
+            parent_stack.push((indent, id));
         } else {
-            let id = doc.insert_node(Node::Line(line.as_line_node()));
+            let id = doc.insert_node(Node::Line(line.into_line_node()));
             attach_node(&mut doc, &parent_stack, id);
         }
     }
@@ -356,7 +361,7 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     doc
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct LineCandidate {
     raw: String,
     line_ending: String,
@@ -368,13 +373,13 @@ struct LineCandidate {
 }
 
 impl LineCandidate {
-    fn as_line_node(&self) -> LineNode {
+    fn into_line_node(self) -> LineNode {
         LineNode {
-            raw: self.raw.clone(),
-            line_ending: self.line_ending.clone(),
-            span: self.span.clone(),
-            parsed: self.parsed.clone(),
-            key_hint: self.key_hint.clone(),
+            raw: self.raw,
+            line_ending: self.line_ending,
+            span: self.span,
+            parsed: self.parsed,
+            key_hint: self.key_hint,
             trivia: self.trivia,
         }
     }
