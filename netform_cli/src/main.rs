@@ -4,6 +4,7 @@ use std::process;
 
 use clap::{Parser, ValueEnum};
 use netform_dialect_eos::parse_eos;
+use netform_dialect_fortios::parse_fortios;
 use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
@@ -66,6 +67,7 @@ enum CliOrderPolicy {
 enum CliDialect {
     Generic,
     Eos,
+    Fortios,
     Iosxe,
     Junos,
     Nxos,
@@ -157,6 +159,7 @@ fn parse_config(input: &str, dialect: CliDialect) -> Document {
     match dialect {
         CliDialect::Generic => parse_generic(input),
         CliDialect::Eos => parse_eos(input),
+        CliDialect::Fortios => parse_fortios(input),
         CliDialect::Iosxe => parse_iosxe(input),
         CliDialect::Junos => parse_junos(input),
         CliDialect::Nxos => parse_nxos(input),

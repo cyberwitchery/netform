@@ -1,0 +1,16 @@
+{
+  "name": "fortios_reorder_keyed_stable",
+  "dialect": "fortios",
+  "intended": "config system global\n    set hostname \"FortiGate-01\"\n    set timezone 04\nend\nconfig firewall address\n    edit \"server-a\"\n        set type ipmask\n        set subnet 10.0.1.10 255.255.255.255\n    next\n    edit \"server-b\"\n        set type ipmask\n        set subnet 10.0.1.20 255.255.255.255\n    next\nend\n",
+  "actual": "config system global\n    set hostname \"FortiGate-01\"\n    set timezone 04\nend\nconfig firewall address\n    edit \"server-b\"\n        set type ipmask\n        set subnet 10.0.1.20 255.255.255.255\n    next\n    edit \"server-a\"\n        set type ipmask\n        set subnet 10.0.1.10 255.255.255.255\n    next\nend\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": ["ambiguous_key_match", "ambiguous_key_match"]
+  }
+}

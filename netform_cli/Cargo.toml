@@ -18,6 +18,7 @@ netform_dialect_eos = { version = "0.3.0", path = "../netform_dialect_eos" }
 netform_dialect_iosxe = { version = "0.3.0", path = "../netform_dialect_iosxe" }
 netform_dialect_junos = { version = "0.3.0", path = "../netform_dialect_junos" }
 netform_dialect_nxos = { version = "0.3.0", path = "../netform_dialect_nxos" }
+netform_dialect_fortios = { version = "0.3.0", path = "../netform_dialect_fortios" }
 netform_diff = { version = "0.3.0", path = "../netform_diff" }
 netform_ir = { version = "0.3.0", path = "../netform_ir" }
 serde = { version = "1.0", features = ["derive"] }

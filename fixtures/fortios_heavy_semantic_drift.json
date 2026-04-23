@@ -1,0 +1,16 @@
+{
+  "name": "fortios_heavy_semantic_drift",
+  "dialect": "fortios",
+  "intended": "config system global\n    set hostname \"FortiGate-01\"\n    set timezone 04\n    set admintimeout 30\nend\nconfig firewall address\n    edit \"web-server\"\n        set type ipmask\n        set subnet 10.0.1.10 255.255.255.255\n        set comment \"Production web server\"\n    next\n    edit \"db-server\"\n        set type ipmask\n        set subnet 10.0.1.20 255.255.255.255\n    next\nend\nconfig firewall policy\n    edit 1\n        set srcintf \"port1\"\n        set dstintf \"port2\"\n        set srcaddr \"all\"\n        set dstaddr \"web-server\"\n        set action accept\n        set schedule \"always\"\n        set service \"HTTPS\"\n    next\nend\n",
+  "actual": "config system global\n    set hostname \"FortiGate-01\"\n    set admintimeout 30\n    set timezone 04\nend\nconfig firewall address\n    edit \"db-server\"\n        set type ipmask\n        set subnet 10.0.1.20 255.255.255.255\n    next\n    edit \"web-server\"\n        set type ipmask\n        set subnet 10.0.1.10 255.255.255.255\n        set comment \"Production web server\"\n    next\nend\nconfig firewall policy\n    edit 1\n        set srcintf \"port1\"\n        set dstintf \"port2\"\n        set srcaddr \"all\"\n        set dstaddr \"web-server\"\n        set action deny\n        set schedule \"always\"\n        set service \"HTTPS\"\n    next\nend\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Replace"],
+    "finding_codes": ["ambiguous_key_match", "ambiguous_key_match"]
+  }
+}
