@@ -15,7 +15,8 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, parse_with_dialect, tokenize,
+    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_trivia_with_prefixes,
+    parse_with_dialect, tokenize,
 };
 
 /// Dialect implementation for Junos-like configuration text.
@@ -54,20 +55,7 @@ impl Dialect for JunosDialect {
 }
 
 fn classify_junos_trivia(raw: &str) -> TriviaKind {
-    if raw.trim().is_empty() {
-        return TriviaKind::Blank;
-    }
-
-    let trimmed = raw.trim_start();
-    if trimmed.starts_with('#')
-        || trimmed.starts_with("/*")
-        || trimmed.starts_with('*')
-        || trimmed.starts_with("*/")
-    {
-        return TriviaKind::Comment;
-    }
-
-    TriviaKind::Content
+    classify_trivia_with_prefixes(raw, &["#", "/*", "*", "*/"])
 }
 
 fn parse_junos_parts(raw: &str) -> Option<ParsedLineParts> {
