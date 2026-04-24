@@ -1,0 +1,16 @@
+{
+  "name": "fortios_field_level_replace",
+  "dialect": "fortios",
+  "intended": "config system interface\n    edit \"port1\"\n        set ip 10.0.0.1 255.255.255.0\n        set allowaccess ping https ssh\n        set description \"LAN interface\"\n    next\nend\n",
+  "actual": "config system interface\n    edit \"port1\"\n        set ip 10.0.0.1 255.255.255.0\n        set allowaccess ping https ssh\n        set description \"WAN interface\"\n    next\nend\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Replace"],
+    "finding_codes": []
+  }
+}
