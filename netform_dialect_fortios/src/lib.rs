@@ -246,10 +246,23 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_set_type() {
+        assert_eq!(hint("        set type ipmask"), Some("set:type".into()));
+    }
+
+    #[test]
     fn key_hint_set_multivalue() {
         assert_eq!(
             hint("    set subnet 10.0.0.0 255.255.255.0"),
             Some("set:subnet".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_quoted_param_unquotes() {
+        assert_eq!(
+            hint("    set \"custom-field\" value"),
+            Some("set:custom-field".into()),
         );
     }
 
@@ -265,8 +278,27 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_unset_uuid() {
+        assert_eq!(hint("        unset uuid"), Some("unset:uuid".into()));
+    }
+
+    #[test]
     fn key_hint_unset_bare_no_hint() {
         assert_eq!(hint("    unset"), None);
+    }
+
+    #[test]
+    fn key_hint_set_description_quoted_value() {
+        // The key hint captures the parameter name, not the value.
+        assert_eq!(
+            hint("        set description \"Production web server\""),
+            Some("set:description".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_action() {
+        assert_eq!(hint("        set action accept"), Some("set:action".into()),);
     }
 
     #[test]
