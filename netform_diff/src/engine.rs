@@ -443,7 +443,7 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Vec<Op> {
         v = current;
     }
 
-    Vec::new()
+    unreachable!("Myers SES must converge within n+m steps")
 }
 
 fn backtrack_ops(a: &[u64], b: &[u64], trace: &[Vec<isize>], offset: isize) -> Vec<Op> {
