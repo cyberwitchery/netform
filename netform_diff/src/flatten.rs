@@ -173,16 +173,31 @@ fn key_material_for_line(
     key_hint: Option<&str>,
     normalized: &str,
 ) -> KeyMaterial {
-    if kind == KeyKind::BlockHeader
-        && trivia == TriviaKind::Content
+    if trivia == TriviaKind::Content
         && let Some(hint) = key_hint
     {
-        // Keep a stable and explicit namespace prefix for extracted keys.
-        let for_hash = format!("stanza:{hint}");
-        return KeyMaterial {
-            for_hash,
-            hint: Some(hint.to_string()),
-        };
+        match kind {
+            KeyKind::BlockHeader => {
+                // Keep a stable and explicit namespace prefix for extracted keys.
+                let for_hash = format!("stanza:{hint}");
+                return KeyMaterial {
+                    for_hash,
+                    hint: Some(hint.to_string()),
+                };
+            }
+            KeyKind::Line => {
+                // Leaf-line hints (e.g. FortiOS `set:<field>`) stabilise content
+                // keys across value changes.  We intentionally do NOT expose the
+                // hint on ComparisonLine — leaf hints repeat across many sibling
+                // blocks and would flood extracted-key ambiguity findings.
+                let for_hash = format!("subkey:{hint}");
+                return KeyMaterial {
+                    for_hash,
+                    hint: None,
+                };
+            }
+            KeyKind::BlockFooter => {}
+        }
     }
 
     KeyMaterial {
@@ -494,5 +509,107 @@ mod tests {
             view.lines[0].key_hint.as_deref(),
             Some("interface:Ethernet1")
         );
+    }
+
+    #[test]
+    fn leaf_line_hint_stabilises_content_key_across_value_changes() {
+        // Two lines with the same key hint but different text should share a
+        // content key (under the same parent), so the diff engine treats a
+        // value change as a modification rather than delete + add.
+        let mut doc_a = Document::default();
+        let child_a = doc_a.insert_node(Node::Line(LineNode {
+            raw: "  set ip 10.0.0.1 255.255.255.0".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(2),
+            parsed: None,
+            key_hint: Some("set:ip".to_string()),
+            trivia: TriviaKind::Content,
+        }));
+        doc_a.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "edit port1".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: Some("edit:port1".to_string()),
+                trivia: TriviaKind::Content,
+            },
+            children: vec![child_a],
+            footer: None,
+            kind_label: None,
+        }));
+
+        let mut doc_b = Document::default();
+        let child_b = doc_b.insert_node(Node::Line(LineNode {
+            raw: "  set ip 10.0.0.2 255.255.255.0".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(2),
+            parsed: None,
+            key_hint: Some("set:ip".to_string()),
+            trivia: TriviaKind::Content,
+        }));
+        doc_b.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "edit port1".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: Some("edit:port1".to_string()),
+                trivia: TriviaKind::Content,
+            },
+            children: vec![child_b],
+            footer: None,
+            kind_label: None,
+        }));
+
+        let view_a = build_comparison_view(&doc_a, &default_opts());
+        let view_b = build_comparison_view(&doc_b, &default_opts());
+
+        // The set lines should share a content key despite different text.
+        assert_eq!(view_a.lines[1].content_key, view_b.lines[1].content_key);
+
+        // The hint should NOT be exposed on the ComparisonLine (avoids
+        // extracted-key ambiguity noise).
+        assert_eq!(view_a.lines[1].key_hint, None);
+    }
+
+    #[test]
+    fn leaf_line_without_hint_keys_on_normalized_text() {
+        // Lines without key hints should still use full normalized text,
+        // so different text produces different content keys.
+        let mut doc = Document::default();
+        let child_a = doc.insert_node(Node::Line(LineNode {
+            raw: "  line a".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(2),
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        }));
+        let child_b = doc.insert_node(Node::Line(LineNode {
+            raw: "  line b".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(3),
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        }));
+        doc.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "parent".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            },
+            children: vec![child_a, child_b],
+            footer: None,
+            kind_label: None,
+        }));
+
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_ne!(view.lines[1].content_key, view.lines[2].content_key);
     }
 }

@@ -320,14 +320,22 @@ where
         left.sort_by_key(|line| (line.occurrence_key, line.path.0.clone()));
         right.sort_by_key(|line| (line.occurrence_key, line.path.0.clone()));
 
-        if left.len() > right.len() {
-            for line in left.into_iter().skip(right.len()) {
-                deletes.push(to_diff_line(line));
+        let common = left.len().min(right.len());
+
+        // Paired lines share a content key but may differ in text (e.g.
+        // FortiOS `set` lines matched by field name with different values).
+        for idx in 0..common {
+            if left[idx].normalized != right[idx].normalized {
+                deletes.push(to_diff_line(left[idx]));
+                inserts.push(to_diff_line(right[idx]));
             }
-        } else if right.len() > left.len() {
-            for line in right.into_iter().skip(left.len()) {
-                inserts.push(to_diff_line(line));
-            }
+        }
+
+        for line in left.into_iter().skip(common) {
+            deletes.push(to_diff_line(line));
+        }
+        for line in right.into_iter().skip(common) {
+            inserts.push(to_diff_line(line));
         }
     }
 

@@ -86,7 +86,9 @@ fn unquote(s: &str) -> &str {
 /// Recognized patterns:
 /// - `config <section> [<subsection>...]` → `config:<section>[:<subsection>...]`
 /// - `edit <name>` → `edit:<name>` (quotes stripped)
-/// - `set`/`unset` and block markers (`end`, `next`) do not get key hints.
+/// - `set <field> ...` → `set:<field>` (stable across value changes)
+/// - `unset <field>` → `unset:<field>`
+/// - Block markers (`end`, `next`) do not get key hints.
 fn fortios_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let parsed = parsed?;
     let head = parsed.head.as_str();
@@ -105,6 +107,9 @@ fn fortios_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             Some(format!("config:{path}"))
         }
         "edit" => args.first().map(|name| format!("edit:{}", unquote(name))),
+        "set" | "unset" => args
+            .first()
+            .map(|field| format!("{head}:{}", unquote(field))),
         _ => None,
     }
 }
@@ -233,13 +238,35 @@ mod tests {
     }
 
     #[test]
-    fn key_hint_set_no_hint() {
-        assert_eq!(hint("    set hostname \"FGT\""), None);
+    fn key_hint_set_field() {
+        assert_eq!(
+            hint("    set hostname \"FGT\""),
+            Some("set:hostname".into()),
+        );
     }
 
     #[test]
-    fn key_hint_unset_no_hint() {
-        assert_eq!(hint("    unset comments"), None);
+    fn key_hint_set_multivalue() {
+        assert_eq!(
+            hint("    set subnet 10.0.0.0 255.255.255.0"),
+            Some("set:subnet".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_bare_no_hint() {
+        // Bare "set" with no field name — shouldn't happen but must not panic.
+        assert_eq!(hint("    set"), None);
+    }
+
+    #[test]
+    fn key_hint_unset_field() {
+        assert_eq!(hint("    unset comments"), Some("unset:comments".into()));
+    }
+
+    #[test]
+    fn key_hint_unset_bare_no_hint() {
+        assert_eq!(hint("    unset"), None);
     }
 
     #[test]
