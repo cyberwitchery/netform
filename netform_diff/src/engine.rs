@@ -96,8 +96,12 @@ pub(crate) fn diff_views(
                     &mut pending_inserted_segments,
                 );
 
-                let left = a_iter.next().unwrap();
-                let right = b_iter.next().unwrap();
+                let left = a_iter
+                    .next()
+                    .expect("diff bug: Equal op but left segment iterator exhausted");
+                let right = b_iter
+                    .next()
+                    .expect("diff bug: Equal op but right segment iterator exhausted");
                 if left.is_block && right.is_block {
                     let left_children = if left.lines.len() > 1 {
                         &left.lines[1..]
@@ -119,10 +123,18 @@ pub(crate) fn diff_views(
                 }
             }
             Op::Delete => {
-                pending_deleted_segments.push(a_iter.next().unwrap());
+                pending_deleted_segments.push(
+                    a_iter
+                        .next()
+                        .expect("diff bug: Delete op but left segment iterator exhausted"),
+                );
             }
             Op::Insert => {
-                pending_inserted_segments.push(b_iter.next().unwrap());
+                pending_inserted_segments.push(
+                    b_iter
+                        .next()
+                        .expect("diff bug: Insert op but right segment iterator exhausted"),
+                );
             }
         }
     }
@@ -869,16 +881,19 @@ mod tests {
         ]);
         let result = diff_views(&a, &b, &default_options());
         assert!(!result.edits.is_empty());
-        match &result.edits[0] {
-            Edit::Replace {
-                old_lines,
-                new_lines,
-                ..
-            } => {
-                assert_eq!(old_lines[0].text, "  description old");
-                assert_eq!(new_lines[0].text, "  description new");
-            }
-            _ => panic!("expected Replace"),
+        assert!(
+            matches!(&result.edits[0], Edit::Replace { .. }),
+            "expected Replace, got {:?}",
+            result.edits[0]
+        );
+        if let Edit::Replace {
+            old_lines,
+            new_lines,
+            ..
+        } = &result.edits[0]
+        {
+            assert_eq!(old_lines[0].text, "  description old");
+            assert_eq!(new_lines[0].text, "  description new");
         }
     }
 
