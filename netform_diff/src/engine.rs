@@ -315,8 +315,16 @@ where
         let mut left = a_buckets.remove(&key).unwrap_or_default();
         let mut right = b_buckets.remove(&key).unwrap_or_default();
 
-        left.sort_by_key(|line| (line.occurrence_key, line.path.0.clone()));
-        right.sort_by_key(|line| (line.occurrence_key, line.path.0.clone()));
+        left.sort_by(|a, b| {
+            a.occurrence_key
+                .cmp(&b.occurrence_key)
+                .then_with(|| a.path.0.cmp(&b.path.0))
+        });
+        right.sort_by(|a, b| {
+            a.occurrence_key
+                .cmp(&b.occurrence_key)
+                .then_with(|| a.path.0.cmp(&b.path.0))
+        });
 
         let common = left.len().min(right.len());
 
@@ -350,8 +358,18 @@ fn finalize_chunked_edits(mut deletes: Vec<DiffLine>, mut inserts: Vec<DiffLine>
         return Vec::new();
     }
 
-    deletes.sort_by_key(|line| (line.content_key, line.occurrence_key, line.path.0.clone()));
-    inserts.sort_by_key(|line| (line.content_key, line.occurrence_key, line.path.0.clone()));
+    deletes.sort_by(|a, b| {
+        a.content_key
+            .cmp(&b.content_key)
+            .then_with(|| a.occurrence_key.cmp(&b.occurrence_key))
+            .then_with(|| a.path.0.cmp(&b.path.0))
+    });
+    inserts.sort_by(|a, b| {
+        a.content_key
+            .cmp(&b.content_key)
+            .then_with(|| a.occurrence_key.cmp(&b.occurrence_key))
+            .then_with(|| a.path.0.cmp(&b.path.0))
+    });
 
     if !deletes.is_empty() && !inserts.is_empty() {
         return vec![Edit::Replace {
