@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process;
 
@@ -10,7 +11,7 @@ use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
 use netform_diff::{
     DEFAULT_CONTEXT_LINES, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
-    build_plan, diff_documents, format_markdown_report,
+    build_plan, diff_documents, format_unified_diff,
 };
 use netform_ir::{Document, parse_generic};
 
@@ -49,10 +50,18 @@ struct Cli {
     dialect: CliDialect,
 
     /// Maximum number of lines shown per side of each edit before
-    /// truncating with "and N more".  Applies to the default markdown
-    /// report output (ignored with --json / --plan-json).
+    /// truncating with "and N more".  Applies to the unified-diff
+    /// output (ignored with --json / --plan-json).
     #[arg(long, default_value_t = DEFAULT_CONTEXT_LINES)]
     context_lines: usize,
+
+    /// Force colored output even when stdout is not a TTY.
+    #[arg(long, conflicts_with = "no_color")]
+    color: bool,
+
+    /// Disable colored output.
+    #[arg(long)]
+    no_color: bool,
 
     /// Suppress exit code 1 when configs differ.  By default config-diff
     /// exits 1 when the configs differ (like `diff(1)`).  Pass this flag
@@ -128,6 +137,15 @@ fn main() {
 
     let diff = diff_documents(&a_doc, &b_doc, options);
 
+    let use_color = if cli.color {
+        true
+    } else if cli.no_color {
+        false
+    } else {
+        std::io::stdout().is_terminal()
+    };
+    colored::control::set_override(use_color);
+
     if cli.plan_json {
         let plan = build_plan(&diff);
         match serde_json::to_string_pretty(&plan) {
@@ -146,9 +164,9 @@ fn main() {
             }
         }
     } else {
-        println!(
+        print!(
             "{}",
-            format_markdown_report(
+            format_unified_diff(
                 &diff,
                 &cli.file_a.display().to_string(),
                 &cli.file_b.display().to_string(),

@@ -138,6 +138,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "colored"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
+dependencies = [
+ "windows-sys",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -282,6 +291,7 @@ name = "netform_cli"
 version = "0.3.0"
 dependencies = [
  "clap",
+ "colored",
  "netform_dialect_eos",
  "netform_dialect_fortios",
  "netform_dialect_iosxe",
@@ -332,6 +342,7 @@ dependencies = [
 name = "netform_diff"
 version = "0.3.0"
 dependencies = [
+ "colored",
  "netform_dialect_iosxe",
  "netform_ir",
  "proptest",
