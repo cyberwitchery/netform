@@ -1,4 +1,4 @@
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 use crate::model::{Diff, DiffLine, Edit};
 
@@ -156,12 +156,11 @@ fn append_colored_lines(
     let show = lines.len().min(max_lines_shown);
     for line in &lines[..show] {
         let formatted = format!("{prefix} {}", line.text);
-        let colored = if prefix == "+" {
-            formatted.green()
+        if prefix == "+" {
+            out.push_str(&format!("{}\n", formatted.green()));
         } else {
-            formatted.red()
-        };
-        out.push_str(&format!("{colored}\n"));
+            out.push_str(&format!("{}\n", formatted.red()));
+        }
     }
     let remaining = lines.len().saturating_sub(max_lines_shown);
     if remaining > 0 {

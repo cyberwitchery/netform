@@ -144,7 +144,7 @@ fn main() {
     } else {
         std::io::stdout().is_terminal()
     };
-    colored::control::set_override(use_color);
+    owo_colors::set_override(use_color);
 
     if cli.plan_json {
         let plan = build_plan(&diff);

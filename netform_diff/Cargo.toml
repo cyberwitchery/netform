@@ -9,7 +9,7 @@ homepage = "https://github.com/cyberwitchery/netform"
 documentation = "https://docs.rs/netform_diff"
 
 [dependencies]
-colored = "3"
+owo-colors = { version = "4", features = ["supports-colors"] }
 netform_ir = { version = "0.3.0", path = "../netform_ir" }
 serde = { version = "1.0", features = ["derive"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
