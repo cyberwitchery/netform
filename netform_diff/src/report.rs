@@ -1,10 +1,18 @@
 use crate::model::{Diff, DiffLine, Edit};
 
-/// Maximum number of lines shown per side of an edit before truncating.
-const MAX_LINES_SHOWN: usize = 10;
+/// Default maximum number of lines shown per side of an edit before truncating.
+pub const DEFAULT_CONTEXT_LINES: usize = 10;
 
 /// Format a markdown-oriented human report from a diff result.
-pub fn format_markdown_report(diff: &Diff, left_label: &str, right_label: &str) -> String {
+///
+/// `max_lines_shown` controls how many lines are printed per side of each edit
+/// before the output is truncated with an "and N more" message.
+pub fn format_markdown_report(
+    diff: &Diff,
+    left_label: &str,
+    right_label: &str,
+    max_lines_shown: usize,
+) -> String {
     let mut out = String::new();
     out.push_str("# Config Diff Report\n\n");
     out.push_str(&format!("- Left: `{left_label}`\n"));
@@ -29,7 +37,11 @@ pub fn format_markdown_report(diff: &Diff, left_label: &str, right_label: &str) 
         out.push_str("No changes detected.\n");
     } else {
         for (idx, edit) in diff.edits.iter().enumerate() {
-            out.push_str(&format!("{}. {}\n", idx + 1, describe_edit(edit)));
+            out.push_str(&format!(
+                "{}. {}\n",
+                idx + 1,
+                describe_edit(edit, max_lines_shown)
+            ));
         }
     }
 
@@ -46,7 +58,7 @@ pub fn format_markdown_report(diff: &Diff, left_label: &str, right_label: &str) 
     out
 }
 
-fn describe_edit(edit: &Edit) -> String {
+fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
     let mut out = String::new();
     match edit {
         Edit::Insert { at_key, lines, .. } => {
@@ -55,7 +67,7 @@ fn describe_edit(edit: &Edit) -> String {
                 lines.len(),
                 crate::util::key_label(*at_key),
             ));
-            append_diff_lines(&mut out, "+", lines);
+            append_diff_lines(&mut out, "+", lines, max_lines_shown);
         }
         Edit::Delete { at_key, lines, .. } => {
             out.push_str(&format!(
@@ -63,7 +75,7 @@ fn describe_edit(edit: &Edit) -> String {
                 lines.len(),
                 crate::util::key_label(*at_key),
             ));
-            append_diff_lines(&mut out, "-", lines);
+            append_diff_lines(&mut out, "-", lines, max_lines_shown);
         }
         Edit::Replace {
             old_at_key,
@@ -79,19 +91,19 @@ fn describe_edit(edit: &Edit) -> String {
                 new_lines.len(),
                 crate::util::key_label(*new_at_key),
             ));
-            append_diff_lines(&mut out, "-", old_lines);
-            append_diff_lines(&mut out, "+", new_lines);
+            append_diff_lines(&mut out, "-", old_lines, max_lines_shown);
+            append_diff_lines(&mut out, "+", new_lines, max_lines_shown);
         }
     }
     out
 }
 
-fn append_diff_lines(out: &mut String, prefix: &str, lines: &[DiffLine]) {
-    let show = lines.len().min(MAX_LINES_SHOWN);
+fn append_diff_lines(out: &mut String, prefix: &str, lines: &[DiffLine], max_lines_shown: usize) {
+    let show = lines.len().min(max_lines_shown);
     for line in &lines[..show] {
         out.push_str(&format!("\n   {} {}", prefix, line.text));
     }
-    let remaining = lines.len().saturating_sub(MAX_LINES_SHOWN);
+    let remaining = lines.len().saturating_sub(max_lines_shown);
     if remaining > 0 {
         out.push_str(&format!("\n   {} ... and {} more", prefix, remaining));
     }
