@@ -10,7 +10,7 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Replace"],
+    "edit_types": ["Delete", "Insert"],
     "finding_codes": []
   }
 }

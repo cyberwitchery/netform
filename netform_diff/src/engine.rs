@@ -310,8 +310,7 @@ where
     all_keys.sort_unstable();
     all_keys.dedup();
 
-    let mut deletes = Vec::new();
-    let mut inserts = Vec::new();
+    let mut edits = Vec::new();
     for key in all_keys {
         let mut left = a_buckets.remove(&key).unwrap_or_default();
         let mut right = b_buckets.remove(&key).unwrap_or_default();
@@ -321,24 +320,29 @@ where
 
         let common = left.len().min(right.len());
 
+        let mut bucket_deletes = Vec::new();
+        let mut bucket_inserts = Vec::new();
+
         // Paired lines share a content key but may differ in text (e.g.
         // FortiOS `set` lines matched by field name with different values).
         for idx in 0..common {
             if left[idx].normalized != right[idx].normalized {
-                deletes.push(to_diff_line(left[idx]));
-                inserts.push(to_diff_line(right[idx]));
+                bucket_deletes.push(to_diff_line(left[idx]));
+                bucket_inserts.push(to_diff_line(right[idx]));
             }
         }
 
         for line in left.into_iter().skip(common) {
-            deletes.push(to_diff_line(line));
+            bucket_deletes.push(to_diff_line(line));
         }
         for line in right.into_iter().skip(common) {
-            inserts.push(to_diff_line(line));
+            bucket_inserts.push(to_diff_line(line));
         }
+
+        edits.extend(finalize_chunked_edits(bucket_deletes, bucket_inserts));
     }
 
-    finalize_chunked_edits(deletes, inserts)
+    edits
 }
 
 fn finalize_chunked_edits(mut deletes: Vec<DiffLine>, mut inserts: Vec<DiffLine>) -> Vec<Edit> {
@@ -1017,6 +1021,33 @@ mod tests {
         let b = vec![cline("  description new", 20, vec![0, 0])];
         let edits = line_diff(&a, &b, OrderPolicy::KeyedStable);
         assert!(!edits.is_empty());
+    }
+
+    #[test]
+    fn line_diff_keyed_stable_emits_per_key_edits() {
+        let a = vec![
+            cline("  set allowaccess ping", 10, vec![0, 0]),
+            cline("  set hostname old", 20, vec![0, 1]),
+        ];
+        let b = vec![
+            cline("  set allowaccess https", 10, vec![0, 0]),
+            cline("  set hostname new", 20, vec![0, 1]),
+        ];
+        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        assert_eq!(edits.len(), 2);
+        for edit in &edits {
+            match edit {
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => {
+                    assert_eq!(old_lines.len(), 1);
+                    assert_eq!(new_lines.len(), 1);
+                }
+                _ => panic!("expected per-key Replace edits"),
+            }
+        }
     }
 
     // ── finalize_chunked_edits ──

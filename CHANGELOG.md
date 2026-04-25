@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- `line_diff_multiset` now emits one edit per differing key bucket instead of collapsing all changes into a single monolithic Replace — multiset diffs (keyed-stable, unordered) with multiple changed fields produce per-field edits, so the plan builder takes the fine-grained `ApplyLineEditsUnderContext` path rather than the coarse `ReplaceBlock` arm
 - expanded `fortios_key_hint` with `set:<field>` and `unset:<field>` subkey hints — FortiOS diffs now treat value changes on the same field as modifications rather than spurious delete + add pairs; the diff engine uses leaf-line hints for stable content-key hashing without exposing them as extracted keys
 - added `netform_dialect_fortios` crate — Fortinet FortiOS dialect with `config`/`edit` key hints, `#` comment classification, and quoted-string tokenization, wired into the CLI as `--dialect fortios`
 - expanded `ios_like_key_hint` with NX-OS-specific stanza types: `feature`, `vpc domain`, `role name`, `monitor session`, `ntp server`/`peer`, and `system` — NX-OS config diffs now correctly match these constructs instead of flagging them as ambiguous
