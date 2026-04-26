@@ -34,7 +34,7 @@ pub use model::{
     ComparisonLine, ComparisonView, Diff, DiffLine, DiffStats, Edit, EditAnchor, Finding,
     FindingLevel, KeyKind, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     OrderPolicyOverride, Plan, PlanAction, PlanFinding, PlanLineEdit, PlanLineEditKind,
-    derive_content_key, derive_occurrence_key,
+    derive_content_key, derive_occurrence_key, finding_code,
 };
 pub use plan::build_plan;
 pub use report::{DEFAULT_CONTEXT_LINES, format_markdown_report};

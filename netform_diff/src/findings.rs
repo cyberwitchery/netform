@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use netform_ir::{Document, Node, NodeId, Path};
 
 use crate::flatten::{content_counts, extracted_key_counts};
-use crate::model::{ComparisonView, Finding, FindingLevel};
+use crate::model::{ComparisonView, Finding, FindingLevel, finding_code};
 
 #[derive(Debug)]
 pub(crate) struct DiffContext {
@@ -83,7 +83,7 @@ fn push_ambiguity_finding(
         .or_else(|| b_view.lines.iter().find(|line| anchor_predicate(line)));
 
     out.push(Finding {
-        code: "ambiguous_key_match".to_string(),
+        code: finding_code::AMBIGUOUS_KEY_MATCH.to_string(),
         level: FindingLevel::Warning,
         message,
         path: anchor.map(|line| line.path.clone()),
@@ -134,7 +134,7 @@ fn collect_parse_findings(
             .find(|line| line.span.line == pf.span.line)
             .map(|line| line.path.clone());
         out.push(Finding {
-            code: "unknown_unparsed_construct".to_string(),
+            code: finding_code::UNKNOWN_UNPARSED_CONSTRUCT.to_string(),
             level: FindingLevel::Warning,
             message: format!("{side} parse uncertainty [{}]: {}", pf.code, pf.message),
             path: matched_path,
@@ -166,7 +166,7 @@ fn walk_findings(
     if let Node::Block(block) = node {
         if block.kind_label.as_deref() == Some("unknown") {
             out.push(Finding {
-                code: "unknown_unparsed_construct".to_string(),
+                code: finding_code::UNKNOWN_UNPARSED_CONSTRUCT.to_string(),
                 level: FindingLevel::Warning,
                 message: format!("{side} document has an unknown block"),
                 path: Some(Path(path.clone())),
@@ -217,7 +217,7 @@ fn collect_ambiguity_findings(
 fn collect_fallback_alignment_findings(contexts: &[Path], out: &mut Vec<Finding>) {
     for context in contexts {
         out.push(Finding {
-            code: "diff_unreliable_region".to_string(),
+            code: finding_code::DIFF_UNRELIABLE_REGION.to_string(),
             level: FindingLevel::Warning,
             message: "diff used fallback segment alignment for this context".to_string(),
             path: Some(context.clone()),
@@ -326,7 +326,10 @@ mod tests {
         collect_fallback_alignment_findings(&contexts, &mut out);
 
         assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|f| f.code == "diff_unreliable_region"));
+        assert!(
+            out.iter()
+                .all(|f| f.code == finding_code::DIFF_UNRELIABLE_REGION)
+        );
         assert_eq!(out[0].path.as_ref().unwrap().0, vec![0]);
         assert_eq!(out[1].path.as_ref().unwrap().0, vec![1, 2]);
     }
@@ -345,7 +348,7 @@ mod tests {
         collect_ambiguity_findings(&a, &b, &ctx, &mut out);
 
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].code, "ambiguous_key_match");
+        assert_eq!(out[0].code, finding_code::AMBIGUOUS_KEY_MATCH);
         assert!(out[0].message.contains("2x on left"));
         assert!(out[0].message.contains("3x on right"));
         assert!(out[0].path.is_some());

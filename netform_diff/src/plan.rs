@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::model::{Diff, Edit, Plan, PlanAction, PlanFinding, PlanLineEdit, PlanLineEditKind};
+use crate::model::{
+    Diff, Edit, FindingLevel, Plan, PlanAction, PlanFinding, PlanLineEdit, PlanLineEditKind,
+    finding_code,
+};
 
 /// Convert a [`Diff`] into a transport-neutral action plan.
 pub fn build_plan(diff: &Diff) -> Plan {
@@ -39,11 +42,7 @@ pub fn build_plan(diff: &Diff) -> Plan {
                         );
                     }
                 } else {
-                    findings.push(PlanFinding {
-                        code: "missing_anchor".to_string(),
-                        message: "cannot create plan action for replace edit without left anchor"
-                            .to_string(),
-                    });
+                    findings.push(missing_anchor_finding("replace", "left"));
                 }
             }
             Edit::Insert {
@@ -66,11 +65,7 @@ pub fn build_plan(diff: &Diff) -> Plan {
                             .collect(),
                     );
                 } else {
-                    findings.push(PlanFinding {
-                        code: "missing_anchor".to_string(),
-                        message: "cannot create plan action for insert edit without right anchor"
-                            .to_string(),
-                    });
+                    findings.push(missing_anchor_finding("insert", "right"));
                 }
             }
             Edit::Delete {
@@ -91,11 +86,7 @@ pub fn build_plan(diff: &Diff) -> Plan {
                             .collect(),
                     );
                 } else {
-                    findings.push(PlanFinding {
-                        code: "missing_anchor".to_string(),
-                        message: "cannot create plan action for delete edit without left anchor"
-                            .to_string(),
-                    });
+                    findings.push(missing_anchor_finding("delete", "left"));
                 }
             }
         }
@@ -105,6 +96,18 @@ pub fn build_plan(diff: &Diff) -> Plan {
         version: "v1".to_string(),
         actions,
         findings,
+    }
+}
+
+fn missing_anchor_finding(edit_kind: &str, anchor_side: &str) -> PlanFinding {
+    PlanFinding {
+        code: finding_code::MISSING_ANCHOR.to_string(),
+        message: format!(
+            "cannot create plan action for {edit_kind} edit without {anchor_side} anchor"
+        ),
+        level: Some(FindingLevel::Warning),
+        path: None,
+        span: None,
     }
 }
 
@@ -325,7 +328,7 @@ mod tests {
 
         assert!(plan.actions.is_empty());
         assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, "missing_anchor");
+        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
         assert!(plan.findings[0].message.contains("replace"));
     }
 
@@ -342,7 +345,7 @@ mod tests {
 
         assert!(plan.actions.is_empty());
         assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, "missing_anchor");
+        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
         assert!(plan.findings[0].message.contains("insert"));
     }
 
@@ -359,7 +362,7 @@ mod tests {
 
         assert!(plan.actions.is_empty());
         assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, "missing_anchor");
+        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
         assert!(plan.findings[0].message.contains("delete"));
     }
 
@@ -458,7 +461,7 @@ mod tests {
 
         assert_eq!(plan.actions.len(), 1);
         assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, "missing_anchor");
+        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
     }
 
     #[test]

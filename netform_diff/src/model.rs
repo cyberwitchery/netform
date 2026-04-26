@@ -161,6 +161,14 @@ pub struct DiffStats {
     pub replaced_new_lines: usize,
 }
 
+/// Machine-readable diagnostic codes used in [`Finding`] and [`PlanFinding`].
+pub mod finding_code {
+    pub const MISSING_ANCHOR: &str = "missing_anchor";
+    pub const AMBIGUOUS_KEY_MATCH: &str = "ambiguous_key_match";
+    pub const UNKNOWN_UNPARSED_CONSTRUCT: &str = "unknown_unparsed_construct";
+    pub const DIFF_UNRELIABLE_REGION: &str = "diff_unreliable_region";
+}
+
 /// Warning/info emitted during parse propagation or diff uncertainty handling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Finding {
@@ -243,6 +251,12 @@ pub enum PlanLineEditKind {
 pub struct PlanFinding {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<FindingLevel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<Path>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<Span>,
 }
 
 /// Key namespace discriminator used when hashing comparison identities.
