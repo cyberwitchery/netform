@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+- added `finding_code` module with typed constants (`MISSING_ANCHOR`, `AMBIGUOUS_KEY_MATCH`, `UNKNOWN_UNPARSED_CONSTRUCT`, `DIFF_UNRELIABLE_REGION`) — diagnostic codes are now defined in one place instead of scattered string literals
+- `PlanFinding` now carries optional `level`, `path`, and `span` fields (matching `Finding`), serialized only when present — plan consumers can now pinpoint which config location triggered a diagnostic
 - added `--context-lines N` CLI flag — controls how many lines are shown per side of each edit in the default markdown report before truncating; defaults to 10 (the previous hardcoded value)
 - `line_diff_multiset` now emits one edit per differing key bucket instead of collapsing all changes into a single monolithic Replace — multiset diffs (keyed-stable, unordered) with multiple changed fields produce per-field edits, so the plan builder takes the fine-grained `ApplyLineEditsUnderContext` path rather than the coarse `ReplaceBlock` arm
 - expanded `fortios_key_hint` with `set:<field>` and `unset:<field>` subkey hints — FortiOS diffs now treat value changes on the same field as modifications rather than spurious delete + add pairs; the diff engine uses leaf-line hints for stable content-key hashing without exposing them as extracted keys
