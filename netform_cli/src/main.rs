@@ -9,8 +9,8 @@ use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
 use netform_diff::{
-    NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig, build_plan,
-    diff_documents, format_markdown_report,
+    DEFAULT_CONTEXT_LINES, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
+    build_plan, diff_documents, format_markdown_report,
 };
 use netform_ir::{Document, parse_generic};
 
@@ -47,6 +47,12 @@ struct Cli {
 
     #[arg(long, value_enum, default_value_t = CliDialect::Generic)]
     dialect: CliDialect,
+
+    /// Maximum number of lines shown per side of each edit before
+    /// truncating with "and N more".  Applies to the default markdown
+    /// report output (ignored with --json / --plan-json).
+    #[arg(long, default_value_t = DEFAULT_CONTEXT_LINES)]
+    context_lines: usize,
 
     /// Suppress exit code 1 when configs differ.  By default config-diff
     /// exits 1 when the configs differ (like `diff(1)`).  Pass this flag
@@ -146,6 +152,7 @@ fn main() {
                 &diff,
                 &cli.file_a.display().to_string(),
                 &cli.file_b.display().to_string(),
+                cli.context_lines,
             )
         );
     }

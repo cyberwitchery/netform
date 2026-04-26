@@ -1,4 +1,6 @@
-use netform_diff::{NormalizeOptions, diff_documents, format_markdown_report};
+use netform_diff::{
+    DEFAULT_CONTEXT_LINES, NormalizeOptions, diff_documents, format_markdown_report,
+};
 use netform_ir::parse_generic;
 
 #[test]
@@ -7,7 +9,7 @@ fn markdown_report_mentions_keyed_replace() {
     let b = parse_generic("interface Ethernet1\n  description new\n");
 
     let diff = diff_documents(&a, &b, NormalizeOptions::default());
-    let report = format_markdown_report(&diff, "left.cfg", "right.cfg");
+    let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
     assert!(report.contains("# Config Diff Report"));
@@ -31,7 +33,7 @@ fn markdown_report_shows_added_line_in_replace() {
     let b = parse_generic("interface Ethernet1\n  description added\n");
 
     let diff = diff_documents(&a, &b, NormalizeOptions::default());
-    let report = format_markdown_report(&diff, "left.cfg", "right.cfg");
+    let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
     assert!(
@@ -48,7 +50,7 @@ fn markdown_report_shows_removed_line_in_replace() {
     let b = parse_generic("interface Ethernet1\n");
 
     let diff = diff_documents(&a, &b, NormalizeOptions::default());
-    let report = format_markdown_report(&diff, "left.cfg", "right.cfg");
+    let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
     assert!(
