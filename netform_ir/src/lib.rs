@@ -607,6 +607,15 @@ pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             }
             _ => None,
         },
+        "ipv6" => match args {
+            [next, name, ..] if next == "access-list" => Some(format!("ipv6-access-list:{name}")),
+            [next, name, ..] if next == "prefix-list" => Some(format!("ipv6-prefix-list:{name}")),
+            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
+                Some(format!("ipv6-route:{vrf_name}:{prefix}"))
+            }
+            [next, prefix, ..] if next == "route" => Some(format!("ipv6-route:{prefix}")),
+            _ => None,
+        },
         "access-list" => args.first().map(|num| format!("access-list:{num}")),
         "crypto" => match args {
             [kind, sub, name, ..] if kind == "ikev2" => Some(format!("crypto:ikev2:{sub}:{name}")),
@@ -768,6 +777,59 @@ mod tests {
             hint("ip prefix-list DEFAULT-ONLY"),
             Some("prefix-list:DEFAULT-ONLY".into()),
         );
+    }
+
+    // -- IPv6 constructs --
+
+    #[test]
+    fn key_hint_ipv6_access_list() {
+        assert_eq!(
+            hint("ipv6 access-list BLOCK-BOGONS"),
+            Some("ipv6-access-list:BLOCK-BOGONS".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ipv6_prefix_list() {
+        assert_eq!(
+            hint("ipv6 prefix-list DEFAULT-V6-ONLY"),
+            Some("ipv6-prefix-list:DEFAULT-V6-ONLY".into()),
+        );
+        assert_eq!(
+            hint("ipv6 prefix-list CONNECTED-V6 seq 10 permit 2001:db8::/32 le 48"),
+            Some("ipv6-prefix-list:CONNECTED-V6".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ipv6_route() {
+        assert_eq!(
+            hint("ipv6 route 2001:db8::/32 Null0"),
+            Some("ipv6-route:2001:db8::/32".into()),
+        );
+        assert_eq!(
+            hint("ipv6 route ::/0 GigabitEthernet0/0 fe80::1"),
+            Some("ipv6-route:::/0".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ipv6_route_vrf() {
+        assert_eq!(
+            hint("ipv6 route vrf MGMT ::/0 GigabitEthernet0/0 fe80::1"),
+            Some("ipv6-route:MGMT:::/0".into()),
+        );
+        assert_eq!(
+            hint("ipv6 route vrf PROD 2001:db8:1::/48 2001:db8::1"),
+            Some("ipv6-route:PROD:2001:db8:1::/48".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ipv6_no_match() {
+        // Other ipv6 subcommands should not produce a hint.
+        assert_eq!(hint("ipv6 unicast-routing"), None);
+        assert_eq!(hint("ipv6 nd ra suppress all"), None);
     }
 
     #[test]
