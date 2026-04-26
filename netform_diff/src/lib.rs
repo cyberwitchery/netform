@@ -37,7 +37,7 @@ pub use model::{
     derive_content_key, derive_occurrence_key, finding_code,
 };
 pub use plan::build_plan;
-pub use report::{DEFAULT_CONTEXT_LINES, format_markdown_report};
+pub use report::{DEFAULT_CONTEXT_LINES, format_markdown_report, format_unified_diff};
 
 use netform_ir::Document;
 

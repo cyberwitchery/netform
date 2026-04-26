@@ -12,9 +12,9 @@ fn temp_file_path(prefix: &str) -> PathBuf {
 }
 
 #[test]
-fn config_diff_cli_prints_markdown_report() {
-    let left = temp_file_path("left-markdown");
-    let right = temp_file_path("right-markdown");
+fn config_diff_cli_prints_unified_diff() {
+    let left = temp_file_path("left-unified");
+    let right = temp_file_path("right-unified");
     fs::write(&left, "hostname old\n").expect("write left");
     fs::write(&right, "hostname new\n").expect("write right");
 
@@ -27,8 +27,17 @@ fn config_diff_cli_prints_markdown_report() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("# Config Diff Report"));
-    assert!(stdout.contains("Replaces:"));
+    assert!(stdout.contains("---"), "should contain --- header");
+    assert!(stdout.contains("+++"), "should contain +++ header");
+    assert!(stdout.contains("@@"), "should contain @@ hunk header");
+    assert!(
+        stdout.contains("- hostname old"),
+        "should contain deleted line"
+    );
+    assert!(
+        stdout.contains("+ hostname new"),
+        "should contain inserted line"
+    );
 }
 
 #[test]

@@ -1,3 +1,5 @@
+use owo_colors::OwoColorize;
+
 use crate::model::{Diff, DiffLine, Edit};
 
 /// Default maximum number of lines shown per side of an edit before truncating.
@@ -56,6 +58,117 @@ pub fn format_markdown_report(
     }
 
     out
+}
+
+/// Format a colored unified-diff-style report from a diff result.
+///
+/// Uses ANSI colors when enabled via `owo_colors`:
+/// - `---`/`+++` file headers: bold
+/// - `@@` hunk headers: cyan
+/// - `-` deletion lines: red
+/// - `+` insertion lines: green
+///
+/// Call `owo_colors::set_override(false)` before invoking this function
+/// to suppress ANSI escapes (e.g. when stdout is not a TTY).
+pub fn format_unified_diff(
+    diff: &Diff,
+    left_label: &str,
+    right_label: &str,
+    max_lines_shown: usize,
+) -> String {
+    let mut out = String::new();
+    if diff.edits.is_empty() {
+        return out;
+    }
+
+    out.push_str(&format!("{}\n", format!("--- {left_label}").bold()));
+    out.push_str(&format!("{}\n", format!("+++ {right_label}").bold()));
+
+    for edit in &diff.edits {
+        match edit {
+            Edit::Insert { at_key, lines, .. } => {
+                out.push_str(&format!(
+                    "{}\n",
+                    format!(
+                        "@@ insert {} line(s) at key {} @@",
+                        lines.len(),
+                        crate::util::key_label(*at_key),
+                    )
+                    .cyan()
+                ));
+                append_colored_lines(&mut out, "+", lines, max_lines_shown);
+            }
+            Edit::Delete { at_key, lines, .. } => {
+                out.push_str(&format!(
+                    "{}\n",
+                    format!(
+                        "@@ delete {} line(s) at key {} @@",
+                        lines.len(),
+                        crate::util::key_label(*at_key),
+                    )
+                    .cyan()
+                ));
+                append_colored_lines(&mut out, "-", lines, max_lines_shown);
+            }
+            Edit::Replace {
+                old_at_key,
+                new_at_key,
+                old_lines,
+                new_lines,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "{}\n",
+                    format!(
+                        "@@ replace {} line(s) at key {} -> {} line(s) at key {} @@",
+                        old_lines.len(),
+                        crate::util::key_label(*old_at_key),
+                        new_lines.len(),
+                        crate::util::key_label(*new_at_key),
+                    )
+                    .cyan()
+                ));
+                append_colored_lines(&mut out, "-", old_lines, max_lines_shown);
+                append_colored_lines(&mut out, "+", new_lines, max_lines_shown);
+            }
+        }
+    }
+
+    if !diff.findings.is_empty() {
+        out.push('\n');
+        for finding in &diff.findings {
+            out.push_str(&format!(
+                "{}\n",
+                format!("{} [{}]: {}", finding.level, finding.code, finding.message).yellow()
+            ));
+        }
+    }
+
+    out
+}
+
+fn append_colored_lines(
+    out: &mut String,
+    prefix: &str,
+    lines: &[DiffLine],
+    max_lines_shown: usize,
+) {
+    let show = lines.len().min(max_lines_shown);
+    for line in &lines[..show] {
+        let formatted = format!("{prefix} {}", line.text);
+        if prefix == "+" {
+            out.push_str(&format!("{}\n", formatted.green()));
+        } else {
+            out.push_str(&format!("{}\n", formatted.red()));
+        }
+    }
+    let remaining = lines.len().saturating_sub(max_lines_shown);
+    if remaining > 0 {
+        out.push_str(&format!(
+            "{}\n",
+            format!("{prefix} ... and {remaining} more").dimmed()
+        ));
+    }
 }
 
 fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
