@@ -55,7 +55,7 @@ impl Dialect for JunosDialect {
 }
 
 fn classify_junos_trivia(raw: &str) -> TriviaKind {
-    classify_trivia_with_prefixes(raw, &["#", "/*", "*", "*/"])
+    classify_trivia_with_prefixes(raw, &["#", "/*", "* ", "*/"])
 }
 
 fn parse_junos_parts(raw: &str) -> Option<ParsedLineParts> {
@@ -73,7 +73,7 @@ fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     match head {
         "interfaces" | "protocols" | "routing-instances" | "policy-options" | "firewall"
         | "security" | "snmp" | "vlans" | "chassis" | "class-of-service" | "forwarding-options"
-        | "applications" | "groups" => Some(head.to_string()),
+        | "applications" | "groups" | "system" | "routing-options" => Some(head.to_string()),
         "set" => set_style_key_hint(args),
         _ => None,
     }
@@ -106,10 +106,20 @@ fn set_style_key_hint(args: &[String]) -> Option<String> {
         [section, kind, name, ..] if section == "policy-options" => {
             Some(format!("set-policy-options:{kind}:{name}"))
         }
+        [section, sub, ..]
+            if section == "system"
+                && matches!(
+                    sub.as_str(),
+                    "host-name" | "services" | "login" | "ntp" | "syslog"
+                ) =>
+        {
+            Some(format!("set-system:{sub}"))
+        }
+        [section, ..] if section == "system" => Some("set-system".into()),
         [section, ..]
             if matches!(
                 section.as_str(),
-                "snmp" | "chassis" | "class-of-service" | "forwarding-options"
+                "snmp" | "chassis" | "class-of-service" | "forwarding-options" | "routing-options"
             ) =>
         {
             Some(format!("set-{section}"))
@@ -127,7 +137,17 @@ mod tests {
         assert_eq!(classify_junos_trivia("# note"), TriviaKind::Comment);
         assert_eq!(classify_junos_trivia("/* note */"), TriviaKind::Comment);
         assert_eq!(classify_junos_trivia("*/"), TriviaKind::Comment);
+        assert_eq!(
+            classify_junos_trivia("  * continuation"),
+            TriviaKind::Comment
+        );
         assert_eq!(classify_junos_trivia("interfaces {"), TriviaKind::Content);
+    }
+
+    #[test]
+    fn star_without_trailing_space_is_not_a_comment() {
+        assert_eq!(classify_junos_trivia("*10.0.0.0/8"), TriviaKind::Content);
+        assert_eq!(classify_junos_trivia("*[BGP/170]"), TriviaKind::Content);
     }
 
     #[test]
@@ -399,11 +419,91 @@ mod tests {
         );
     }
 
+    // -- hierarchical stanzas (system / routing-options) --
+
+    #[test]
+    fn key_hint_system() {
+        assert_eq!(hint("system {"), Some("system".into()));
+    }
+
+    #[test]
+    fn key_hint_routing_options() {
+        assert_eq!(hint("routing-options {"), Some("routing-options".into()));
+    }
+
+    // -- set-style (system sub-stanzas) --
+
+    #[test]
+    fn key_hint_set_system_host_name() {
+        assert_eq!(
+            hint("set system host-name router-1"),
+            Some("set-system:host-name".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_services() {
+        assert_eq!(
+            hint("set system services ssh root-login deny"),
+            Some("set-system:services".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_login() {
+        assert_eq!(
+            hint("set system login user admin class super-user"),
+            Some("set-system:login".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_ntp() {
+        assert_eq!(
+            hint("set system ntp server 10.0.0.1"),
+            Some("set-system:ntp".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_syslog() {
+        assert_eq!(
+            hint("set system syslog host 10.0.0.2 any any"),
+            Some("set-system:syslog".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_fallback() {
+        assert_eq!(
+            hint("set system name-server 8.8.8.8"),
+            Some("set-system".into()),
+        );
+    }
+
+    // -- set-style (routing-options) --
+
+    #[test]
+    fn key_hint_set_routing_options() {
+        assert_eq!(
+            hint("set routing-options static route 0.0.0.0/0 next-hop 10.0.0.1"),
+            Some("set-routing-options".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_autonomous_system() {
+        assert_eq!(
+            hint("set routing-options autonomous-system 65001"),
+            Some("set-routing-options".into()),
+        );
+    }
+
     // -- negative cases --
 
     #[test]
     fn key_hint_none_for_unknown() {
-        assert_eq!(hint("system {"), None);
+        assert_eq!(hint("event-options {"), None);
     }
 
     #[test]
@@ -413,6 +513,6 @@ mod tests {
 
     #[test]
     fn key_hint_set_unknown_section() {
-        assert_eq!(hint("set system host-name router-1"), None);
+        assert_eq!(hint("set event-options policy DUMP-ON-SNMPD"), None);
     }
 }
