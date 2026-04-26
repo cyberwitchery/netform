@@ -62,13 +62,13 @@ pub fn format_markdown_report(
 
 /// Format a colored unified-diff-style report from a diff result.
 ///
-/// Uses ANSI colors when enabled via the `colored` crate's global controls:
+/// Uses ANSI colors when enabled via `owo_colors`:
 /// - `---`/`+++` file headers: bold
 /// - `@@` hunk headers: cyan
 /// - `-` deletion lines: red
 /// - `+` insertion lines: green
 ///
-/// Call `colored::control::set_override(false)` before invoking this function
+/// Call `owo_colors::set_override(false)` before invoking this function
 /// to suppress ANSI escapes (e.g. when stdout is not a TTY).
 pub fn format_unified_diff(
     diff: &Diff,
