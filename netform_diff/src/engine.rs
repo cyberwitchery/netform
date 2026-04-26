@@ -433,10 +433,14 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Vec<Op> {
     // Myers SES trace over diagonals. This avoids the quadratic LCS matrix and
     // remains deterministic for a fixed input/order.
     let mut v = vec![0isize; v_len];
-    let mut trace: Vec<Vec<isize>> = Vec::new();
+    let mut trace: Vec<Vec<isize>> = Vec::with_capacity((max + 1) as usize);
 
     for d in 0..=max {
-        let mut current = v.clone();
+        // Diagonals are visited in steps of 2, so writes to v[idx] (diagonal k)
+        // never collide with reads from v[idx-1] (k-1) or v[idx+1] (k+1) —
+        // those diagonals have opposite parity and still hold their d-1 values.
+        // This lets us mutate v in-place and snapshot once, instead of cloning
+        // v into a working copy and then cloning that copy into the trace.
         let mut k = -d;
         while k <= d {
             let idx = (k + offset) as usize;
@@ -452,16 +456,15 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Vec<Op> {
                 x += 1;
                 y += 1;
             }
-            current[idx] = x;
+            v[idx] = x;
 
             if x >= n && y >= m {
-                trace.push(current);
+                trace.push(v.clone());
                 return backtrack_ops(a, b, &trace, offset);
             }
             k += 2;
         }
-        trace.push(current.clone());
-        v = current;
+        trace.push(v.clone());
     }
 
     unreachable!("Myers SES must converge within n+m steps")
