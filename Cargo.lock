@@ -356,7 +356,11 @@ dependencies = [
 name = "netform_diff"
 version = "0.3.0"
 dependencies = [
+ "netform_dialect_eos",
+ "netform_dialect_fortios",
  "netform_dialect_iosxe",
+ "netform_dialect_junos",
+ "netform_dialect_nxos",
  "netform_ir",
  "owo-colors",
  "proptest",

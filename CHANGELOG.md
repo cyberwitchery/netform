@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- expanded `ios_like_key_hint` with `ip route` support: `ip route <prefix> <mask> ...` → `ip-route:<prefix>` and `ip route vrf <vrf> <prefix> ...` → `ip-route:<vrf>:<prefix>` — static route diffs now correctly match by destination prefix instead of flagging as ambiguous
 - added `finding_code` module with typed constants (`MISSING_ANCHOR`, `AMBIGUOUS_KEY_MATCH`, `UNKNOWN_UNPARSED_CONSTRUCT`, `DIFF_UNRELIABLE_REGION`) — diagnostic codes are now defined in one place instead of scattered string literals
 - `PlanFinding` now carries optional `level`, `path`, and `span` fields (matching `Finding`), serialized only when present — plan consumers can now pinpoint which config location triggered a diagnostic
 - expanded `ios_like_key_hint` with IPv6 constructs: `ipv6 access-list`, `ipv6 prefix-list`, and `ipv6 route` (with VRF support) — IPv6 config diffs now correctly match these stanzas instead of flagging them as ambiguous

@@ -286,6 +286,186 @@ fn config_diff_junos_dialect_with_keyed_stable_policy() {
 }
 
 #[test]
+fn config_diff_nxos_dialect_produces_diff() {
+    let left = temp_file_path("left-nxos");
+    let right = temp_file_path("right-nxos");
+    fs::write(
+        &left,
+        "feature ospf\ninterface Ethernet1/1\n  description old-uplink\n  no shutdown\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "feature ospf\ninterface Ethernet1/1\n  description new-uplink\n  no shutdown\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("nxos")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect nxos");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid nxos json");
+    assert_eq!(diff_json["has_changes"], true);
+}
+
+#[test]
+fn config_diff_nxos_dialect_no_changes() {
+    let path = temp_file_path("nxos-same");
+    fs::write(
+        &path,
+        "feature bgp\nvpc domain 10\n  peer-keepalive destination 10.0.0.1\n",
+    )
+    .expect("write file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("nxos")
+        .arg(&path)
+        .arg(&path)
+        .output()
+        .expect("run config-diff --dialect nxos");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "identical nxos files → exit 0"
+    );
+}
+
+#[test]
+fn config_diff_nxos_keyed_stable_matches_interfaces() {
+    let left = temp_file_path("left-nxos-keyed");
+    let right = temp_file_path("right-nxos-keyed");
+    fs::write(
+        &left,
+        "interface Ethernet1/1\n  description uplink\n  mtu 9000\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "interface Ethernet1/1\n  mtu 9000\n  description uplink\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("nxos")
+        .arg("--order-policy")
+        .arg("keyed-stable")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect nxos --order-policy keyed-stable");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert_eq!(
+        diff_json["has_changes"], false,
+        "nxos + keyed-stable should ignore reordered children"
+    );
+}
+
+#[test]
+fn config_diff_fortios_dialect_produces_diff() {
+    let left = temp_file_path("left-fortios");
+    let right = temp_file_path("right-fortios");
+    // Use structural change (add a line) to produce a diff — FortiOS leaf-line
+    // hints stabilize content keys across value changes, so changing a set value
+    // alone does not produce edits in ordered mode.
+    fs::write(
+        &left,
+        "config system global\n    set hostname \"FGT\"\nend\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "config system global\n    set hostname \"FGT\"\n    set timezone 04\nend\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("fortios")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect fortios");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid fortios json");
+    assert_eq!(diff_json["has_changes"], true);
+}
+
+#[test]
+fn config_diff_fortios_dialect_no_changes() {
+    let path = temp_file_path("fortios-same");
+    fs::write(
+        &path,
+        "config firewall address\n    edit \"all\"\n        set type ipmask\n    next\nend\n",
+    )
+    .expect("write file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("fortios")
+        .arg(&path)
+        .arg(&path)
+        .output()
+        .expect("run config-diff --dialect fortios");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "identical fortios files → exit 0"
+    );
+}
+
+#[test]
+fn config_diff_fortios_unified_output() {
+    let left = temp_file_path("left-fortios-unified");
+    let right = temp_file_path("right-fortios-unified");
+    // Structural change (remove a line) to produce unified diff output.
+    fs::write(
+        &left,
+        "config system global\n    set hostname \"FGT\"\n    set timezone 04\nend\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "config system global\n    set hostname \"FGT\"\nend\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("fortios")
+        .arg("--no-color")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect fortios unified");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("---"), "should contain --- header");
+    assert!(stdout.contains("+++"), "should contain +++ header");
+    assert!(stdout.contains("@@"), "should contain @@ hunk header");
+}
+
+#[test]
 fn replay_fixtures_cli_runs_successfully() {
     let output = Command::new(env!("CARGO_BIN_EXE_netform-replay-fixtures"))
         .output()

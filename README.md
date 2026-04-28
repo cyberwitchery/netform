@@ -10,6 +10,8 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 - `netform_dialect_eos`: eos profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_iosxe`: iosxe profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_junos`: junos profile for comment/token handling and dialect-aware parsing.
+- `netform_dialect_nxos`: nxos profile for comment/token handling and dialect-aware parsing.
+- `netform_dialect_fortios`: fortios profile for comment/token handling and dialect-aware parsing.
 
 ## features
 
@@ -39,6 +41,8 @@ netform_diff = "0.3.0"
 netform_dialect_eos = "0.3.0"
 netform_dialect_iosxe = "0.3.0"
 netform_dialect_junos = "0.3.0"
+netform_dialect_nxos = "0.3.0"
+netform_dialect_fortios = "0.3.0"
 ```
 
 install the cli binary so you can run `config-diff` directly:
@@ -88,7 +92,7 @@ config-diff [OPTIONS] <FILE_A> <FILE_B>
 
 options:
 
-- `--dialect <generic|eos|iosxe|junos>`: parser profile to apply (default: `generic`)
+- `--dialect <generic|eos|iosxe|junos|nxos|fortios>`: parser profile to apply (default: `generic`)
 - `--order-policy <ordered|unordered|keyed-stable>`: sibling ordering semantics (default: `ordered`)
 - `--ignore-comments`: drop comment lines from comparison
 - `--ignore-blank-lines`: drop blank lines from comparison
@@ -104,6 +108,8 @@ cargo run -p netform_cli --bin config-diff -- ./before.cfg ./after.cfg
 cargo run -p netform_cli --bin config-diff -- --dialect eos ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --dialect iosxe ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --dialect junos ./intended.conf ./actual.conf
+cargo run -p netform_cli --bin config-diff -- --dialect nxos ./intended.conf ./actual.conf
+cargo run -p netform_cli --bin config-diff -- --dialect fortios ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --order-policy keyed-stable ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --json ./before.cfg ./after.cfg
 cargo run -p netform_cli --bin config-diff -- --plan-json ./before.cfg ./after.cfg
