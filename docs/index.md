@@ -13,9 +13,11 @@ how to use this repo:
 - parse eos-oriented text with `netform_dialect_eos::parse_eos`
 - parse iosxe-oriented text with `netform_dialect_iosxe::parse_iosxe`
 - parse junos-oriented text with `netform_dialect_junos::parse_junos`
+- parse nxos-oriented text with `netform_dialect_nxos::parse_nxos`
+- parse fortios-oriented text with `netform_dialect_fortios::parse_fortios`
 - render with `Document::render()` to preserve exact line text and endings
 - compare two documents with `netform_diff::diff_documents`
-- emit markdown or json using `netform_cli`'s `config-diff` (`--dialect generic|eos|iosxe|junos`)
+- emit markdown or json using `netform_cli`'s `config-diff` (`--dialect generic|eos|iosxe|junos|nxos|fortios`)
 
 quick start:
 

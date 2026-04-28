@@ -605,6 +605,10 @@ pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             [next, kind, name, ..] if next == "community-list" => {
                 Some(format!("ip-community-list:{kind}:{name}"))
             }
+            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
+                Some(format!("ip-route:{vrf_name}:{prefix}"))
+            }
+            [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
             _ => None,
         },
         "ipv6" => match args {
@@ -780,6 +784,41 @@ mod tests {
     }
 
     // -- IPv6 constructs --
+
+    // -- ip route constructs --
+
+    #[test]
+    fn key_hint_ip_route() {
+        assert_eq!(
+            hint("ip route 10.0.0.0 255.255.255.0 192.168.1.1"),
+            Some("ip-route:10.0.0.0".into()),
+        );
+        assert_eq!(
+            hint("ip route 0.0.0.0 0.0.0.0 10.0.0.1"),
+            Some("ip-route:0.0.0.0".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ip_route_vrf() {
+        assert_eq!(
+            hint("ip route vrf MGMT 0.0.0.0 0.0.0.0 10.0.0.1"),
+            Some("ip-route:MGMT:0.0.0.0".into()),
+        );
+        assert_eq!(
+            hint("ip route vrf PROD 10.1.0.0 255.255.0.0 192.168.1.1"),
+            Some("ip-route:PROD:10.1.0.0".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ip_route_minimal() {
+        // ip route with just prefix and mask (no next-hop)
+        assert_eq!(
+            hint("ip route 172.16.0.0 255.240.0.0"),
+            Some("ip-route:172.16.0.0".into()),
+        );
+    }
 
     #[test]
     fn key_hint_ipv6_access_list() {
