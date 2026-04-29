@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use owo_colors::OwoColorize;
 
 use crate::model::{Diff, DiffLine, Edit};
@@ -17,43 +19,47 @@ pub fn format_markdown_report(
 ) -> String {
     let mut out = String::new();
     out.push_str("# Config Diff Report\n\n");
-    out.push_str(&format!("- Left: `{left_label}`\n"));
-    out.push_str(&format!("- Right: `{right_label}`\n\n"));
+    writeln!(out, "- Left: `{left_label}`").unwrap();
+    writeln!(out, "- Right: `{right_label}`\n").unwrap();
 
     out.push_str("## Stats\n\n");
-    out.push_str(&format!(
-        "- Inserts: {} ({} lines)\n",
+    writeln!(
+        out,
+        "- Inserts: {} ({} lines)",
         diff.stats.inserts, diff.stats.inserted_lines
-    ));
-    out.push_str(&format!(
-        "- Deletes: {} ({} lines)\n",
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "- Deletes: {} ({} lines)",
         diff.stats.deletes, diff.stats.deleted_lines
-    ));
-    out.push_str(&format!(
-        "- Replaces: {} ({} -> {} lines)\n\n",
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "- Replaces: {} ({} -> {} lines)\n",
         diff.stats.replaces, diff.stats.replaced_old_lines, diff.stats.replaced_new_lines
-    ));
+    )
+    .unwrap();
 
     out.push_str("## Edits\n\n");
     if diff.edits.is_empty() {
         out.push_str("No changes detected.\n");
     } else {
         for (idx, edit) in diff.edits.iter().enumerate() {
-            out.push_str(&format!(
-                "{}. {}\n",
-                idx + 1,
-                describe_edit(edit, max_lines_shown)
-            ));
+            writeln!(out, "{}. {}", idx + 1, describe_edit(edit, max_lines_shown)).unwrap();
         }
     }
 
     if !diff.findings.is_empty() {
         out.push_str("\n## Findings\n\n");
         for finding in &diff.findings {
-            out.push_str(&format!(
-                "- {} [{}]: {}\n",
+            writeln!(
+                out,
+                "- {} [{}]: {}",
                 finding.level, finding.code, finding.message
-            ));
+            )
+            .unwrap();
         }
     }
 
@@ -81,33 +87,37 @@ pub fn format_unified_diff(
         return out;
     }
 
-    out.push_str(&format!("{}\n", format!("--- {left_label}").bold()));
-    out.push_str(&format!("{}\n", format!("+++ {right_label}").bold()));
+    writeln!(out, "{}", format_args!("--- {left_label}").bold()).unwrap();
+    writeln!(out, "{}", format_args!("+++ {right_label}").bold()).unwrap();
 
     for edit in &diff.edits {
         match edit {
             Edit::Insert { at_key, lines, .. } => {
-                out.push_str(&format!(
-                    "{}\n",
-                    format!(
+                writeln!(
+                    out,
+                    "{}",
+                    format_args!(
                         "@@ insert {} line(s) at key {} @@",
                         lines.len(),
                         crate::util::key_label(*at_key),
                     )
                     .cyan()
-                ));
+                )
+                .unwrap();
                 append_colored_lines(&mut out, "+", lines, max_lines_shown);
             }
             Edit::Delete { at_key, lines, .. } => {
-                out.push_str(&format!(
-                    "{}\n",
-                    format!(
+                writeln!(
+                    out,
+                    "{}",
+                    format_args!(
                         "@@ delete {} line(s) at key {} @@",
                         lines.len(),
                         crate::util::key_label(*at_key),
                     )
                     .cyan()
-                ));
+                )
+                .unwrap();
                 append_colored_lines(&mut out, "-", lines, max_lines_shown);
             }
             Edit::Replace {
@@ -117,9 +127,10 @@ pub fn format_unified_diff(
                 new_lines,
                 ..
             } => {
-                out.push_str(&format!(
-                    "{}\n",
-                    format!(
+                writeln!(
+                    out,
+                    "{}",
+                    format_args!(
                         "@@ replace {} line(s) at key {} -> {} line(s) at key {} @@",
                         old_lines.len(),
                         crate::util::key_label(*old_at_key),
@@ -127,7 +138,8 @@ pub fn format_unified_diff(
                         crate::util::key_label(*new_at_key),
                     )
                     .cyan()
-                ));
+                )
+                .unwrap();
                 append_colored_lines(&mut out, "-", old_lines, max_lines_shown);
                 append_colored_lines(&mut out, "+", new_lines, max_lines_shown);
             }
@@ -137,10 +149,12 @@ pub fn format_unified_diff(
     if !diff.findings.is_empty() {
         out.push('\n');
         for finding in &diff.findings {
-            out.push_str(&format!(
-                "{}\n",
-                format!("{} [{}]: {}", finding.level, finding.code, finding.message).yellow()
-            ));
+            writeln!(
+                out,
+                "{}",
+                format_args!("{} [{}]: {}", finding.level, finding.code, finding.message).yellow()
+            )
+            .unwrap();
         }
     }
 
@@ -157,17 +171,19 @@ fn append_colored_lines(
     for line in &lines[..show] {
         let formatted = format!("{prefix} {}", line.text);
         if prefix == "+" {
-            out.push_str(&format!("{}\n", formatted.green()));
+            writeln!(out, "{}", formatted.green()).unwrap();
         } else {
-            out.push_str(&format!("{}\n", formatted.red()));
+            writeln!(out, "{}", formatted.red()).unwrap();
         }
     }
     let remaining = lines.len().saturating_sub(max_lines_shown);
     if remaining > 0 {
-        out.push_str(&format!(
-            "{}\n",
-            format!("{prefix} ... and {remaining} more").dimmed()
-        ));
+        writeln!(
+            out,
+            "{}",
+            format_args!("{prefix} ... and {remaining} more").dimmed()
+        )
+        .unwrap();
     }
 }
 
@@ -175,19 +191,23 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
     let mut out = String::new();
     match edit {
         Edit::Insert { at_key, lines, .. } => {
-            out.push_str(&format!(
+            write!(
+                out,
                 "Insert {} line(s) at key {}",
                 lines.len(),
                 crate::util::key_label(*at_key),
-            ));
+            )
+            .unwrap();
             append_diff_lines(&mut out, "+", lines, max_lines_shown);
         }
         Edit::Delete { at_key, lines, .. } => {
-            out.push_str(&format!(
+            write!(
+                out,
                 "Delete {} line(s) at key {}",
                 lines.len(),
                 crate::util::key_label(*at_key),
-            ));
+            )
+            .unwrap();
             append_diff_lines(&mut out, "-", lines, max_lines_shown);
         }
         Edit::Replace {
@@ -197,13 +217,15 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
             new_lines,
             ..
         } => {
-            out.push_str(&format!(
+            write!(
+                out,
                 "Replace {} line(s) at key {} with {} line(s) at key {}",
                 old_lines.len(),
                 crate::util::key_label(*old_at_key),
                 new_lines.len(),
                 crate::util::key_label(*new_at_key),
-            ));
+            )
+            .unwrap();
             append_diff_lines(&mut out, "-", old_lines, max_lines_shown);
             append_diff_lines(&mut out, "+", new_lines, max_lines_shown);
         }
@@ -214,10 +236,10 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
 fn append_diff_lines(out: &mut String, prefix: &str, lines: &[DiffLine], max_lines_shown: usize) {
     let show = lines.len().min(max_lines_shown);
     for line in &lines[..show] {
-        out.push_str(&format!("\n   {} {}", prefix, line.text));
+        write!(out, "\n   {prefix} {}", line.text).unwrap();
     }
     let remaining = lines.len().saturating_sub(max_lines_shown);
     if remaining > 0 {
-        out.push_str(&format!("\n   {} ... and {} more", prefix, remaining));
+        write!(out, "\n   {prefix} ... and {remaining} more").unwrap();
     }
 }
