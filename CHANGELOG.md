@@ -2,6 +2,9 @@
 
 ## [unreleased]
 
+- replaced O(n²) per-line forward scan in parser block detection with O(n) backward precomputation — parsing large configs no longer degrades quadratically
+- replaced `push_str(&format!(...))` double-allocation pattern in report formatting with `std::fmt::Write` — eliminates an intermediate `String` allocation on every formatted write in both markdown and unified diff output
+- eliminated redundant path cloning in `flush_segment_fallback` — the diff engine now borrows the first path once instead of cloning it twice per fallback flush
 - expanded `ios_like_key_hint` with `ip route` support: `ip route <prefix> <mask> ...` → `ip-route:<prefix>` and `ip route vrf <vrf> <prefix> ...` → `ip-route:<vrf>:<prefix>` — static route diffs now correctly match by destination prefix instead of flagging as ambiguous
 - added `finding_code` module with typed constants (`MISSING_ANCHOR`, `AMBIGUOUS_KEY_MATCH`, `UNKNOWN_UNPARSED_CONSTRUCT`, `DIFF_UNRELIABLE_REGION`) — diagnostic codes are now defined in one place instead of scattered string literals
 - `PlanFinding` now carries optional `level`, `path`, and `span` fields (matching `Finding`), serialized only when present — plan consumers can now pinpoint which config location triggered a diagnostic

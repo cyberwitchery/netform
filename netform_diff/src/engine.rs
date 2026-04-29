@@ -66,23 +66,18 @@ pub(crate) fn diff_views(
                 .flat_map(|segment| segment.lines)
                 .collect::<Vec<_>>();
 
+            let first_path = deleted_lines
+                .first()
+                .or(inserted_lines.first())
+                .map(|line| &line.path);
+            let empty_path = netform_ir::Path(Vec::new());
             let mut fallback = line_diff(
                 &deleted_lines,
                 &inserted_lines,
-                options.policy_for_path(
-                    &deleted_lines
-                        .first()
-                        .map(|line| line.path.clone())
-                        .or_else(|| inserted_lines.first().map(|line| line.path.clone()))
-                        .unwrap_or(netform_ir::Path(Vec::new())),
-                ),
+                options.policy_for_path(first_path.unwrap_or(&empty_path)),
             );
-            if let Some(anchor) = deleted_lines
-                .first()
-                .map(|line| line.path.clone())
-                .or_else(|| inserted_lines.first().map(|line| line.path.clone()))
-            {
-                fallback_contexts.push(anchor);
+            if let Some(path) = first_path {
+                fallback_contexts.push(path.clone());
             }
             edits.append(&mut fallback);
         };

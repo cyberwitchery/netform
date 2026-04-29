@@ -311,11 +311,24 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     );
     let mut parent_stack: Vec<(usize, NodeId)> = Vec::new();
 
-    // Pre-compute block-opening decisions while we still need lookahead.
+    // Pre-compute the indent of the next content line for each position in O(n).
+    // This replaces a per-line forward scan that was O(n²) on large configs.
+    let mut next_content_indent: Vec<Option<usize>> = vec![None; lines.len()];
+    {
+        let mut last_content_indent: Option<usize> = None;
+        for i in (0..lines.len()).rev() {
+            next_content_indent[i] = last_content_indent;
+            if lines[i].trivia == TriviaKind::Content {
+                last_content_indent = Some(lines[i].indent);
+            }
+        }
+    }
+
+    // Pre-compute block-opening decisions using the O(n) lookup table.
     let opens_block: Vec<bool> = (0..lines.len())
         .map(|idx| {
             lines[idx].trivia == TriviaKind::Content
-                && next_content_indent(&lines, idx).is_some_and(|next| next > lines[idx].indent)
+                && next_content_indent[idx].is_some_and(|next| next > lines[idx].indent)
         })
         .collect();
 
@@ -443,13 +456,6 @@ fn collect_lines<D: Dialect>(
     }
 
     out
-}
-
-fn next_content_indent(lines: &[LineCandidate], idx: usize) -> Option<usize> {
-    lines[idx + 1..]
-        .iter()
-        .find(|line| line.trivia == TriviaKind::Content)
-        .map(|line| line.indent)
 }
 
 fn attach_node(doc: &mut Document, parent_stack: &[(usize, NodeId)], id: NodeId) {
