@@ -91,6 +91,14 @@ proptest! {
     }
 
     #[test]
+    fn self_diff_has_no_changes_iosxe(input in ios_like_strategy()) {
+        let dialect = netform_dialect_iosxe::IOSXE_DIALECT;
+        let doc = parse_with_dialect(&input, &dialect);
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        prop_assert!(!diff.has_changes, "IOS-XE self-diff should report no changes");
+    }
+
+    #[test]
     fn self_diff_has_no_changes_fortios(input in fortios_strategy()) {
         let dialect = netform_dialect_fortios::FortiosDialect;
         let doc = parse_with_dialect(&input, &dialect);
