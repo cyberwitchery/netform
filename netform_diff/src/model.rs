@@ -268,26 +268,79 @@ pub enum KeyKind {
     BlockFooter,
 }
 
+impl KeyKind {
+    /// The `Debug` representation as a byte slice, matching what `{:?}` produces.
+    fn as_bytes(self) -> &'static [u8] {
+        match self {
+            Self::Line => b"Line",
+            Self::BlockHeader => b"BlockHeader",
+            Self::BlockFooter => b"BlockFooter",
+        }
+    }
+}
+
+/// Format a `u64` as decimal digits into a stack buffer, returning the slice.
+struct U64Buf {
+    buf: [u8; 20], // u64::MAX = 18446744073709551615 (20 digits)
+    start: usize,
+}
+
+impl U64Buf {
+    fn new(value: u64) -> Self {
+        let mut buf = [0u8; 20];
+        if value == 0 {
+            buf[19] = b'0';
+            return Self { buf, start: 19 };
+        }
+        let mut pos = 20usize;
+        let mut v = value;
+        while v > 0 {
+            pos -= 1;
+            buf[pos] = b'0' + (v % 10) as u8;
+            v /= 10;
+        }
+        Self { buf, start: pos }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        &self.buf[self.start..]
+    }
+}
+
 /// Derive a content key from parent signature, key kind, trivia, and normalized text.
+///
+/// Uses incremental xxh3 hashing to avoid the intermediate `String` allocation
+/// that `format!()` would require.  The byte sequence fed to the hasher is
+/// identical to what the old `format!()` call produced, so hash values are
+/// unchanged.
 pub fn derive_content_key(
     parent_signature: u64,
     kind: KeyKind,
     trivia: TriviaKind,
     normalized_for_key: &str,
 ) -> u64 {
-    let canonical_content = format!(
-        "p={parent_signature}|k={:?}|t={}|n={}",
-        kind,
-        crate::normalize::trivia_tag(trivia),
-        normalized_for_key
-    );
-    xxhash_rust::xxh3::xxh3_64(canonical_content.as_bytes())
+    let mut h = xxhash_rust::xxh3::Xxh3Default::new();
+    h.update(b"p=");
+    h.update(U64Buf::new(parent_signature).as_bytes());
+    h.update(b"|k=");
+    h.update(kind.as_bytes());
+    h.update(b"|t=");
+    h.update(crate::normalize::trivia_tag(trivia).as_bytes());
+    h.update(b"|n=");
+    h.update(normalized_for_key.as_bytes());
+    h.digest()
 }
 
 /// Derive an occurrence key from content key and 1-based ordinal.
+///
+/// Uses incremental xxh3 hashing to avoid the intermediate `String` allocation.
 pub fn derive_occurrence_key(content_key: u64, ordinal: u64) -> u64 {
-    let canonical_occurrence = format!("c={content_key}|o={ordinal}");
-    xxhash_rust::xxh3::xxh3_64(canonical_occurrence.as_bytes())
+    let mut h = xxhash_rust::xxh3::Xxh3Default::new();
+    h.update(b"c=");
+    h.update(U64Buf::new(content_key).as_bytes());
+    h.update(b"|o=");
+    h.update(U64Buf::new(ordinal).as_bytes());
+    h.digest()
 }
 
 #[cfg(test)]
@@ -499,5 +552,101 @@ mod tests {
         let config = OrderPolicyConfig::default();
         assert_eq!(config.default, OrderPolicy::Ordered);
         assert!(config.overrides.is_empty());
+    }
+
+    // --- U64Buf tests ---
+
+    #[test]
+    fn u64buf_zero() {
+        assert_eq!(U64Buf::new(0).as_bytes(), b"0");
+    }
+
+    #[test]
+    fn u64buf_small() {
+        assert_eq!(U64Buf::new(42).as_bytes(), b"42");
+    }
+
+    #[test]
+    fn u64buf_max() {
+        assert_eq!(U64Buf::new(u64::MAX).as_bytes(), b"18446744073709551615");
+    }
+
+    #[test]
+    fn u64buf_matches_display() {
+        for &v in &[0, 1, 9, 10, 99, 100, 999, 12345, u64::MAX] {
+            assert_eq!(
+                std::str::from_utf8(U64Buf::new(v).as_bytes()).unwrap(),
+                v.to_string(),
+            );
+        }
+    }
+
+    // --- Hash stability tests (incremental == one-shot) ---
+
+    /// Reference implementation using the old format!() + xxh3_64() approach.
+    fn derive_content_key_reference(
+        parent_signature: u64,
+        kind: KeyKind,
+        trivia: TriviaKind,
+        normalized_for_key: &str,
+    ) -> u64 {
+        let canonical = format!(
+            "p={parent_signature}|k={:?}|t={}|n={}",
+            kind,
+            crate::normalize::trivia_tag(trivia),
+            normalized_for_key
+        );
+        xxhash_rust::xxh3::xxh3_64(canonical.as_bytes())
+    }
+
+    fn derive_occurrence_key_reference(content_key: u64, ordinal: u64) -> u64 {
+        let canonical = format!("c={content_key}|o={ordinal}");
+        xxhash_rust::xxh3::xxh3_64(canonical.as_bytes())
+    }
+
+    #[test]
+    fn content_key_matches_reference_implementation() {
+        let cases: &[(u64, KeyKind, TriviaKind, &str)] = &[
+            (0, KeyKind::Line, TriviaKind::Content, "permit any"),
+            (
+                12345,
+                KeyKind::BlockHeader,
+                TriviaKind::Blank,
+                "interface Ethernet0",
+            ),
+            (u64::MAX, KeyKind::BlockFooter, TriviaKind::Comment, "!"),
+            (42, KeyKind::Line, TriviaKind::Unknown, ""),
+            (
+                999,
+                KeyKind::Line,
+                TriviaKind::Content,
+                "a line with spaces and special chars: <>!@#$%",
+            ),
+        ];
+        for &(parent, kind, trivia, text) in cases {
+            assert_eq!(
+                derive_content_key(parent, kind, trivia, text),
+                derive_content_key_reference(parent, kind, trivia, text),
+                "mismatch for parent={parent}, kind={kind:?}, trivia={trivia:?}, text={text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn occurrence_key_matches_reference_implementation() {
+        let cases: &[(u64, u64)] = &[
+            (0, 1),
+            (12345, 2),
+            (u64::MAX, u64::MAX),
+            (42, 0),
+            (999_999_999, 100),
+        ];
+        for &(content_key, ordinal) in cases {
+            assert_eq!(
+                derive_occurrence_key(content_key, ordinal),
+                derive_occurrence_key_reference(content_key, ordinal),
+                "mismatch for content_key={content_key}, ordinal={ordinal}"
+            );
+        }
     }
 }
