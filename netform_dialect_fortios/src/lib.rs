@@ -16,7 +16,7 @@
 
 use netform_ir::{
     Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_trivia_with_prefixes,
-    parse_with_dialect, tokenize,
+    parse_ios_like_parts, parse_with_dialect,
 };
 
 /// Dialect implementation for FortiOS configuration text.
@@ -38,7 +38,7 @@ impl Dialect for FortiosDialect {
     }
 
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_fortios_parts(raw)
+        parse_ios_like_parts(raw)
     }
 
     fn key_hint(
@@ -60,18 +60,6 @@ impl Dialect for FortiosDialect {
 /// blank/whitespace-only lines are blank; everything else is content.
 fn classify_fortios_trivia(raw: &str) -> TriviaKind {
     classify_trivia_with_prefixes(raw, &["#"])
-}
-
-/// Tokenize a FortiOS content line.
-///
-/// Uses [`tokenize`] with no punctuation characters — FortiOS uses
-/// whitespace-delimited tokens with quoted strings, similar to IOS-like
-/// dialects.
-fn parse_fortios_parts(raw: &str) -> Option<ParsedLineParts> {
-    let tokens = tokenize(raw, &[]);
-    let head = tokens.first()?.clone();
-    let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
-    Some(ParsedLineParts { head, args })
 }
 
 /// Strip surrounding double-quotes from a token, if present.
@@ -161,7 +149,7 @@ mod tests {
 
     #[test]
     fn fortios_tokenize_config_line() {
-        let parsed = parse_fortios_parts("config system global").expect("should parse");
+        let parsed = parse_ios_like_parts("config system global").expect("should parse");
         assert_eq!(parsed.head, "config");
         assert_eq!(parsed.args, vec!["system", "global"]);
     }
@@ -169,21 +157,21 @@ mod tests {
     #[test]
     fn fortios_tokenize_set_quoted() {
         let parsed =
-            parse_fortios_parts("    set hostname \"My FortiGate\"").expect("should parse");
+            parse_ios_like_parts("    set hostname \"My FortiGate\"").expect("should parse");
         assert_eq!(parsed.head, "set");
         assert_eq!(parsed.args, vec!["hostname", "\"My FortiGate\""]);
     }
 
     #[test]
     fn fortios_tokenize_edit_quoted() {
-        let parsed = parse_fortios_parts("    edit \"all\"").expect("should parse");
+        let parsed = parse_ios_like_parts("    edit \"all\"").expect("should parse");
         assert_eq!(parsed.head, "edit");
         assert_eq!(parsed.args, vec!["\"all\""]);
     }
 
     #[test]
     fn fortios_tokenize_end() {
-        let parsed = parse_fortios_parts("end").expect("should parse");
+        let parsed = parse_ios_like_parts("end").expect("should parse");
         assert_eq!(parsed.head, "end");
         assert!(parsed.args.is_empty());
     }
@@ -191,7 +179,7 @@ mod tests {
     #[test]
     fn fortios_tokenize_set_multivalue() {
         let parsed =
-            parse_fortios_parts("    set subnet 10.0.0.0 255.255.255.0").expect("should parse");
+            parse_ios_like_parts("    set subnet 10.0.0.0 255.255.255.0").expect("should parse");
         assert_eq!(parsed.head, "set");
         assert_eq!(parsed.args, vec!["subnet", "10.0.0.0", "255.255.255.0"]);
     }
@@ -199,7 +187,7 @@ mod tests {
     // -- key hints --
 
     fn hint(line: &str) -> Option<String> {
-        let parsed = parse_fortios_parts(line);
+        let parsed = parse_ios_like_parts(line);
         fortios_key_hint(parsed.as_ref())
     }
 
