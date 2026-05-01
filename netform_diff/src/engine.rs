@@ -1066,6 +1066,132 @@ mod tests {
         }
     }
 
+    // ── order policy behavioral contrasts ──
+    //
+    // Each test runs the same input through all three policies and asserts the
+    // different outcomes side by side.  These complement the per-policy tests
+    // above by showing *when* the policies diverge on identical data.
+
+    #[test]
+    fn same_content_key_different_text_diverges_across_all_three_policies() {
+        // Two lines whose content_key matches (simulating dialect key_hints like
+        // FortiOS `set hostname`) but whose normalized text differs.
+        //
+        // Ordered sees matching content_keys → SES emits Equal → 0 edits.
+        // Unordered hashes normalized text → distinct buckets → Delete + Insert.
+        // KeyedStable buckets by content_key → paired → text differs → Replace.
+        let a = vec![
+            cline("  set hostname old", 10, vec![0, 0]),
+            cline("  set allowaccess ping", 20, vec![0, 1]),
+        ];
+        let b = vec![
+            cline("  set hostname new", 10, vec![0, 0]),
+            cline("  set allowaccess https", 20, vec![0, 1]),
+        ];
+
+        // Ordered: content_keys [10, 20] == [10, 20] → all Equal, no edits.
+        let ordered = line_diff(&a, &b, OrderPolicy::Ordered);
+        assert!(
+            ordered.is_empty(),
+            "Ordered matches by content_key; identical key sequences produce no edits"
+        );
+
+        // Unordered: four distinct text hashes → 2 Delete + 2 Insert.
+        let unordered = line_diff(&a, &b, OrderPolicy::Unordered);
+        assert_eq!(unordered.len(), 4);
+        assert_eq!(
+            unordered
+                .iter()
+                .filter(|e| matches!(e, Edit::Delete { .. }))
+                .count(),
+            2
+        );
+        assert_eq!(
+            unordered
+                .iter()
+                .filter(|e| matches!(e, Edit::Insert { .. }))
+                .count(),
+            2
+        );
+
+        // KeyedStable: two content_key buckets, each with a text mismatch → 2 Replace.
+        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        assert_eq!(keyed.len(), 2);
+        for edit in &keyed {
+            assert!(
+                matches!(edit, Edit::Replace { .. }),
+                "KeyedStable pairs by content_key and detects text change as Replace"
+            );
+        }
+    }
+
+    #[test]
+    fn reorder_plus_value_change_diverges_across_all_three_policies() {
+        // Lines are reordered AND one line's text changes (same content_key).
+        //
+        // Ordered sees key sequence [10, 20] vs [20, 10] → reorder edits.
+        // Unordered ignores order, only sees the text change → Delete + Insert.
+        // KeyedStable ignores order, pairs by key, detects text diff → Replace.
+        let a = vec![
+            cline("  set hostname old", 10, vec![0, 0]),
+            cline("  set allowaccess ping", 20, vec![0, 1]),
+        ];
+        let b = vec![
+            cline("  set allowaccess ping", 20, vec![0, 0]),
+            cline("  set hostname new", 10, vec![0, 1]),
+        ];
+
+        // Ordered: reordering detected — at least one edit.
+        let ordered = line_diff(&a, &b, OrderPolicy::Ordered);
+        assert!(!ordered.is_empty(), "Ordered treats reordering as a change");
+
+        // Unordered: "set allowaccess ping" matches by text hash.
+        // "set hostname old" → Delete, "set hostname new" → Insert.
+        let unordered = line_diff(&a, &b, OrderPolicy::Unordered);
+        assert_eq!(unordered.len(), 2);
+        assert!(
+            unordered.iter().any(|e| matches!(e, Edit::Delete { .. })),
+            "Unordered emits Delete for the removed text"
+        );
+        assert!(
+            unordered.iter().any(|e| matches!(e, Edit::Insert { .. })),
+            "Unordered emits Insert for the new text"
+        );
+
+        // KeyedStable: "set allowaccess ping" matches by content_key 20.
+        // content_key 10 paired, text differs → single Replace.
+        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        assert_eq!(keyed.len(), 1);
+        assert!(
+            matches!(keyed[0], Edit::Replace { .. }),
+            "KeyedStable pairs the changed line by key and emits Replace"
+        );
+    }
+
+    #[test]
+    fn pure_reorder_only_ordered_reports_change() {
+        // Identical content in different order.  Ordered is the only policy
+        // that treats this as a change.
+        let a = vec![
+            cline("  description uplink", 10, vec![0, 0]),
+            cline("  mtu 9000", 20, vec![0, 1]),
+            cline("  no shutdown", 30, vec![0, 2]),
+        ];
+        let b = vec![
+            cline("  no shutdown", 30, vec![0, 0]),
+            cline("  description uplink", 10, vec![0, 1]),
+            cline("  mtu 9000", 20, vec![0, 2]),
+        ];
+
+        let ordered = line_diff(&a, &b, OrderPolicy::Ordered);
+        let unordered = line_diff(&a, &b, OrderPolicy::Unordered);
+        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable);
+
+        assert!(!ordered.is_empty(), "Ordered detects the reorder");
+        assert!(unordered.is_empty(), "Unordered ignores order");
+        assert!(keyed.is_empty(), "KeyedStable ignores order");
+    }
+
     // ── finalize_chunked_edits ──
 
     #[test]

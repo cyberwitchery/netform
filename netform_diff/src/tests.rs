@@ -1,3 +1,4 @@
+use netform_dialect_fortios::parse_fortios;
 use netform_dialect_iosxe::parse_iosxe;
 use netform_ir::{Path, Span, parse_generic};
 
@@ -913,4 +914,162 @@ fn emits_finding_for_ambiguous_extracted_stanza_keys() {
     assert!(diff.findings.iter().any(|f| {
         f.code == "ambiguous_key_match" && f.message.contains("ambiguous extracted key")
     }));
+}
+
+// ── order policy behavioral contrasts (diff_documents level) ──
+//
+// These tests run the same parsed documents through all three policies and
+// assert the different outcomes, documenting when and how the policies diverge.
+
+#[test]
+fn reordered_block_children_only_changed_under_ordered_policy() {
+    // Identical block children in swapped order.  Ordered treats this as
+    // drift; Unordered and KeyedStable do not.
+    let a = parse_generic("interface Ethernet1\n  description uplink\n  mtu 9000\n  no shutdown\n");
+    let b = parse_generic("interface Ethernet1\n  no shutdown\n  description uplink\n  mtu 9000\n");
+
+    let opts = |policy| {
+        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: policy,
+            overrides: Vec::new(),
+        })
+    };
+
+    let ordered = diff_documents(&a, &b, opts(OrderPolicy::Ordered));
+    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered));
+    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable));
+
+    assert!(ordered.has_changes, "Ordered detects reordering as drift");
+    assert!(!ordered.edits.is_empty());
+
+    assert!(!unordered.has_changes, "Unordered ignores child reordering");
+    assert!(unordered.edits.is_empty());
+
+    assert!(!keyed.has_changes, "KeyedStable ignores child reordering");
+    assert!(keyed.edits.is_empty());
+}
+
+#[test]
+fn fortios_set_value_change_keyed_stable_emits_replace_unordered_emits_delete_insert() {
+    // FortiOS `set` commands produce key_hints (e.g. `set:hostname`), which
+    // give lines a stable content_key independent of the actual value.
+    //
+    // When a value changes:
+    //   KeyedStable → pairs by content_key → Replace
+    //   Unordered   → hashes normalized text → different buckets → Delete + Insert
+    let a = parse_fortios("config system global\n    set hostname \"edge-1\"\nend\n");
+    let b = parse_fortios("config system global\n    set hostname \"edge-2\"\nend\n");
+
+    let opts = |policy| {
+        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: policy,
+            overrides: Vec::new(),
+        })
+    };
+
+    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable));
+    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered));
+
+    assert!(keyed.has_changes);
+    assert!(unordered.has_changes);
+
+    // KeyedStable pairs the two `set hostname` lines by their shared
+    // content_key and emits a single Replace.
+    assert!(
+        keyed
+            .edits
+            .iter()
+            .any(|e| matches!(e, Edit::Replace { .. })),
+        "KeyedStable should emit Replace for value change on a keyed line"
+    );
+    assert!(
+        !keyed
+            .edits
+            .iter()
+            .any(|e| matches!(e, Edit::Delete { .. } | Edit::Insert { .. })),
+        "KeyedStable should not emit separate Delete/Insert for a keyed value change"
+    );
+
+    // Unordered sees two distinct text hashes — the old value disappears,
+    // the new one appears.  No pairing, so Delete + Insert, not Replace.
+    assert!(
+        !unordered
+            .edits
+            .iter()
+            .any(|e| matches!(e, Edit::Replace { .. })),
+        "Unordered should not emit Replace (no key-based pairing)"
+    );
+    assert!(
+        unordered
+            .edits
+            .iter()
+            .any(|e| matches!(e, Edit::Delete { .. })),
+        "Unordered should emit Delete for the old text"
+    );
+    assert!(
+        unordered
+            .edits
+            .iter()
+            .any(|e| matches!(e, Edit::Insert { .. })),
+        "Unordered should emit Insert for the new text"
+    );
+}
+
+#[test]
+fn fortios_reorder_plus_value_change_three_way_contrast() {
+    // Two `set` fields under the same block: reordered AND one value changes.
+    //
+    // Ordered  → sees both the reorder and the value change.
+    // Unordered → ignores reorder; sees value change as Delete + Insert.
+    // KeyedStable → ignores reorder; sees value change as Replace.
+    let a = parse_fortios(
+        "config system global\n    set hostname \"edge-1\"\n    set timezone \"UTC\"\nend\n",
+    );
+    let b = parse_fortios(
+        "config system global\n    set timezone \"UTC\"\n    set hostname \"edge-2\"\nend\n",
+    );
+
+    let opts = |policy| {
+        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: policy,
+            overrides: Vec::new(),
+        })
+    };
+
+    let ordered = diff_documents(&a, &b, opts(OrderPolicy::Ordered));
+    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered));
+    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable));
+
+    // All three detect changes (the hostname value changed).
+    assert!(ordered.has_changes);
+    assert!(unordered.has_changes);
+    assert!(keyed.has_changes);
+
+    // Ordered produces more edits because it also reports the reordering.
+    assert!(
+        ordered.edits.len() > keyed.edits.len(),
+        "Ordered reports reorder edits that KeyedStable suppresses"
+    );
+
+    // Unordered emits Delete + Insert for the hostname change.
+    assert!(
+        unordered
+            .edits
+            .iter()
+            .any(|e| matches!(e, Edit::Delete { .. })),
+    );
+    assert!(
+        unordered
+            .edits
+            .iter()
+            .any(|e| matches!(e, Edit::Insert { .. })),
+    );
+
+    // KeyedStable emits a single Replace for the hostname change.
+    assert_eq!(
+        keyed.edits.len(),
+        1,
+        "KeyedStable should emit exactly one edit for the value change"
+    );
+    assert!(matches!(keyed.edits[0], Edit::Replace { .. }));
 }
