@@ -466,6 +466,61 @@ fn config_diff_fortios_unified_output() {
 }
 
 #[test]
+fn config_diff_format_markdown_produces_markdown_report() {
+    let left = temp_file_path("left-md");
+    let right = temp_file_path("right-md");
+    fs::write(&left, "hostname old\n").expect("write left");
+    fs::write(&right, "hostname new\n").expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--format")
+        .arg("markdown")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --format markdown");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("# Config Diff Report"),
+        "should contain markdown heading"
+    );
+    assert!(stdout.contains("## Stats"), "should contain stats section");
+    assert!(stdout.contains("## Edits"), "should contain edits section");
+}
+
+#[test]
+fn config_diff_format_unified_is_default() {
+    let left = temp_file_path("left-fmt-default");
+    let right = temp_file_path("right-fmt-default");
+    fs::write(&left, "hostname old\n").expect("write left");
+    fs::write(&right, "hostname new\n").expect("write right");
+
+    let explicit = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--format")
+        .arg("unified")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --format unified");
+
+    let implicit = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff (default format)");
+
+    assert_eq!(
+        explicit.stdout, implicit.stdout,
+        "--format unified should produce the same output as the default"
+    );
+}
+
+#[test]
 fn replay_fixtures_cli_runs_successfully() {
     let output = Command::new(env!("CARGO_BIN_EXE_netform-replay-fixtures"))
         .output()

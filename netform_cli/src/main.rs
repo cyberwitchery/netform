@@ -11,7 +11,7 @@ use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
 use netform_diff::{
     DEFAULT_CONTEXT_LINES, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
-    build_plan, diff_documents, format_unified_diff,
+    build_plan, diff_documents, format_markdown_report, format_unified_diff,
 };
 use netform_ir::{Document, parse_generic};
 
@@ -49,8 +49,12 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = CliDialect::Generic)]
     dialect: CliDialect,
 
+    /// Output format for the human-readable report.
+    #[arg(long, value_enum, default_value_t = CliFormat::Unified)]
+    format: CliFormat,
+
     /// Maximum number of lines shown per side of each edit before
-    /// truncating with "and N more".  Applies to the unified-diff
+    /// truncating with "and N more".  Applies to unified and markdown
     /// output (ignored with --json / --plan-json).
     #[arg(long, default_value_t = DEFAULT_CONTEXT_LINES)]
     context_lines: usize,
@@ -69,6 +73,12 @@ struct Cli {
     /// never suppressed.
     #[arg(long)]
     no_exit_code: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliFormat {
+    Unified,
+    Markdown,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -164,15 +174,17 @@ fn main() {
             }
         }
     } else {
-        print!(
-            "{}",
-            format_unified_diff(
-                &diff,
-                &cli.file_a.display().to_string(),
-                &cli.file_b.display().to_string(),
-                cli.context_lines,
-            )
-        );
+        let left_label = cli.file_a.display().to_string();
+        let right_label = cli.file_b.display().to_string();
+        let output = match cli.format {
+            CliFormat::Unified => {
+                format_unified_diff(&diff, &left_label, &right_label, cli.context_lines)
+            }
+            CliFormat::Markdown => {
+                format_markdown_report(&diff, &left_label, &right_label, cli.context_lines)
+            }
+        };
+        print!("{output}");
     }
 
     if !cli.no_exit_code && diff.has_changes {
