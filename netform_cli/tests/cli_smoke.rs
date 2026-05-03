@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_file_path(prefix: &str) -> PathBuf {
@@ -517,6 +517,148 @@ fn config_diff_format_unified_is_default() {
     assert_eq!(
         explicit.stdout, implicit.stdout,
         "--format unified should produce the same output as the default"
+    );
+}
+
+#[test]
+fn config_diff_reads_file_a_from_stdin() {
+    let right = temp_file_path("right-stdin-a");
+    fs::write(&right, "hostname new\n").expect("write right");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--no-color")
+        .arg("-")
+        .arg(&right)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn config-diff");
+
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"hostname old\n")
+        .expect("write stdin");
+
+    let output = child.wait_with_output().expect("wait for config-diff");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("<stdin>"),
+        "header should show <stdin> for the piped input"
+    );
+    assert!(
+        stdout.contains("- hostname old"),
+        "should contain deleted line"
+    );
+    assert!(
+        stdout.contains("+ hostname new"),
+        "should contain inserted line"
+    );
+}
+
+#[test]
+fn config_diff_reads_file_b_from_stdin() {
+    let left = temp_file_path("left-stdin-b");
+    fs::write(&left, "hostname old\n").expect("write left");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--no-color")
+        .arg(&left)
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn config-diff");
+
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"hostname new\n")
+        .expect("write stdin");
+
+    let output = child.wait_with_output().expect("wait for config-diff");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("<stdin>"),
+        "header should show <stdin> for the piped input"
+    );
+    assert!(
+        stdout.contains("- hostname old"),
+        "should contain deleted line"
+    );
+    assert!(
+        stdout.contains("+ hostname new"),
+        "should contain inserted line"
+    );
+}
+
+#[test]
+fn config_diff_stdin_with_json_output() {
+    let right = temp_file_path("right-stdin-json");
+    fs::write(&right, "hostname new\n").expect("write right");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg("-")
+        .arg(&right)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn config-diff");
+
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"hostname old\n")
+        .expect("write stdin");
+
+    let output = child.wait_with_output().expect("wait for config-diff");
+    assert!(output.status.success());
+    let diff_json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json from stdin input");
+    assert_eq!(diff_json["has_changes"], true);
+}
+
+#[test]
+fn config_diff_both_stdin_yields_no_changes() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--json")
+        .arg("-")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn config-diff");
+
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"hostname router\n")
+        .expect("write stdin");
+
+    let output = child.wait_with_output().expect("wait for config-diff");
+    assert!(output.status.success(), "identical stdin → exit 0");
+    let diff_json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert_eq!(
+        diff_json["has_changes"], false,
+        "both args are `-` → same content, no changes"
     );
 }
 
