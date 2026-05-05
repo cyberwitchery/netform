@@ -1,6 +1,6 @@
 use std::fs;
-use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::io::{self, IsTerminal, Read as _};
+use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::{Parser, ValueEnum};
@@ -101,19 +101,16 @@ enum CliDialect {
 fn main() {
     let cli = Cli::parse();
 
-    let a_text = match fs::read_to_string(&cli.file_a) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("config-diff: {}: {e}", cli.file_a.display());
-            process::exit(2);
-        }
-    };
-    let b_text = match fs::read_to_string(&cli.file_b) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("config-diff: {}: {e}", cli.file_b.display());
-            process::exit(2);
-        }
+    let is_a_stdin = cli.file_a.as_os_str() == "-";
+    let is_b_stdin = cli.file_b.as_os_str() == "-";
+
+    let (a_text, a_label, b_text, b_label) = if is_a_stdin && is_b_stdin {
+        let (text, label) = read_input(&cli.file_a);
+        (text.clone(), label.clone(), text, label)
+    } else {
+        let (a_text, a_label) = read_input(&cli.file_a);
+        let (b_text, b_label) = read_input(&cli.file_b);
+        (a_text, a_label, b_text, b_label)
     };
 
     let a_doc = parse_config(&a_text, cli.dialect);
@@ -174,14 +171,10 @@ fn main() {
             }
         }
     } else {
-        let left_label = cli.file_a.display().to_string();
-        let right_label = cli.file_b.display().to_string();
         let output = match cli.format {
-            CliFormat::Unified => {
-                format_unified_diff(&diff, &left_label, &right_label, cli.context_lines)
-            }
+            CliFormat::Unified => format_unified_diff(&diff, &a_label, &b_label, cli.context_lines),
             CliFormat::Markdown => {
-                format_markdown_report(&diff, &left_label, &right_label, cli.context_lines)
+                format_markdown_report(&diff, &a_label, &b_label, cli.context_lines)
             }
         };
         print!("{output}");
@@ -189,6 +182,27 @@ fn main() {
 
     if !cli.no_exit_code && diff.has_changes {
         process::exit(1);
+    }
+}
+
+fn read_input(path: &Path) -> (String, String) {
+    if path.as_os_str() == "-" {
+        let mut buf = String::new();
+        match io::stdin().read_to_string(&mut buf) {
+            Ok(_) => (buf, "<stdin>".to_string()),
+            Err(e) => {
+                eprintln!("config-diff: <stdin>: {e}");
+                process::exit(2);
+            }
+        }
+    } else {
+        match fs::read_to_string(path) {
+            Ok(s) => (s, path.display().to_string()),
+            Err(e) => {
+                eprintln!("config-diff: {}: {e}", path.display());
+                process::exit(2);
+            }
+        }
     }
 }
 

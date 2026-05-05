@@ -3,6 +3,7 @@
 ## [unreleased]
 
 - added `--format` CLI flag with `unified` (default) and `markdown` variants — the existing `format_markdown_report` output is now reachable from the CLI via `--format markdown`
+- `config-diff` now accepts `-` as a filename to read from stdin — either position (or both) can be `-`, enabling piped workflows like `fetch-config | config-diff - running.cfg`
 - replaced O(n²) per-line forward scan in parser block detection with O(n) backward precomputation — parsing large configs no longer degrades quadratically
 - replaced `push_str(&format!(...))` double-allocation pattern in report formatting with `std::fmt::Write` — eliminates an intermediate `String` allocation on every formatted write in both markdown and unified diff output
 - eliminated redundant path cloning in `flush_segment_fallback` — the diff engine now borrows the first path once instead of cloning it twice per fallback flush
