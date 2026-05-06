@@ -83,7 +83,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_ir --no-verify 2>&1); rc=$?
+          out=$(cargo publish -p netform_ir --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
@@ -91,7 +91,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_dialect_iosxe --no-verify 2>&1); rc=$?
+          out=$(cargo publish -p netform_dialect_iosxe --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
@@ -99,7 +99,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_dialect_eos --no-verify 2>&1); rc=$?
+          out=$(cargo publish -p netform_dialect_eos --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
@@ -107,7 +107,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_dialect_junos --no-verify 2>&1); rc=$?
+          out=$(cargo publish -p netform_dialect_junos --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
@@ -115,7 +115,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_dialect_nxos --no-verify 2>&1); rc=$?
+          out=$(cargo publish -p netform_dialect_nxos --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
@@ -123,7 +123,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_dialect_fortios --no-verify 2>&1); rc=$?
+          out=$(cargo publish -p netform_dialect_fortios --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
@@ -131,7 +131,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_diff --no-verify 2>&1); rc=$?
+          out=$(cargo publish -p netform_diff --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
@@ -139,6 +139,6 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_cli --no-verify 2>&1); rc=$?
+          out=$(cargo publish -p netform_cli --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
