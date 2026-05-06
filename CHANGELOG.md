@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+## [0.4.0] - 2026-05-06
+
 - added `--format` CLI flag with `unified` (default) and `markdown` variants — the existing `format_markdown_report` output is now reachable from the CLI via `--format markdown`
 - `config-diff` now accepts `-` as a filename to read from stdin — either position (or both) can be `-`, enabling piped workflows like `fetch-config | config-diff - running.cfg`
 - replaced O(n²) per-line forward scan in parser block detection with O(n) backward precomputation — parsing large configs no longer degrades quadratically
