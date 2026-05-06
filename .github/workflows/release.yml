@@ -77,32 +77,68 @@ jobs:
           set -euo pipefail
           test -z "$(git status --porcelain)"
 
+      # Each step tolerates "already uploaded" so a re-tagged release can
+      # complete the publishes that didn't make it on a previous run.
       - name: publish netform_ir
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p netform_ir --no-verify
+        run: |
+          out=$(cargo publish -p netform_ir --no-verify 2>&1); rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
       - name: publish netform_dialect_iosxe
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p netform_dialect_iosxe --no-verify
+        run: |
+          out=$(cargo publish -p netform_dialect_iosxe --no-verify 2>&1); rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
       - name: publish netform_dialect_eos
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p netform_dialect_eos --no-verify
+        run: |
+          out=$(cargo publish -p netform_dialect_eos --no-verify 2>&1); rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
       - name: publish netform_dialect_junos
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p netform_dialect_junos --no-verify
+        run: |
+          out=$(cargo publish -p netform_dialect_junos --no-verify 2>&1); rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+
+      - name: publish netform_dialect_nxos
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          out=$(cargo publish -p netform_dialect_nxos --no-verify 2>&1); rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+
+      - name: publish netform_dialect_fortios
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          out=$(cargo publish -p netform_dialect_fortios --no-verify 2>&1); rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
       - name: publish netform_diff
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p netform_diff --no-verify
+        run: |
+          out=$(cargo publish -p netform_diff --no-verify 2>&1); rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
 
       - name: publish netform_cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p netform_cli --no-verify
+        run: |
+          out=$(cargo publish -p netform_cli --no-verify 2>&1); rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
