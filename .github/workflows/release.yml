@@ -85,7 +85,7 @@ jobs:
         run: |
           out=$(cargo publish -p netform_ir --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 
       - name: publish netform_dialect_iosxe
         env:
@@ -93,7 +93,7 @@ jobs:
         run: |
           out=$(cargo publish -p netform_dialect_iosxe --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 
       - name: publish netform_dialect_eos
         env:
@@ -101,7 +101,7 @@ jobs:
         run: |
           out=$(cargo publish -p netform_dialect_eos --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 
       - name: publish netform_dialect_junos
         env:
@@ -109,7 +109,7 @@ jobs:
         run: |
           out=$(cargo publish -p netform_dialect_junos --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 
       - name: publish netform_dialect_nxos
         env:
@@ -117,7 +117,7 @@ jobs:
         run: |
           out=$(cargo publish -p netform_dialect_nxos --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 
       - name: publish netform_dialect_fortios
         env:
@@ -125,7 +125,7 @@ jobs:
         run: |
           out=$(cargo publish -p netform_dialect_fortios --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 
       - name: publish netform_diff
         env:
@@ -133,7 +133,7 @@ jobs:
         run: |
           out=$(cargo publish -p netform_diff --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 
       - name: publish netform_cli
         env:
@@ -141,4 +141,4 @@ jobs:
         run: |
           out=$(cargo publish -p netform_cli --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -q "already uploaded"
+          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
