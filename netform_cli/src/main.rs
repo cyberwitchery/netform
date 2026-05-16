@@ -114,8 +114,23 @@ fn main() {
         (a_text, a_label, b_text, b_label)
     };
 
-    let a_doc = parse_config(&a_text, cli.dialect);
-    let b_doc = parse_config(&b_text, cli.dialect);
+    let resolved_dialect = match cli.dialect {
+        CliDialect::Auto => {
+            let a_detected = detect_dialect(&a_text);
+            let b_detected = detect_dialect(&b_text);
+            if a_detected == b_detected {
+                a_detected
+            } else {
+                // Disagreement: fall back to Generic rather than risk
+                // parsing two files with different grammars.
+                CliDialect::Generic
+            }
+        }
+        other => other,
+    };
+
+    let a_doc = parse_config(&a_text, resolved_dialect);
+    let b_doc = parse_config(&b_text, resolved_dialect);
 
     let mut steps = Vec::new();
     if cli.ignore_comments {
@@ -293,15 +308,16 @@ fn detect_dialect(input: &str) -> CliDialect {
         // Slot/port interfaces: Ethernet1/1, port-channel1, etc.
         if line.starts_with("interface ") {
             let iface = line.trim_start_matches("interface ");
-            if iface.contains('/') {
-                // Slot/port notation → strong NX-OS signal.
+            if iface.starts_with("Ethernet") && iface.contains('/') {
+                // NX-OS uses plain Ethernet with slot/port (Ethernet1/1).
+                // IOS XE uses GigabitEthernet, TenGigabitEthernet etc. with slashes.
                 nxos += 3;
             } else if iface.starts_with("Ethernet") || iface.starts_with("Management") {
                 // No slot → could be EOS.
                 eos += 2;
             }
         }
-        if line.starts_with("vpc domain ") || line.starts_with("vpc ") {
+        if line.starts_with("vpc ") {
             nxos += 3;
         }
         if line.starts_with("role name ") {
@@ -502,7 +518,7 @@ ip access-list ACL-EDGE-IN
     #[test]
     fn detect_iosxe() {
         let input = "\
-interface Ethernet1
+interface GigabitEthernet0/0/0
   description uplink-core-a
   mtu 9216
   ip address 192.0.2.2 255.255.255.252
