@@ -663,6 +663,271 @@ fn config_diff_both_stdin_yields_no_changes() {
 }
 
 #[test]
+fn config_diff_auto_dialect_detects_junos() {
+    let left = temp_file_path("left-auto-junos");
+    let right = temp_file_path("right-auto-junos");
+    fs::write(
+        &left,
+        "interfaces {\n    ge-0/0/0 {\n        description \"a\";\n    }\n}\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "interfaces {\n    ge-0/0/0 {\n        description \"b\";\n    }\n}\n",
+    )
+    .expect("write right");
+
+    // Without --dialect (defaults to auto), should behave like --dialect junos.
+    let auto_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff (auto)");
+
+    let explicit_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("junos")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect junos");
+
+    assert!(auto_output.status.success());
+    assert_eq!(
+        auto_output.stdout, explicit_output.stdout,
+        "auto-detected dialect should produce same output as explicit --dialect junos"
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_detects_fortios() {
+    let left = temp_file_path("left-auto-fortios");
+    let right = temp_file_path("right-auto-fortios");
+    fs::write(
+        &left,
+        "config system global\n    set hostname \"FGT\"\nend\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "config system global\n    set hostname \"FGT\"\n    set timezone 04\nend\n",
+    )
+    .expect("write right");
+
+    let auto_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff (auto)");
+
+    let explicit_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("fortios")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect fortios");
+
+    assert!(auto_output.status.success());
+    assert_eq!(
+        auto_output.stdout, explicit_output.stdout,
+        "auto-detected dialect should produce same output as explicit --dialect fortios"
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_detects_nxos() {
+    let left = temp_file_path("left-auto-nxos");
+    let right = temp_file_path("right-auto-nxos");
+    fs::write(
+        &left,
+        "feature ospf\ninterface Ethernet1/1\n  description old-uplink\n  no shutdown\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "feature ospf\ninterface Ethernet1/1\n  description new-uplink\n  no shutdown\n",
+    )
+    .expect("write right");
+
+    let auto_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff (auto)");
+
+    let explicit_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("nxos")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect nxos");
+
+    assert!(auto_output.status.success());
+    assert_eq!(
+        auto_output.stdout, explicit_output.stdout,
+        "auto-detected dialect should produce same output as explicit --dialect nxos"
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_detects_eos() {
+    let left = temp_file_path("left-auto-eos");
+    let right = temp_file_path("right-auto-eos");
+    fs::write(
+        &left,
+        "hostname leaf-01\ninterface Ethernet1\n   description old-uplink\n   mtu 9214\n   ip address 192.0.2.2/31\n   no shutdown\nip access-list ACL-EDGE-IN\n   10 permit tcp 10.10.1.0/24 any eq https\n   20 permit tcp 10.10.1.0/24 any eq ssh\n   90 deny ip any any log\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "hostname leaf-01\ninterface Ethernet1\n   description new-uplink\n   mtu 9214\n   ip address 192.0.2.2/31\n   no shutdown\nip access-list ACL-EDGE-IN\n   10 permit tcp 10.10.1.0/24 any eq https\n   20 permit tcp 10.10.1.0/24 any eq ssh\n   90 deny ip any any log\n",
+    )
+    .expect("write right");
+
+    let auto_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff (auto)");
+
+    let explicit_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("eos")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect eos");
+
+    assert!(auto_output.status.success());
+    assert_eq!(
+        auto_output.stdout, explicit_output.stdout,
+        "auto-detected dialect should produce same output as explicit --dialect eos"
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_detects_iosxe() {
+    let left = temp_file_path("left-auto-iosxe");
+    let right = temp_file_path("right-auto-iosxe");
+    fs::write(
+        &left,
+        "hostname rtr-01\ninterface GigabitEthernet0/0/0\n  description old-uplink\n  ip address 192.0.2.2 255.255.255.252\n  no shutdown\nrouter bgp 65000\n  address-family ipv4 unicast\n    network 10.10.1.0 mask 255.255.255.0\nip access-list extended ACL-EDGE-IN\n  permit tcp 10.10.1.0 0.0.0.255 any eq 443\n  deny ip any any log\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "hostname rtr-01\ninterface GigabitEthernet0/0/0\n  description new-uplink\n  ip address 192.0.2.2 255.255.255.252\n  no shutdown\nrouter bgp 65000\n  address-family ipv4 unicast\n    network 10.10.1.0 mask 255.255.255.0\nip access-list extended ACL-EDGE-IN\n  permit tcp 10.10.1.0 0.0.0.255 any eq 443\n  deny ip any any log\n",
+    )
+    .expect("write right");
+
+    let auto_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff (auto)");
+
+    let explicit_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("iosxe")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect iosxe");
+
+    assert!(auto_output.status.success());
+    assert_eq!(
+        auto_output.stdout, explicit_output.stdout,
+        "auto-detected dialect should produce same output as explicit --dialect iosxe"
+    );
+}
+
+#[test]
+fn config_diff_explicit_dialect_overrides_auto() {
+    // Feed Junos content but force --dialect generic — the explicit flag wins.
+    let left = temp_file_path("left-override");
+    let right = temp_file_path("right-override");
+    fs::write(
+        &left,
+        "interfaces {\n    ge-0/0/0 {\n        description \"a\";\n    }\n}\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "interfaces {\n    ge-0/0/0 {\n        description \"b\";\n    }\n}\n",
+    )
+    .expect("write right");
+
+    let generic_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("generic")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect generic");
+
+    let auto_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff (auto)");
+
+    assert!(generic_output.status.success());
+    assert!(auto_output.status.success());
+    // Generic and Junos parse differently, so outputs should differ.
+    assert_ne!(
+        generic_output.stdout, auto_output.stdout,
+        "explicit --dialect generic should differ from auto-detected junos"
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_accepts_value() {
+    // Verify the CLI accepts `--dialect auto` explicitly.
+    let path = temp_file_path("auto-value");
+    fs::write(&path, "hostname router\n").expect("write file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("auto")
+        .arg(&path)
+        .arg(&path)
+        .output()
+        .expect("run config-diff --dialect auto");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "--dialect auto should be accepted and produce exit 0 for identical files"
+    );
+}
+
+#[test]
 fn replay_fixtures_cli_runs_successfully() {
     let output = Command::new(env!("CARGO_BIN_EXE_netform-replay-fixtures"))
         .output()
