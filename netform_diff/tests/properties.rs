@@ -1,4 +1,7 @@
-use netform_diff::{NormalizationStep, NormalizeOptions, build_comparison_view, diff_documents};
+use netform_diff::{
+    NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig, build_comparison_view,
+    diff_documents,
+};
 use netform_ir::{parse_generic, parse_with_dialect};
 use proptest::prelude::*;
 
@@ -535,4 +538,264 @@ ntp peer 172.16.0.1
     assert_ne!(feature_ospf, feature_vpc);
     assert_ne!(ntp_server, ntp_peer);
     assert_ne!(feature_ospf, ntp_server);
+}
+
+// ── mutation-pair strategies for diff-pair property tests ──
+
+/// Pool of flat config lines used as building blocks for mutation strategies.
+fn flat_line_pool() -> Vec<&'static str> {
+    vec![
+        "hostname router1",
+        "ip route 0.0.0.0/0 10.0.0.1",
+        "logging buffered 4096",
+        "no ip domain-lookup",
+        "service timestamps",
+        "ip name-server 8.8.8.8",
+        "ntp server 10.0.0.1",
+        "snmp-server community public RO",
+    ]
+}
+
+/// Strategy: (original, mutated) pair where `mutated` has one extra line inserted.
+fn insert_mutation_pair() -> impl Strategy<Value = (String, String)> {
+    let extra = prop::string::string_regex("[a-z][a-z0-9 -]{1,30}").expect("valid regex");
+    (
+        prop::sample::subsequence(flat_line_pool(), 3..=6),
+        extra,
+        any::<usize>(),
+    )
+        .prop_map(|(base, new_line, raw_idx)| {
+            let original = base.join("\n");
+            let mut lines: Vec<String> = base.into_iter().map(String::from).collect();
+            let pos = raw_idx % (lines.len() + 1);
+            lines.insert(pos, new_line);
+            (original, lines.join("\n"))
+        })
+}
+
+/// Strategy: (original, mutated) pair where `mutated` has one line removed.
+fn delete_mutation_pair() -> impl Strategy<Value = (String, String)> {
+    (
+        prop::sample::subsequence(flat_line_pool(), 4..=7),
+        any::<usize>(),
+    )
+        .prop_map(|(base, raw_idx)| {
+            let original = base.join("\n");
+            let mut lines: Vec<String> = base.into_iter().map(String::from).collect();
+            let pos = raw_idx % lines.len();
+            lines.remove(pos);
+            (original, lines.join("\n"))
+        })
+}
+
+/// Strategy: (original, mutated) pair where lines are reordered via Fisher-Yates shuffle.
+fn reorder_mutation_pair() -> impl Strategy<Value = (String, String)> {
+    (
+        prop::sample::subsequence(flat_line_pool(), 3..=7),
+        prop::collection::vec(any::<usize>(), 7),
+    )
+        .prop_map(|(base, shuffle)| {
+            let original = base.join("\n");
+            let mut reordered = base.clone();
+            for i in 0..reordered.len() {
+                if let Some(&s) = shuffle.get(i) {
+                    let j = s % reordered.len();
+                    reordered.swap(i, j);
+                }
+            }
+            (original, reordered.join("\n"))
+        })
+}
+
+/// Strategy: pair of block configs where children are reordered but the header is unchanged.
+fn block_child_reorder_pair() -> impl Strategy<Value = (String, String)> {
+    let children = vec![
+        "  description uplink",
+        "  mtu 9000",
+        "  no shutdown",
+        "  ip address 10.0.0.1 255.255.255.0",
+        "  speed auto",
+        "  duplex full",
+    ];
+    (
+        prop::sample::select(vec![
+            "interface Ethernet1",
+            "interface Ethernet2",
+            "interface Loopback0",
+        ]),
+        prop::sample::subsequence(children, 3..=5),
+        prop::collection::vec(any::<usize>(), 5),
+    )
+        .prop_map(|(hdr, kids, shuffle)| {
+            let mut orig = vec![hdr.to_string()];
+            orig.extend(kids.iter().map(|s| s.to_string()));
+
+            let mut reordered = kids.clone();
+            for i in 0..reordered.len() {
+                if let Some(&s) = shuffle.get(i) {
+                    let j = s % reordered.len();
+                    reordered.swap(i, j);
+                }
+            }
+            let mut mutated = vec![hdr.to_string()];
+            mutated.extend(reordered.iter().map(|s| s.to_string()));
+
+            (orig.join("\n"), mutated.join("\n"))
+        })
+}
+
+// ── diff-pair property tests ──
+
+proptest! {
+    // -- diff symmetry --
+
+    #[test]
+    fn diff_pair_has_changes_symmetric(a in text_strategy(), b in text_strategy()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let fwd = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let rev = diff_documents(&doc_b, &doc_a, NormalizeOptions::default());
+        prop_assert_eq!(
+            fwd.has_changes, rev.has_changes,
+            "has_changes must be symmetric"
+        );
+    }
+
+    #[test]
+    fn diff_pair_insert_symmetry((a, b) in insert_mutation_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let fwd = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let rev = diff_documents(&doc_b, &doc_a, NormalizeOptions::default());
+        prop_assert_eq!(fwd.stats.inserts, rev.stats.deletes,
+            "inserts(a→b) should equal deletes(b→a)");
+        prop_assert_eq!(fwd.stats.deletes, rev.stats.inserts,
+            "deletes(a→b) should equal inserts(b→a)");
+        prop_assert_eq!(fwd.stats.replaces, rev.stats.replaces,
+            "replaces should be symmetric");
+    }
+
+    #[test]
+    fn diff_pair_delete_symmetry((a, b) in delete_mutation_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let fwd = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let rev = diff_documents(&doc_b, &doc_a, NormalizeOptions::default());
+        prop_assert_eq!(fwd.stats.inserts, rev.stats.deletes,
+            "inserts(a→b) should equal deletes(b→a)");
+        prop_assert_eq!(fwd.stats.deletes, rev.stats.inserts,
+            "deletes(a→b) should equal inserts(b→a)");
+        prop_assert_eq!(fwd.stats.replaces, rev.stats.replaces,
+            "replaces should be symmetric");
+    }
+
+    /// Reordering can cause the Myers SES to match different subsequences in
+    /// each direction, so edit-operation counts may differ.  The total number
+    /// of changed *lines* is still symmetric because LCS length is direction-
+    /// independent: lines_added(fwd) == lines_removed(rev) and vice-versa.
+    #[test]
+    fn diff_pair_reorder_symmetry((a, b) in reorder_mutation_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let fwd = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let rev = diff_documents(&doc_b, &doc_a, NormalizeOptions::default());
+        let fwd_added = fwd.stats.inserted_lines + fwd.stats.replaced_new_lines;
+        let fwd_removed = fwd.stats.deleted_lines + fwd.stats.replaced_old_lines;
+        let rev_added = rev.stats.inserted_lines + rev.stats.replaced_new_lines;
+        let rev_removed = rev.stats.deleted_lines + rev.stats.replaced_old_lines;
+        prop_assert_eq!(fwd_added, rev_removed,
+            "lines added in a→b ({}) should equal lines removed in b→a ({})",
+            fwd_added, rev_removed);
+        prop_assert_eq!(fwd_removed, rev_added,
+            "lines removed in a→b ({}) should equal lines added in b→a ({})",
+            fwd_removed, rev_added);
+    }
+
+    // -- stats consistency --
+
+    #[test]
+    fn stats_consistent_with_has_changes(a in text_strategy(), b in text_strategy()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let diff = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let total_edits = diff.stats.inserts + diff.stats.deletes + diff.stats.replaces;
+        prop_assert_eq!(
+            diff.has_changes,
+            total_edits > 0,
+            "has_changes={} but inserts={} deletes={} replaces={}",
+            diff.has_changes, diff.stats.inserts, diff.stats.deletes, diff.stats.replaces
+        );
+    }
+
+    #[test]
+    fn insert_mutation_produces_changes((a, b) in insert_mutation_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let diff = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        prop_assert!(diff.has_changes, "inserting a line must produce changes");
+    }
+
+    #[test]
+    fn delete_mutation_produces_changes((a, b) in delete_mutation_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let diff = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        prop_assert!(diff.has_changes, "deleting a line must produce changes");
+    }
+
+    // -- OrderPolicy::Unordered invariant --
+
+    #[test]
+    fn unordered_reorder_no_structural_changes((a, b) in block_child_reorder_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let opts = NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: OrderPolicy::Unordered,
+            overrides: vec![],
+        });
+        let diff = diff_documents(&doc_a, &doc_b, opts);
+        prop_assert!(
+            !diff.has_changes,
+            "reordering block children under Unordered policy should produce no changes, \
+             got {} edits (inserts={}, deletes={}, replaces={})",
+            diff.edits.len(),
+            diff.stats.inserts,
+            diff.stats.deletes,
+            diff.stats.replaces
+        );
+    }
+
+    // -- comparison view completeness --
+
+    #[test]
+    fn comparison_view_completeness(input in text_strategy()) {
+        let doc = parse_generic(&input);
+        let view = build_comparison_view(&doc, &NormalizeOptions::default());
+
+        // Derive expected lines from the document's lossless render.
+        let rendered = doc.render();
+        let expected: Vec<&str> = if rendered.is_empty() {
+            vec![]
+        } else {
+            let mut lines: Vec<&str> = rendered.split('\n').collect();
+            // A trailing newline produces a spurious empty element that
+            // does not correspond to a document node.
+            if rendered.ends_with('\n') && lines.last() == Some(&"") {
+                lines.pop();
+            }
+            lines
+        };
+
+        let actual: Vec<&str> = view.lines.iter().map(|l| l.original.as_str()).collect();
+        prop_assert_eq!(
+            actual.len(),
+            expected.len(),
+            "view has {} lines but document has {}",
+            actual.len(),
+            expected.len()
+        );
+        for (i, (got, want)) in actual.iter().zip(expected.iter()).enumerate() {
+            prop_assert_eq!(got, want, "line {} differs", i);
+        }
+    }
 }
