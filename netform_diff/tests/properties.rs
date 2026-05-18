@@ -1,4 +1,7 @@
-use netform_diff::{NormalizationStep, NormalizeOptions, build_comparison_view, diff_documents};
+use netform_diff::{
+    NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig, build_comparison_view,
+    diff_documents,
+};
 use netform_ir::{parse_generic, parse_with_dialect};
 use proptest::prelude::*;
 
@@ -535,4 +538,255 @@ ntp peer 172.16.0.1
     assert_ne!(feature_ospf, feature_vpc);
     assert_ne!(ntp_server, ntp_peer);
     assert_ne!(feature_ospf, ntp_server);
+}
+
+// ── Mutation strategies for diff-pair property testing ──
+
+/// Generate a pair of documents related by inserting a random line.
+fn insert_mutation_pair() -> impl Strategy<Value = (String, String)> {
+    prop::collection::vec(
+        prop::string::string_regex("[a-z][a-z0-9 ]{0,25}").unwrap(),
+        1..15,
+    )
+    .prop_flat_map(|lines| {
+        let len = lines.len();
+        (
+            Just(lines),
+            0..=len,
+            prop::string::string_regex("[a-z][a-z0-9 ]{0,25}").unwrap(),
+        )
+    })
+    .prop_map(|(lines, pos, new_line)| {
+        let original = lines.join("\n");
+        let mut mutated = lines;
+        mutated.insert(pos, new_line);
+        (original, mutated.join("\n"))
+    })
+}
+
+/// Generate a pair of documents related by deleting a random line.
+fn delete_mutation_pair() -> impl Strategy<Value = (String, String)> {
+    prop::collection::vec(
+        prop::string::string_regex("[a-z][a-z0-9 ]{0,25}").unwrap(),
+        2..15,
+    )
+    .prop_flat_map(|lines| {
+        let len = lines.len();
+        (Just(lines), 0..len)
+    })
+    .prop_map(|(lines, idx)| {
+        let original = lines.join("\n");
+        let mut mutated = lines;
+        mutated.remove(idx);
+        (original, mutated.join("\n"))
+    })
+}
+
+/// Generate a pair of documents related by swapping two random lines.
+fn reorder_mutation_pair() -> impl Strategy<Value = (String, String)> {
+    prop::collection::vec(
+        prop::string::string_regex("[a-z][a-z0-9 ]{0,25}").unwrap(),
+        2..15,
+    )
+    .prop_flat_map(|lines| {
+        let len = lines.len();
+        (Just(lines), 0..len, 0..len)
+    })
+    .prop_map(|(lines, a, b)| {
+        let original = lines.join("\n");
+        let mut mutated = lines;
+        mutated.swap(a, b);
+        (original, mutated.join("\n"))
+    })
+}
+
+/// Generate a block with reordered content lines (for Unordered invariant).
+///
+/// Produces a block header + 2–7 children (2-space indent), then creates a
+/// variant with two children swapped.
+fn block_reorder_pair() -> impl Strategy<Value = (String, String)> {
+    (
+        prop::string::string_regex("[a-z]{3,10}").unwrap(),
+        prop::collection::vec(
+            prop::string::string_regex("  [a-z][a-z0-9]{0,20}").unwrap(),
+            2..8,
+        ),
+    )
+        .prop_flat_map(|(header, children)| {
+            let len = children.len();
+            (Just(header), Just(children), 0..len, 0..len)
+        })
+        .prop_map(|(header, children, a, b)| {
+            let mut original = vec![header.clone()];
+            original.extend(children.clone());
+
+            let mut reordered_children = children;
+            reordered_children.swap(a, b);
+            let mut reordered = vec![header];
+            reordered.extend(reordered_children);
+
+            (original.join("\n"), reordered.join("\n"))
+        })
+}
+
+// ── Diff-pair property tests ──
+
+proptest! {
+    // -- diff-pair: symmetry --
+    //
+    // For any two documents a and b, the lines removed in diff(a,b) must equal
+    // the lines added in diff(b,a), and vice versa. This holds because the
+    // underlying SES edit distance is symmetric.
+
+    #[test]
+    fn diff_pair_symmetry(a in text_strategy(), b in text_strategy()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let ab = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let ba = diff_documents(&doc_b, &doc_a, NormalizeOptions::default());
+
+        prop_assert_eq!(ab.has_changes, ba.has_changes,
+            "has_changes must be symmetric");
+
+        let ab_removed = ab.stats.deleted_lines + ab.stats.replaced_old_lines;
+        let ba_added = ba.stats.inserted_lines + ba.stats.replaced_new_lines;
+        prop_assert_eq!(ab_removed, ba_added,
+            "lines removed a→b must equal lines added b→a");
+
+        let ab_added = ab.stats.inserted_lines + ab.stats.replaced_new_lines;
+        let ba_removed = ba.stats.deleted_lines + ba.stats.replaced_old_lines;
+        prop_assert_eq!(ab_added, ba_removed,
+            "lines added a→b must equal lines removed b→a");
+    }
+
+    #[test]
+    fn diff_pair_symmetry_insert((a, b) in insert_mutation_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let ab = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let ba = diff_documents(&doc_b, &doc_a, NormalizeOptions::default());
+
+        prop_assert!(ab.has_changes, "insert mutation must produce changes");
+        prop_assert_eq!(ab.has_changes, ba.has_changes);
+
+        let ab_removed = ab.stats.deleted_lines + ab.stats.replaced_old_lines;
+        let ba_added = ba.stats.inserted_lines + ba.stats.replaced_new_lines;
+        prop_assert_eq!(ab_removed, ba_added);
+
+        let ab_added = ab.stats.inserted_lines + ab.stats.replaced_new_lines;
+        let ba_removed = ba.stats.deleted_lines + ba.stats.replaced_old_lines;
+        prop_assert_eq!(ab_added, ba_removed);
+    }
+
+    #[test]
+    fn diff_pair_symmetry_delete((a, b) in delete_mutation_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let ab = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let ba = diff_documents(&doc_b, &doc_a, NormalizeOptions::default());
+
+        prop_assert!(ab.has_changes, "delete mutation must produce changes");
+        prop_assert_eq!(ab.has_changes, ba.has_changes);
+
+        let ab_removed = ab.stats.deleted_lines + ab.stats.replaced_old_lines;
+        let ba_added = ba.stats.inserted_lines + ba.stats.replaced_new_lines;
+        prop_assert_eq!(ab_removed, ba_added);
+
+        let ab_added = ab.stats.inserted_lines + ab.stats.replaced_new_lines;
+        let ba_removed = ba.stats.deleted_lines + ba.stats.replaced_old_lines;
+        prop_assert_eq!(ab_added, ba_removed);
+    }
+
+    #[test]
+    fn diff_pair_symmetry_reorder((a, b) in reorder_mutation_pair()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let ab = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let ba = diff_documents(&doc_b, &doc_a, NormalizeOptions::default());
+
+        prop_assert_eq!(ab.has_changes, ba.has_changes);
+
+        let ab_removed = ab.stats.deleted_lines + ab.stats.replaced_old_lines;
+        let ba_added = ba.stats.inserted_lines + ba.stats.replaced_new_lines;
+        prop_assert_eq!(ab_removed, ba_added);
+
+        let ab_added = ab.stats.inserted_lines + ab.stats.replaced_new_lines;
+        let ba_removed = ba.stats.deleted_lines + ba.stats.replaced_old_lines;
+        prop_assert_eq!(ab_added, ba_removed);
+    }
+
+    // -- diff-pair: stats consistency --
+    //
+    // has_changes must be true iff there is at least one edit operation, and
+    // the stats counters must agree with the edit list.
+
+    #[test]
+    fn diff_pair_stats_consistency(a in text_strategy(), b in text_strategy()) {
+        let doc_a = parse_generic(&a);
+        let doc_b = parse_generic(&b);
+        let diff = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+
+        let total_ops = diff.stats.inserts + diff.stats.deletes + diff.stats.replaces;
+        prop_assert_eq!(
+            diff.has_changes,
+            total_ops > 0,
+            "has_changes must match (inserts + deletes + replaces) > 0"
+        );
+
+        prop_assert_eq!(
+            diff.has_changes,
+            !diff.edits.is_empty(),
+            "has_changes must match !edits.is_empty()"
+        );
+    }
+
+    // -- OrderPolicy::Unordered invariant --
+    //
+    // Reordering content lines within a block must produce zero structural
+    // changes when the Unordered policy is active.
+
+    #[test]
+    fn unordered_reorder_produces_no_changes((original, reordered) in block_reorder_pair()) {
+        let doc_a = parse_generic(&original);
+        let doc_b = parse_generic(&reordered);
+
+        let opts = NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: OrderPolicy::Unordered,
+            overrides: vec![],
+        });
+
+        let diff = diff_documents(&doc_a, &doc_b, opts);
+        prop_assert!(
+            !diff.has_changes,
+            "reordering content lines under Unordered policy must produce no changes, \
+             got {} edits",
+            diff.edits.len()
+        );
+    }
+
+    // -- comparison view completeness --
+    //
+    // Every line in the rendered document must appear in the flattened
+    // comparison view, preserving order and original text.
+
+    #[test]
+    fn comparison_view_completeness(input in text_strategy()) {
+        let doc = parse_generic(&input);
+        let view = build_comparison_view(&doc, &NormalizeOptions::default());
+        let rendered = doc.render();
+
+        let rendered_lines: Vec<&str> = if rendered.is_empty() {
+            vec![]
+        } else {
+            rendered.lines().collect()
+        };
+        let view_originals: Vec<&str> = view.lines.iter()
+            .map(|l| l.original.as_str())
+            .collect();
+
+        prop_assert_eq!(
+            rendered_lines, view_originals,
+            "every document line must appear in the comparison view"
+        );
+    }
 }

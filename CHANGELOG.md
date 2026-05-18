@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- added diff-pair property tests: mutation-based strategies (insert/delete/reorder lines) test diff symmetry, stats consistency, `OrderPolicy::Unordered` reorder invariant, and comparison-view completeness — the core diffing of two *different* documents now has property-test coverage
 - added `--dialect auto` (now the default) — `config-diff` infers the dialect from config content using score-based heuristics (FortiOS: `config`/`edit`/`next`/`end` blocks; Junos: hierarchical braces with semicolons and set-style stanza paths; NX-OS: `feature` keyword + slot/port interfaces; EOS: non-slot Ethernet + CIDR addresses + numbered ACLs; IOS XE: extended ACLs + dotted subnet/wildcard masks); falls back to `generic` when the content is ambiguous or too short to identify
 
 ## [0.4.0] - 2026-05-06
