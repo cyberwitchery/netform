@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- **breaking:** `diff_documents` now returns `Result<Diff, DiffError>` instead of `Diff` — the `unreachable!()` in Myers SES and `.unwrap()` calls on edit-script iterators in `engine.rs` are replaced with proper `Result`-based error propagation; callers must handle the new `DiffError` type (library code should never panic on user input)
 - added `--policy-override PATH:POLICY` repeatable CLI flag — applies per-context order-policy overrides (e.g. `--policy-override 0:unordered`) to specific subtrees, completing the `OrderPolicyConfig.overrides` feature that was modeled but not reachable from the CLI
 - added `--dialect auto` (now the default) — `config-diff` infers the dialect from config content using score-based heuristics (FortiOS: `config`/`edit`/`next`/`end` blocks; Junos: hierarchical braces with semicolons and set-style stanza paths; NX-OS: `feature` keyword + slot/port interfaces; EOS: non-slot Ethernet + CIDR addresses + numbered ACLs; IOS XE: extended ACLs + dotted subnet/wildcard masks); falls back to `generic` when the content is ambiguous or too short to identify
 

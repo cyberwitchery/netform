@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let options = NormalizeOptions::new(fixture.normalization_steps)
             .with_order_policy(fixture.order_policy);
-        let diff = diff_documents(&intended, &actual, options);
+        let diff = diff_documents(&intended, &actual, options)?;
 
         if diff.has_changes != fixture.expected.has_changes {
             return Err(format!(

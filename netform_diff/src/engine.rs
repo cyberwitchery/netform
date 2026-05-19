@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::model::{
-    ComparisonLine, ComparisonView, DiffLine, DiffStats, Edit, EditAnchor, NormalizeOptions,
-    OrderPolicy,
+    ComparisonLine, ComparisonView, DiffError, DiffLine, DiffStats, Edit, EditAnchor,
+    NormalizeOptions, OrderPolicy,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub(crate) fn diff_views(
     a: &ComparisonView,
     b: &ComparisonView,
     options: &NormalizeOptions,
-) -> DiffComputation {
+) -> Result<DiffComputation, DiffError> {
     let a_segments = build_segments(a);
     let b_segments = build_segments(b);
 
@@ -42,7 +42,7 @@ pub(crate) fn diff_views(
         .map(|segment| segment.segment_key)
         .collect::<Vec<_>>();
 
-    let ops = compute_ops(&a_keys, &b_keys);
+    let ops = compute_ops(&a_keys, &b_keys)?;
 
     let mut edits = Vec::new();
     let mut fallback_contexts = Vec::new();
@@ -51,36 +51,39 @@ pub(crate) fn diff_views(
     let mut pending_deleted_segments: Vec<Segment> = Vec::new();
     let mut pending_inserted_segments: Vec<Segment> = Vec::new();
 
-    let mut flush_segment_fallback =
-        |edits: &mut Vec<Edit>, deleted: &mut Vec<Segment>, inserted: &mut Vec<Segment>| {
-            if deleted.is_empty() && inserted.is_empty() {
-                return;
-            }
+    let mut flush_segment_fallback = |edits: &mut Vec<Edit>,
+                                      deleted: &mut Vec<Segment>,
+                                      inserted: &mut Vec<Segment>|
+     -> Result<(), DiffError> {
+        if deleted.is_empty() && inserted.is_empty() {
+            return Ok(());
+        }
 
-            let deleted_lines = deleted
-                .drain(..)
-                .flat_map(|segment| segment.lines)
-                .collect::<Vec<_>>();
-            let inserted_lines = inserted
-                .drain(..)
-                .flat_map(|segment| segment.lines)
-                .collect::<Vec<_>>();
+        let deleted_lines = deleted
+            .drain(..)
+            .flat_map(|segment| segment.lines)
+            .collect::<Vec<_>>();
+        let inserted_lines = inserted
+            .drain(..)
+            .flat_map(|segment| segment.lines)
+            .collect::<Vec<_>>();
 
-            let first_path = deleted_lines
-                .first()
-                .or(inserted_lines.first())
-                .map(|line| &line.path);
-            let empty_path = netform_ir::Path(Vec::new());
-            let mut fallback = line_diff(
-                &deleted_lines,
-                &inserted_lines,
-                options.policy_for_path(first_path.unwrap_or(&empty_path)),
-            );
-            if let Some(path) = first_path {
-                fallback_contexts.push(path.clone());
-            }
-            edits.append(&mut fallback);
-        };
+        let first_path = deleted_lines
+            .first()
+            .or(inserted_lines.first())
+            .map(|line| &line.path);
+        let empty_path = netform_ir::Path(Vec::new());
+        let mut fallback = line_diff(
+            &deleted_lines,
+            &inserted_lines,
+            options.policy_for_path(first_path.unwrap_or(&empty_path)),
+        )?;
+        if let Some(path) = first_path {
+            fallback_contexts.push(path.clone());
+        }
+        edits.append(&mut fallback);
+        Ok(())
+    };
 
     for op in ops {
         match op {
@@ -89,10 +92,18 @@ pub(crate) fn diff_views(
                     &mut edits,
                     &mut pending_deleted_segments,
                     &mut pending_inserted_segments,
-                );
+                )?;
 
-                let left = a_iter.next().unwrap();
-                let right = b_iter.next().unwrap();
+                let left = a_iter.next().ok_or_else(|| {
+                    DiffError::EditScriptInconsistency(
+                        "left segment iterator exhausted on Equal op".into(),
+                    )
+                })?;
+                let right = b_iter.next().ok_or_else(|| {
+                    DiffError::EditScriptInconsistency(
+                        "right segment iterator exhausted on Equal op".into(),
+                    )
+                })?;
                 if left.is_block && right.is_block {
                     let left_children = if left.lines.len() > 1 {
                         &left.lines[1..]
@@ -109,15 +120,23 @@ pub(crate) fn diff_views(
                         left_children,
                         right_children,
                         options.policy_for_path(&left.lines[0].path),
-                    );
+                    )?;
                     edits.append(&mut child_edits);
                 }
             }
             Op::Delete => {
-                pending_deleted_segments.push(a_iter.next().unwrap());
+                pending_deleted_segments.push(a_iter.next().ok_or_else(|| {
+                    DiffError::EditScriptInconsistency(
+                        "left segment iterator exhausted on Delete op".into(),
+                    )
+                })?);
             }
             Op::Insert => {
-                pending_inserted_segments.push(b_iter.next().unwrap());
+                pending_inserted_segments.push(b_iter.next().ok_or_else(|| {
+                    DiffError::EditScriptInconsistency(
+                        "right segment iterator exhausted on Insert op".into(),
+                    )
+                })?);
             }
         }
     }
@@ -126,12 +145,12 @@ pub(crate) fn diff_views(
         &mut edits,
         &mut pending_deleted_segments,
         &mut pending_inserted_segments,
-    );
+    )?;
 
-    DiffComputation {
+    Ok(DiffComputation {
         edits,
         fallback_contexts,
-    }
+    })
 }
 
 pub(crate) fn build_stats(edits: &[Edit]) -> DiffStats {
@@ -196,18 +215,22 @@ fn lines_to_segment(lines: Vec<ComparisonLine>) -> Segment {
     }
 }
 
-fn line_diff(a: &[ComparisonLine], b: &[ComparisonLine], policy: OrderPolicy) -> Vec<Edit> {
+fn line_diff(
+    a: &[ComparisonLine],
+    b: &[ComparisonLine],
+    policy: OrderPolicy,
+) -> Result<Vec<Edit>, DiffError> {
     match policy {
         OrderPolicy::Ordered => line_diff_ordered(a, b),
-        OrderPolicy::Unordered => line_diff_unordered(a, b),
-        OrderPolicy::KeyedStable => line_diff_keyed_stable(a, b),
+        OrderPolicy::Unordered => Ok(line_diff_unordered(a, b)),
+        OrderPolicy::KeyedStable => Ok(line_diff_keyed_stable(a, b)),
     }
 }
 
-fn line_diff_ordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Vec<Edit> {
+fn line_diff_ordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Result<Vec<Edit>, DiffError> {
     let a_tokens = a.iter().map(|line| line.content_key).collect::<Vec<_>>();
     let b_tokens = b.iter().map(|line| line.content_key).collect::<Vec<_>>();
-    let ops = compute_ops(&a_tokens, &b_tokens);
+    let ops = compute_ops(&a_tokens, &b_tokens)?;
 
     let mut edits = Vec::new();
     let mut i = 0usize;
@@ -270,7 +293,7 @@ fn line_diff_ordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Vec<Edit> {
     }
 
     flush(&mut edits, &mut pending_deletes, &mut pending_inserts);
-    edits
+    Ok(edits)
 }
 
 fn line_diff_unordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Vec<Edit> {
@@ -411,12 +434,12 @@ fn to_anchor(line: &DiffLine) -> EditAnchor {
     }
 }
 
-fn compute_ops(a: &[u64], b: &[u64]) -> Vec<Op> {
+fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
     if a.is_empty() {
-        return vec![Op::Insert; b.len()];
+        return Ok(vec![Op::Insert; b.len()]);
     }
     if b.is_empty() {
-        return vec![Op::Delete; a.len()];
+        return Ok(vec![Op::Delete; a.len()]);
     }
 
     let n = a.len() as isize;
@@ -455,14 +478,14 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Vec<Op> {
 
             if x >= n && y >= m {
                 trace.push(v.clone());
-                return backtrack_ops(a, b, &trace, offset);
+                return Ok(backtrack_ops(a, b, &trace, offset));
             }
             k += 2;
         }
         trace.push(v.clone());
     }
 
-    unreachable!("Myers SES must converge within n+m steps")
+    Err(DiffError::SesNotConverged)
 }
 
 fn backtrack_ops(a: &[u64], b: &[u64], trace: &[Vec<isize>], offset: isize) -> Vec<Op> {
@@ -552,31 +575,31 @@ mod tests {
 
     #[test]
     fn compute_ops_identical_sequences() {
-        let ops = compute_ops(&[1, 2, 3], &[1, 2, 3]);
+        let ops = compute_ops(&[1, 2, 3], &[1, 2, 3]).unwrap();
         assert_eq!(ops, vec![Op::Equal, Op::Equal, Op::Equal]);
     }
 
     #[test]
     fn compute_ops_empty_left_yields_all_inserts() {
-        let ops = compute_ops(&[], &[1, 2]);
+        let ops = compute_ops(&[], &[1, 2]).unwrap();
         assert_eq!(ops, vec![Op::Insert, Op::Insert]);
     }
 
     #[test]
     fn compute_ops_empty_right_yields_all_deletes() {
-        let ops = compute_ops(&[1, 2], &[]);
+        let ops = compute_ops(&[1, 2], &[]).unwrap();
         assert_eq!(ops, vec![Op::Delete, Op::Delete]);
     }
 
     #[test]
     fn compute_ops_both_empty() {
-        let ops = compute_ops(&[], &[]);
+        let ops = compute_ops(&[], &[]).unwrap();
         assert!(ops.is_empty());
     }
 
     #[test]
     fn compute_ops_single_insertion() {
-        let ops = compute_ops(&[1, 3], &[1, 2, 3]);
+        let ops = compute_ops(&[1, 3], &[1, 2, 3]).unwrap();
         let inserts = ops.iter().filter(|o| **o == Op::Insert).count();
         let equals = ops.iter().filter(|o| **o == Op::Equal).count();
         assert_eq!(inserts, 1);
@@ -585,7 +608,7 @@ mod tests {
 
     #[test]
     fn compute_ops_single_deletion() {
-        let ops = compute_ops(&[1, 2, 3], &[1, 3]);
+        let ops = compute_ops(&[1, 2, 3], &[1, 3]).unwrap();
         let deletes = ops.iter().filter(|o| **o == Op::Delete).count();
         let equals = ops.iter().filter(|o| **o == Op::Equal).count();
         assert_eq!(deletes, 1);
@@ -594,7 +617,7 @@ mod tests {
 
     #[test]
     fn compute_ops_complete_replacement() {
-        let ops = compute_ops(&[1, 2], &[3, 4]);
+        let ops = compute_ops(&[1, 2], &[3, 4]).unwrap();
         let deletes = ops.iter().filter(|o| **o == Op::Delete).count();
         let inserts = ops.iter().filter(|o| **o == Op::Insert).count();
         assert_eq!(deletes, 2);
@@ -605,7 +628,7 @@ mod tests {
     fn compute_ops_preserves_length_invariant() {
         let a = [10, 20, 30, 40];
         let b = [10, 25, 30, 50];
-        let ops = compute_ops(&a, &b);
+        let ops = compute_ops(&a, &b).unwrap();
         let mut ai = 0usize;
         let mut bi = 0usize;
         for op in &ops {
@@ -828,7 +851,7 @@ mod tests {
             cline("ip route 0.0.0.0/0 10.0.0.1", 200, vec![1]),
         ]);
         let b = a.clone();
-        let result = diff_views(&a, &b, &default_options());
+        let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(result.edits.is_empty());
     }
 
@@ -839,7 +862,7 @@ mod tests {
             cline("hostname router1", 100, vec![0]),
             cline("ip route default", 200, vec![1]),
         ]);
-        let result = diff_views(&a, &b, &default_options());
+        let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(!result.edits.is_empty());
         assert!(
             result
@@ -856,7 +879,7 @@ mod tests {
             cline("ip route default", 200, vec![1]),
         ]);
         let b = view(vec![cline("hostname router1", 100, vec![0])]);
-        let result = diff_views(&a, &b, &default_options());
+        let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(!result.edits.is_empty());
         assert!(
             result
@@ -870,7 +893,7 @@ mod tests {
     fn diff_views_both_empty() {
         let a = view(vec![]);
         let b = view(vec![]);
-        let result = diff_views(&a, &b, &default_options());
+        let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(result.edits.is_empty());
     }
 
@@ -886,7 +909,7 @@ mod tests {
             cline("  description new", 201, vec![0, 0]),
             cline("  mtu 9000", 102, vec![0, 1]),
         ]);
-        let result = diff_views(&a, &b, &default_options());
+        let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(!result.edits.is_empty());
         match &result.edits[0] {
             Edit::Replace {
@@ -911,7 +934,7 @@ mod tests {
             cline("router bgp 65000", 200, vec![0]),
             cline("  neighbor 10.0.0.1", 201, vec![0, 0]),
         ]);
-        let result = diff_views(&a, &b, &default_options());
+        let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(!result.edits.is_empty());
         assert!(!result.fallback_contexts.is_empty());
     }
@@ -924,7 +947,7 @@ mod tests {
             cline("  description uplink", 10, vec![0, 0]),
             cline("  mtu 9000", 20, vec![0, 1]),
         ];
-        let edits = line_diff(&lines, &lines, OrderPolicy::Ordered);
+        let edits = line_diff(&lines, &lines, OrderPolicy::Ordered).unwrap();
         assert!(edits.is_empty());
     }
 
@@ -932,7 +955,7 @@ mod tests {
     fn line_diff_ordered_detects_replacement() {
         let a = vec![cline("  description old", 10, vec![0, 0])];
         let b = vec![cline("  description new", 20, vec![0, 0])];
-        let edits = line_diff(&a, &b, OrderPolicy::Ordered);
+        let edits = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
         assert_eq!(edits.len(), 1);
         assert!(matches!(edits[0], Edit::Replace { .. }));
     }
@@ -944,7 +967,7 @@ mod tests {
             cline("  mtu 9000", 10, vec![0, 0]),
             cline("  no shutdown", 20, vec![0, 1]),
         ];
-        let edits = line_diff(&a, &b, OrderPolicy::Ordered);
+        let edits = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
         assert_eq!(edits.len(), 1);
         assert!(matches!(edits[0], Edit::Insert { .. }));
     }
@@ -956,7 +979,7 @@ mod tests {
             cline("  no shutdown", 20, vec![0, 1]),
         ];
         let b = vec![cline("  mtu 9000", 10, vec![0, 0])];
-        let edits = line_diff(&a, &b, OrderPolicy::Ordered);
+        let edits = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
         assert_eq!(edits.len(), 1);
         assert!(matches!(edits[0], Edit::Delete { .. }));
     }
@@ -971,7 +994,7 @@ mod tests {
             cline("  mtu 9000", 20, vec![0, 0]),
             cline("  description uplink", 10, vec![0, 1]),
         ];
-        let edits = line_diff(&a, &b, OrderPolicy::Ordered);
+        let edits = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
         assert!(!edits.is_empty());
     }
 
@@ -987,7 +1010,7 @@ mod tests {
             cline("  mtu 9000", 20, vec![0, 0]),
             cline("  description uplink", 10, vec![0, 1]),
         ];
-        let edits = line_diff(&a, &b, OrderPolicy::Unordered);
+        let edits = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
         assert!(edits.is_empty());
     }
 
@@ -998,7 +1021,7 @@ mod tests {
             cline("  mtu 9000", 10, vec![0, 0]),
             cline("  no shutdown", 20, vec![0, 1]),
         ];
-        let edits = line_diff(&a, &b, OrderPolicy::Unordered);
+        let edits = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
         assert_eq!(edits.len(), 1);
         assert!(matches!(edits[0], Edit::Insert { .. }));
     }
@@ -1010,7 +1033,7 @@ mod tests {
             cline("  no shutdown", 20, vec![0, 1]),
         ];
         let b = vec![cline("  mtu 9000", 10, vec![0, 0])];
-        let edits = line_diff(&a, &b, OrderPolicy::Unordered);
+        let edits = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
         assert_eq!(edits.len(), 1);
         assert!(matches!(edits[0], Edit::Delete { .. }));
     }
@@ -1027,7 +1050,7 @@ mod tests {
             cline("  mtu 9000", 20, vec![0, 0]),
             cline("  description uplink", 10, vec![0, 1]),
         ];
-        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable).unwrap();
         assert!(edits.is_empty());
     }
 
@@ -1035,7 +1058,7 @@ mod tests {
     fn line_diff_keyed_stable_detects_content_change() {
         let a = vec![cline("  description old", 10, vec![0, 0])];
         let b = vec![cline("  description new", 20, vec![0, 0])];
-        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable).unwrap();
         assert!(!edits.is_empty());
     }
 
@@ -1049,7 +1072,7 @@ mod tests {
             cline("  set allowaccess https", 10, vec![0, 0]),
             cline("  set hostname new", 20, vec![0, 1]),
         ];
-        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable).unwrap();
         assert_eq!(edits.len(), 2);
         for edit in &edits {
             match edit {
@@ -1090,14 +1113,14 @@ mod tests {
         ];
 
         // Ordered: content_keys [10, 20] == [10, 20] → all Equal, no edits.
-        let ordered = line_diff(&a, &b, OrderPolicy::Ordered);
+        let ordered = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
         assert!(
             ordered.is_empty(),
             "Ordered matches by content_key; identical key sequences produce no edits"
         );
 
         // Unordered: four distinct text hashes → 2 Delete + 2 Insert.
-        let unordered = line_diff(&a, &b, OrderPolicy::Unordered);
+        let unordered = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
         assert_eq!(unordered.len(), 4);
         assert_eq!(
             unordered
@@ -1115,7 +1138,7 @@ mod tests {
         );
 
         // KeyedStable: two content_key buckets, each with a text mismatch → 2 Replace.
-        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable).unwrap();
         assert_eq!(keyed.len(), 2);
         for edit in &keyed {
             assert!(
@@ -1142,12 +1165,12 @@ mod tests {
         ];
 
         // Ordered: reordering detected — at least one edit.
-        let ordered = line_diff(&a, &b, OrderPolicy::Ordered);
+        let ordered = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
         assert!(!ordered.is_empty(), "Ordered treats reordering as a change");
 
         // Unordered: "set allowaccess ping" matches by text hash.
         // "set hostname old" → Delete, "set hostname new" → Insert.
-        let unordered = line_diff(&a, &b, OrderPolicy::Unordered);
+        let unordered = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
         assert_eq!(unordered.len(), 2);
         assert!(
             unordered.iter().any(|e| matches!(e, Edit::Delete { .. })),
@@ -1160,7 +1183,7 @@ mod tests {
 
         // KeyedStable: "set allowaccess ping" matches by content_key 20.
         // content_key 10 paired, text differs → single Replace.
-        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable).unwrap();
         assert_eq!(keyed.len(), 1);
         assert!(
             matches!(keyed[0], Edit::Replace { .. }),
@@ -1183,9 +1206,9 @@ mod tests {
             cline("  mtu 9000", 20, vec![0, 2]),
         ];
 
-        let ordered = line_diff(&a, &b, OrderPolicy::Ordered);
-        let unordered = line_diff(&a, &b, OrderPolicy::Unordered);
-        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable);
+        let ordered = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
+        let unordered = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
+        let keyed = line_diff(&a, &b, OrderPolicy::KeyedStable).unwrap();
 
         assert!(!ordered.is_empty(), "Ordered detects the reorder");
         assert!(unordered.is_empty(), "Unordered ignores order");

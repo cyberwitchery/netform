@@ -13,7 +13,7 @@ fn detects_replace_edit() {
     let a = parse_generic("interface Ethernet1\n  description old\n");
     let b = parse_generic("interface Ethernet1\n  description new\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     assert_eq!(diff.edits.len(), 1);
     assert!(matches!(diff.edits[0], Edit::Replace { .. }));
 }
@@ -27,7 +27,8 @@ fn ignores_comments_when_configured() {
         &a,
         &b,
         NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]),
-    );
+    )
+    .unwrap();
 
     assert!(diff.edits.is_empty());
 }
@@ -38,7 +39,7 @@ fn records_applied_normalization_steps() {
     let b = parse_generic("line a\n");
     let options = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
 
-    let diff = diff_documents(&a, &b, options);
+    let diff = diff_documents(&a, &b, options).unwrap();
     assert_eq!(
         diff.normalization_steps,
         vec![NormalizationStep::CollapseInternalWhitespace]
@@ -50,7 +51,7 @@ fn block_aware_diff_only_reports_changed_children() {
     let a = parse_generic("interface Ethernet1\n  description old\n  mtu 9000\n");
     let b = parse_generic("interface Ethernet1\n  description new\n  mtu 9000\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     assert_eq!(diff.edits.len(), 1);
 
     match &diff.edits[0] {
@@ -73,7 +74,7 @@ fn ambiguous_duplicate_lines_create_findings() {
     let a = parse_generic("line\nline\nline\n");
     let b = parse_generic("line\nline\nline\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     assert!(!diff.has_changes);
     assert!(!diff.findings.is_empty());
     assert!(
@@ -88,7 +89,7 @@ fn reports_has_changes_for_drift() {
     let a = parse_generic("hostname old\n");
     let b = parse_generic("hostname new\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     assert!(diff.has_changes);
 }
 
@@ -104,7 +105,8 @@ fn ordered_policy_reports_reordered_block_children_as_change() {
             default: OrderPolicy::Ordered,
             overrides: Vec::new(),
         }),
-    );
+    )
+    .unwrap();
 
     assert!(diff.has_changes);
 }
@@ -121,7 +123,8 @@ fn unordered_policy_ignores_reordered_block_children() {
             default: OrderPolicy::Unordered,
             overrides: Vec::new(),
         }),
-    );
+    )
+    .unwrap();
 
     assert!(!diff.has_changes);
 }
@@ -138,7 +141,8 @@ fn keyed_stable_policy_ignores_reordered_block_children() {
             default: OrderPolicy::KeyedStable,
             overrides: Vec::new(),
         }),
-    );
+    )
+    .unwrap();
 
     assert!(!diff.has_changes);
 }
@@ -148,7 +152,7 @@ fn fallback_alignment_emits_finding() {
     let a = parse_generic("interface Ethernet1\n  description one\n");
     let b = parse_generic("router bgp 65000\n  neighbor 10.0.0.1 remote-as 65001\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     assert!(
         diff.findings
             .iter()
@@ -161,7 +165,7 @@ fn parse_uncertainty_is_exposed_as_finding() {
     let a = parse_generic("  orphan-line\n");
     let b = parse_generic("  orphan-line\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     assert!(
         diff.findings
             .iter()
@@ -909,7 +913,8 @@ fn emits_finding_for_ambiguous_extracted_stanza_keys() {
             default: OrderPolicy::KeyedStable,
             overrides: Vec::new(),
         }),
-    );
+    )
+    .unwrap();
 
     assert!(diff.findings.iter().any(|f| {
         f.code == "ambiguous_key_match" && f.message.contains("ambiguous extracted key")
@@ -935,9 +940,9 @@ fn reordered_block_children_only_changed_under_ordered_policy() {
         })
     };
 
-    let ordered = diff_documents(&a, &b, opts(OrderPolicy::Ordered));
-    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered));
-    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable));
+    let ordered = diff_documents(&a, &b, opts(OrderPolicy::Ordered)).unwrap();
+    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered)).unwrap();
+    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable)).unwrap();
 
     assert!(ordered.has_changes, "Ordered detects reordering as drift");
     assert!(!ordered.edits.is_empty());
@@ -967,8 +972,8 @@ fn fortios_set_value_change_keyed_stable_emits_replace_unordered_emits_delete_in
         })
     };
 
-    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable));
-    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered));
+    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable)).unwrap();
+    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered)).unwrap();
 
     assert!(keyed.has_changes);
     assert!(unordered.has_changes);
@@ -1036,9 +1041,9 @@ fn fortios_reorder_plus_value_change_three_way_contrast() {
         })
     };
 
-    let ordered = diff_documents(&a, &b, opts(OrderPolicy::Ordered));
-    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered));
-    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable));
+    let ordered = diff_documents(&a, &b, opts(OrderPolicy::Ordered)).unwrap();
+    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered)).unwrap();
+    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable)).unwrap();
 
     // All three detect changes (the hostname value changed).
     assert!(ordered.has_changes);

@@ -2,6 +2,35 @@ use serde::{Deserialize, Serialize};
 
 use netform_ir::{Path, Span, TriviaKind};
 
+/// Errors that can occur during diff computation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffError {
+    /// The Myers shortest-edit-script algorithm did not converge within
+    /// the expected number of steps.
+    SesNotConverged,
+    /// The edit-script operation sequence was inconsistent with the input
+    /// data (e.g., referenced more elements than present in one side).
+    EditScriptInconsistency(String),
+}
+
+impl std::fmt::Display for DiffError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SesNotConverged => {
+                write!(
+                    f,
+                    "Myers SES algorithm did not converge within expected steps"
+                )
+            }
+            Self::EditScriptInconsistency(detail) => {
+                write!(f, "diff engine inconsistency: {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DiffError {}
+
 /// One ordered normalization step in the comparison pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
