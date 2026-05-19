@@ -11,7 +11,7 @@ use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
 use netform_diff::{
     DEFAULT_CONTEXT_LINES, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
-    build_plan, diff_documents, format_markdown_report, format_unified_diff,
+    OrderPolicyOverride, build_plan, diff_documents, format_markdown_report, format_unified_diff,
 };
 use netform_ir::{Document, parse_generic};
 
@@ -45,6 +45,12 @@ struct Cli {
 
     #[arg(long, value_enum, default_value_t = CliOrderPolicy::Ordered)]
     order_policy: CliOrderPolicy,
+
+    /// Per-context order-policy override.  Format: PATH:POLICY where PATH
+    /// is a dot-separated context prefix (e.g. "0.1") and POLICY is one of
+    /// ordered, unordered, or keyed-stable.  May be repeated.
+    #[arg(long, value_parser = parse_policy_override)]
+    policy_override: Vec<OrderPolicyOverride>,
 
     #[arg(long, value_enum, default_value_t = CliDialect::Auto)]
     dialect: CliDialect,
@@ -97,6 +103,40 @@ enum CliDialect {
     Iosxe,
     Junos,
     Nxos,
+}
+
+fn parse_policy_override(s: &str) -> Result<OrderPolicyOverride, String> {
+    let (path_str, policy_str) = s
+        .split_once(':')
+        .ok_or_else(|| format!("expected PATH:POLICY (e.g. \"0.1:unordered\"), got \"{s}\""))?;
+
+    let context_prefix: Vec<usize> = if path_str.is_empty() {
+        Vec::new()
+    } else {
+        path_str
+            .split('.')
+            .map(|seg| {
+                seg.parse::<usize>()
+                    .map_err(|_| format!("invalid path segment \"{seg}\" — expected an integer"))
+            })
+            .collect::<Result<_, _>>()?
+    };
+
+    let policy = match policy_str {
+        "ordered" => OrderPolicy::Ordered,
+        "unordered" => OrderPolicy::Unordered,
+        "keyed-stable" => OrderPolicy::KeyedStable,
+        other => {
+            return Err(format!(
+                "unknown policy \"{other}\" — expected ordered, unordered, or keyed-stable"
+            ));
+        }
+    };
+
+    Ok(OrderPolicyOverride {
+        context_prefix,
+        policy,
+    })
 }
 
 fn main() {
@@ -155,7 +195,7 @@ fn main() {
     };
     let options = NormalizeOptions::new(steps).with_order_policy(OrderPolicyConfig {
         default: policy,
-        overrides: Vec::new(),
+        overrides: cli.policy_override,
     });
 
     let diff = diff_documents(&a_doc, &b_doc, options);
@@ -558,5 +598,41 @@ interface Ethernet1
 ";
         // Both junos/fortios and eos get mild scores — should fall back.
         assert_eq!(detect_dialect(input), CliDialect::Generic);
+    }
+
+    #[test]
+    fn parse_policy_override_simple() {
+        let result = parse_policy_override("0:unordered").unwrap();
+        assert_eq!(result.context_prefix, vec![0]);
+        assert_eq!(result.policy, OrderPolicy::Unordered);
+    }
+
+    #[test]
+    fn parse_policy_override_dotted_path() {
+        let result = parse_policy_override("0.1.2:keyed-stable").unwrap();
+        assert_eq!(result.context_prefix, vec![0, 1, 2]);
+        assert_eq!(result.policy, OrderPolicy::KeyedStable);
+    }
+
+    #[test]
+    fn parse_policy_override_empty_path() {
+        let result = parse_policy_override(":ordered").unwrap();
+        assert_eq!(result.context_prefix, Vec::<usize>::new());
+        assert_eq!(result.policy, OrderPolicy::Ordered);
+    }
+
+    #[test]
+    fn parse_policy_override_missing_colon() {
+        assert!(parse_policy_override("0-unordered").is_err());
+    }
+
+    #[test]
+    fn parse_policy_override_bad_segment() {
+        assert!(parse_policy_override("0.abc:unordered").is_err());
+    }
+
+    #[test]
+    fn parse_policy_override_bad_policy() {
+        assert!(parse_policy_override("0:bogus").is_err());
     }
 }

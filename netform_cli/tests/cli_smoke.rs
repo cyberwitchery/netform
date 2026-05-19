@@ -928,6 +928,150 @@ fn config_diff_auto_dialect_accepts_value() {
 }
 
 #[test]
+fn config_diff_policy_override_makes_subtree_unordered() {
+    let left = temp_file_path("left-override-sub");
+    let right = temp_file_path("right-override-sub");
+    // Two top-level blocks: "router bgp" (index 0) has reordered children.
+    fs::write(
+        &left,
+        "router bgp 65000\n  neighbor 10.0.0.1\n  neighbor 10.0.0.2\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "router bgp 65000\n  neighbor 10.0.0.2\n  neighbor 10.0.0.1\n",
+    )
+    .expect("write right");
+
+    // Without override: ordered default sees changes.
+    let ordered_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--json")
+        .arg("--no-exit-code")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff ordered");
+
+    assert!(ordered_output.status.success());
+    let ordered_json: serde_json::Value =
+        serde_json::from_slice(&ordered_output.stdout).expect("valid json");
+    assert_eq!(
+        ordered_json["has_changes"], true,
+        "ordered default should see reordering as a change"
+    );
+
+    // With --policy-override 0:unordered, the subtree ignores order.
+    let override_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--json")
+        .arg("--policy-override")
+        .arg("0:unordered")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff with --policy-override");
+
+    assert!(override_output.status.success());
+    let override_json: serde_json::Value =
+        serde_json::from_slice(&override_output.stdout).expect("valid json");
+    assert_eq!(
+        override_json["has_changes"], false,
+        "--policy-override 0:unordered should ignore reordering in that subtree"
+    );
+}
+
+#[test]
+fn config_diff_multiple_policy_overrides() {
+    let left = temp_file_path("left-multi-override");
+    let right = temp_file_path("right-multi-override");
+    fs::write(
+        &left,
+        "router bgp 65000\n  neighbor 10.0.0.1\n  neighbor 10.0.0.2\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "router bgp 65000\n  neighbor 10.0.0.2\n  neighbor 10.0.0.1\n",
+    )
+    .expect("write right");
+
+    // Multiple --policy-override flags are accepted.
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--json")
+        .arg("--policy-override")
+        .arg("0:unordered")
+        .arg("--policy-override")
+        .arg("0.1:keyed-stable")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff with multiple --policy-override");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    // The overrides should be present in the output JSON.
+    let overrides = &diff_json["order_policy"]["overrides"];
+    assert_eq!(overrides.as_array().map(|a| a.len()), Some(2));
+}
+
+#[test]
+fn config_diff_policy_override_appears_in_json_output() {
+    let path = temp_file_path("override-json");
+    fs::write(&path, "hostname router\n").expect("write file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--json")
+        .arg("--policy-override")
+        .arg("0:keyed-stable")
+        .arg(&path)
+        .arg(&path)
+        .output()
+        .expect("run config-diff with --policy-override");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let overrides = &diff_json["order_policy"]["overrides"];
+    assert!(overrides.is_array());
+    assert_eq!(overrides[0]["context_prefix"], serde_json::json!([0]));
+    assert_eq!(overrides[0]["policy"], "keyed-stable");
+}
+
+#[test]
+fn config_diff_policy_override_invalid_format_fails() {
+    let path = temp_file_path("override-bad");
+    fs::write(&path, "hostname router\n").expect("write file");
+
+    // Missing colon separator.
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--policy-override")
+        .arg("0-unordered")
+        .arg(&path)
+        .arg(&path)
+        .output()
+        .expect("run config-diff with bad --policy-override");
+
+    assert!(
+        !output.status.success(),
+        "invalid override format should fail"
+    );
+}
+
+#[test]
+fn config_diff_policy_override_invalid_policy_fails() {
+    let path = temp_file_path("override-bad-policy");
+    fs::write(&path, "hostname router\n").expect("write file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--policy-override")
+        .arg("0:bogus")
+        .arg(&path)
+        .arg(&path)
+        .output()
+        .expect("run config-diff with bad policy name");
+
+    assert!(!output.status.success(), "unknown policy should fail");
+}
+
+#[test]
 fn replay_fixtures_cli_runs_successfully() {
     let output = Command::new(env!("CARGO_BIN_EXE_netform-replay-fixtures"))
         .output()
