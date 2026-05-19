@@ -23,8 +23,8 @@ fn diff_is_deterministic_for_embedded_corpus_pairs() {
             let a = parse_generic(a_text);
             let b = parse_generic(b_text);
 
-            let one = diff_documents(&a, &b, NormalizeOptions::default());
-            let two = diff_documents(&a, &b, NormalizeOptions::default());
+            let one = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
+            let two = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
 
             let one_json = serde_json::to_string_pretty(&one).expect("serialize first");
             let two_json = serde_json::to_string_pretty(&two).expect("serialize second");

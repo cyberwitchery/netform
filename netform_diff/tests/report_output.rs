@@ -9,7 +9,7 @@ fn markdown_report_mentions_keyed_replace() {
     let a = parse_generic("interface Ethernet1\n  description old\n");
     let b = parse_generic("interface Ethernet1\n  description new\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
@@ -33,7 +33,7 @@ fn markdown_report_shows_added_line_in_replace() {
     let a = parse_generic("interface Ethernet1\n");
     let b = parse_generic("interface Ethernet1\n  description added\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
@@ -50,7 +50,7 @@ fn markdown_report_shows_removed_line_in_replace() {
     let a = parse_generic("interface Ethernet1\n  description removed\n");
     let b = parse_generic("interface Ethernet1\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
@@ -66,7 +66,7 @@ fn markdown_report_shows_removed_line_in_replace() {
 #[test]
 fn markdown_report_no_changes_says_no_changes() {
     let a = parse_generic("hostname router\n");
-    let diff = diff_documents(&a, &a, NormalizeOptions::default());
+    let diff = diff_documents(&a, &a, NormalizeOptions::default()).unwrap();
     let report = format_markdown_report(&diff, "same.cfg", "same.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(report.contains("# Config Diff Report"));
@@ -80,7 +80,7 @@ fn markdown_report_no_changes_says_no_changes() {
 fn markdown_report_shows_labels() {
     let a = parse_generic("hostname old\n");
     let b = parse_generic("hostname new\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let report = format_markdown_report(&diff, "before.cfg", "after.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(report.contains("- Left: `before.cfg`"));
@@ -91,7 +91,7 @@ fn markdown_report_shows_labels() {
 fn markdown_report_insert_shows_added_lines() {
     let a = parse_generic("");
     let b = parse_generic("hostname new\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let report = format_markdown_report(&diff, "empty.cfg", "new.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
@@ -103,7 +103,7 @@ fn markdown_report_insert_shows_added_lines() {
 fn markdown_report_delete_shows_removed_lines() {
     let a = parse_generic("hostname old\n");
     let b = parse_generic("");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let report = format_markdown_report(&diff, "old.cfg", "empty.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
@@ -118,7 +118,7 @@ fn markdown_report_truncates_long_edits() {
     let b_lines: Vec<String> = (0..20).map(|i| format!("line-b-{i}")).collect();
     let a = parse_generic(&a_lines.join("\n"));
     let b = parse_generic(&b_lines.join("\n"));
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
 
     // Use max_lines_shown=3 to force truncation
     let report = format_markdown_report(&diff, "a.cfg", "b.cfg", 3);
@@ -134,7 +134,7 @@ fn markdown_report_truncates_long_edits() {
 fn markdown_report_stats_are_correct_for_multiple_edits() {
     let a = parse_generic("line1\nline2\nline3\n");
     let b = parse_generic("line1\nchanged\nline3\nnew-line\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let report = format_markdown_report(&diff, "a.cfg", "b.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
@@ -148,7 +148,7 @@ fn markdown_report_stats_are_correct_for_multiple_edits() {
 #[test]
 fn unified_diff_empty_for_no_changes() {
     let a = parse_generic("hostname router\n");
-    let diff = diff_documents(&a, &a, NormalizeOptions::default());
+    let diff = diff_documents(&a, &a, NormalizeOptions::default()).unwrap();
     // Suppress ANSI colors for test
     owo_colors::set_override(false);
     let output = format_unified_diff(&diff, "a.cfg", "a.cfg", DEFAULT_CONTEXT_LINES);
@@ -164,7 +164,7 @@ fn unified_diff_empty_for_no_changes() {
 fn unified_diff_shows_headers_and_hunks() {
     let a = parse_generic("hostname old\n");
     let b = parse_generic("hostname new\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     owo_colors::set_override(false);
     let output = format_unified_diff(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
     owo_colors::set_override(true);
@@ -190,7 +190,7 @@ fn json_output_is_stable_shape() {
     let a = parse_generic("set system host-name a\n");
     let b = parse_generic("set system host-name b\n");
 
-    let diff = diff_documents(&a, &b, NormalizeOptions::default());
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let json = serde_json::to_string_pretty(&diff).expect("serialize diff");
 
     assert!(diff.has_changes);

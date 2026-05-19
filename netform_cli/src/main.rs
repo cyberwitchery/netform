@@ -198,7 +198,13 @@ fn main() {
         overrides: cli.policy_override,
     });
 
-    let diff = diff_documents(&a_doc, &b_doc, options);
+    let diff = match diff_documents(&a_doc, &b_doc, options) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("config-diff: {e}");
+            process::exit(2);
+        }
+    };
 
     let use_color = if cli.color {
         true

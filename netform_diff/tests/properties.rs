@@ -172,8 +172,8 @@ proptest! {
         let doc_a = parse_generic(&a);
         let doc_b = parse_generic(&b);
 
-        let one = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
-        let two = diff_documents(&doc_a, &doc_b, NormalizeOptions::default());
+        let one = diff_documents(&doc_a, &doc_b, NormalizeOptions::default()).unwrap();
+        let two = diff_documents(&doc_a, &doc_b, NormalizeOptions::default()).unwrap();
 
         prop_assert_eq!(one, two);
     }
@@ -189,7 +189,7 @@ proptest! {
     #[test]
     fn self_diff_has_no_changes_generic(input in text_strategy()) {
         let doc = parse_generic(&input);
-        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "self-diff should report no changes");
         prop_assert!(diff.edits.is_empty(), "self-diff should have no edits");
         prop_assert_eq!(diff.stats.inserts, 0);
@@ -201,7 +201,7 @@ proptest! {
     fn self_diff_has_no_changes_eos(input in ios_like_strategy()) {
         let dialect = netform_dialect_eos::EOS_DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
-        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "EOS self-diff should report no changes");
     }
 
@@ -209,7 +209,7 @@ proptest! {
     fn self_diff_has_no_changes_eos_dialect_constructs(input in eos_strategy()) {
         let dialect = netform_dialect_eos::EOS_DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
-        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "EOS self-diff (dialect constructs) should report no changes");
     }
 
@@ -217,7 +217,7 @@ proptest! {
     fn self_diff_has_no_changes_nxos(input in ios_like_strategy()) {
         let dialect = netform_dialect_nxos::NXOS_DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
-        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "NX-OS self-diff should report no changes");
     }
 
@@ -225,7 +225,7 @@ proptest! {
     fn self_diff_has_no_changes_nxos_dialect_constructs(input in nxos_strategy()) {
         let dialect = netform_dialect_nxos::NXOS_DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
-        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "NX-OS self-diff (dialect constructs) should report no changes");
     }
 
@@ -233,7 +233,7 @@ proptest! {
     fn self_diff_has_no_changes_iosxe(input in ios_like_strategy()) {
         let dialect = netform_dialect_iosxe::IOSXE_DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
-        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "IOS-XE self-diff should report no changes");
     }
 
@@ -241,7 +241,7 @@ proptest! {
     fn self_diff_has_no_changes_fortios(input in fortios_strategy()) {
         let dialect = netform_dialect_fortios::FortiosDialect;
         let doc = parse_with_dialect(&input, &dialect);
-        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "FortiOS self-diff should report no changes");
     }
 
@@ -249,7 +249,7 @@ proptest! {
     fn self_diff_has_no_changes_junos(input in junos_strategy()) {
         let dialect = netform_dialect_junos::JunosDialect;
         let doc = parse_with_dialect(&input, &dialect);
-        let diff = diff_documents(&doc, &doc, NormalizeOptions::default());
+        let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "Junos self-diff should report no changes");
     }
 
@@ -259,8 +259,8 @@ proptest! {
     fn normalization_idempotent_ignore_comments(input in text_strategy()) {
         let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
         let doc = parse_generic(&input);
-        let diff1 = diff_documents(&doc, &doc, opts.clone());
-        let diff2 = diff_documents(&doc, &doc, opts);
+        let diff1 = diff_documents(&doc, &doc, opts.clone()).unwrap();
+        let diff2 = diff_documents(&doc, &doc, opts).unwrap();
         prop_assert_eq!(diff1, diff2, "normalization should be idempotent");
     }
 
@@ -268,8 +268,8 @@ proptest! {
     fn normalization_idempotent_ignore_blanks(input in text_strategy()) {
         let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreBlankLines]);
         let doc = parse_generic(&input);
-        let diff1 = diff_documents(&doc, &doc, opts.clone());
-        let diff2 = diff_documents(&doc, &doc, opts);
+        let diff1 = diff_documents(&doc, &doc, opts.clone()).unwrap();
+        let diff2 = diff_documents(&doc, &doc, opts).unwrap();
         prop_assert_eq!(diff1, diff2, "normalization should be idempotent");
     }
 
@@ -283,8 +283,8 @@ proptest! {
             NormalizationStep::CollapseInternalWhitespace,
         ]);
         let doc = parse_generic(&input);
-        let diff1 = diff_documents(&doc, &doc, opts.clone());
-        let diff2 = diff_documents(&doc, &doc, opts);
+        let diff1 = diff_documents(&doc, &doc, opts.clone()).unwrap();
+        let diff2 = diff_documents(&doc, &doc, opts).unwrap();
         prop_assert_eq!(diff1, diff2, "all-step normalization should be idempotent");
     }
 

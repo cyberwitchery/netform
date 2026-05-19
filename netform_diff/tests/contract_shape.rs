@@ -27,7 +27,7 @@ fn diff_json_shape_contract() {
     let intended = parse_generic("interface Ethernet1\n  description intended\n");
     let actual = parse_generic("interface Ethernet1\n  description actual\n");
 
-    let diff = diff_documents(&intended, &actual, NormalizeOptions::default());
+    let diff = diff_documents(&intended, &actual, NormalizeOptions::default()).unwrap();
     let value = serde_json::to_value(&diff).expect("serialize diff");
 
     let obj = value.as_object().expect("diff should be object");
@@ -92,8 +92,8 @@ fn diff_json_is_byte_stable_across_runs() {
     let intended = parse_generic("line a\nline b\nline c\n");
     let actual = parse_generic("line a\nline x\nline c\n");
 
-    let one = diff_documents(&intended, &actual, NormalizeOptions::default());
-    let two = diff_documents(&intended, &actual, NormalizeOptions::default());
+    let one = diff_documents(&intended, &actual, NormalizeOptions::default()).unwrap();
+    let two = diff_documents(&intended, &actual, NormalizeOptions::default()).unwrap();
 
     let one_json = serde_json::to_string_pretty(&one).expect("serialize first");
     let two_json = serde_json::to_string_pretty(&two).expect("serialize second");
