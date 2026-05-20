@@ -57,32 +57,34 @@ impl Dialect for NxosDialect {
     }
 }
 
-/// NX-OS interface type prefixes and their canonical lowercase names.
+/// NX-OS interface type prefixes in canonical lowercase form.
 ///
 /// Order matters: longer prefixes must come first so `port-channel` matches
-/// before a hypothetical `port` prefix.
-const NXOS_INTERFACE_TYPES: &[(&str, &str)] = &[
-    ("Ethernet", "ethernet"),
-    ("ethernet", "ethernet"),
-    ("port-channel", "port-channel"),
-    ("Port-channel", "port-channel"),
-    ("Vlan", "vlan"),
-    ("vlan", "vlan"),
-    ("loopback", "loopback"),
-    ("Loopback", "loopback"),
-    ("mgmt", "mgmt"),
-    ("nve", "nve"),
-    ("Nve", "nve"),
+/// before a hypothetical `port` prefix. Matching is case-insensitive so that
+/// `Ethernet1/1`, `ethernet1/1`, and `ETHERNET1/1` all normalize the same way.
+const NXOS_INTERFACE_TYPES: &[&str] = &[
+    "port-channel",
+    "ethernet",
+    "loopback",
+    "fabric",
+    "tunnel",
+    "vlan",
+    "mgmt",
+    "nve",
 ];
 
 /// Parse an NX-OS interface name into `(canonical_type, id)`.
 ///
-/// Returns `None` if the name doesn't match any known NX-OS interface type.
+/// Uses case-insensitive prefix matching so that any casing of a known
+/// interface type normalizes to the canonical lowercase form.
+///
+/// Returns `None` if the name doesn't match any known NX-OS interface type
+/// or has no ID portion after the prefix.
 fn parse_nxos_interface(name: &str) -> Option<(&'static str, &str)> {
-    for &(prefix, canonical) in NXOS_INTERFACE_TYPES {
-        if let Some(id) = name.strip_prefix(prefix)
-            && !id.is_empty()
-        {
+    let lower = name.to_ascii_lowercase();
+    for &canonical in NXOS_INTERFACE_TYPES {
+        if lower.starts_with(canonical) && name.len() > canonical.len() {
+            let id = &name[canonical.len()..];
             return Some((canonical, id));
         }
     }
@@ -116,6 +118,7 @@ fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
         },
         "router" => match args {
             [proto, asn, ..] if proto == "bgp" => Some(format!("router:bgp:{asn}")),
+            [proto, id, ..] if proto == "ospf" => Some(format!("router:ospf:{id}")),
             [proto, ..] => Some(format!("router:{proto}")),
             _ => None,
         },
@@ -333,6 +336,40 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_interface_tunnel() {
+        assert_eq!(hint("interface tunnel0"), Some("interface:tunnel:0".into()),);
+    }
+
+    #[test]
+    fn key_hint_interface_tunnel_capitalized() {
+        assert_eq!(hint("interface Tunnel1"), Some("interface:tunnel:1".into()),);
+    }
+
+    #[test]
+    fn key_hint_interface_fabric() {
+        assert_eq!(
+            hint("interface fabric1/1"),
+            Some("interface:fabric:1/1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_fabric_capitalized() {
+        assert_eq!(
+            hint("interface Fabric1/1"),
+            Some("interface:fabric:1/1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_ethernet_allcaps() {
+        assert_eq!(
+            hint("interface ETHERNET1/1"),
+            Some("interface:ethernet:1/1".into()),
+        );
+    }
+
+    #[test]
     fn key_hint_interface_unknown_type() {
         // Unknown types fall back to raw name.
         assert_eq!(
@@ -381,8 +418,13 @@ mod tests {
     }
 
     #[test]
-    fn key_hint_router_ospf() {
-        assert_eq!(hint("router ospf 1"), Some("router:ospf".into()));
+    fn key_hint_router_ospf_with_process_id() {
+        assert_eq!(hint("router ospf 1"), Some("router:ospf:1".into()));
+    }
+
+    #[test]
+    fn key_hint_router_ospf_without_process_id() {
+        assert_eq!(hint("router ospf"), Some("router:ospf".into()));
     }
 
     // -- route-map --
