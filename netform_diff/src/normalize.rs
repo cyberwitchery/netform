@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use netform_ir::{TriviaKind, count_indent};
 
 use crate::model::{NormalizationStep, NormalizeOptions};
@@ -7,7 +9,7 @@ pub(crate) fn normalize_for_compare(
     trivia: TriviaKind,
     options: &NormalizeOptions,
 ) -> Option<String> {
-    let mut output = raw.to_string();
+    let mut output: Cow<'_, str> = Cow::Borrowed(raw);
 
     for step in &options.steps {
         match step {
@@ -22,26 +24,43 @@ pub(crate) fn normalize_for_compare(
                 }
             }
             NormalizationStep::TrimTrailingWhitespace => {
-                output = output.trim_end().to_string();
+                let trimmed_len = output.trim_end().len();
+                if trimmed_len < output.len() {
+                    match &mut output {
+                        Cow::Borrowed(s) => *s = &s[..trimmed_len],
+                        Cow::Owned(s) => s.truncate(trimmed_len),
+                    }
+                }
             }
             NormalizationStep::NormalizeLeadingWhitespace => {
                 let indent = count_indent(&output);
-                let body = output.trim_start_matches([' ', '\t']).to_string();
-                output = format!("{}{}", " ".repeat(indent), body);
+                let body = output.trim_start_matches([' ', '\t']);
+                let leading_byte_len = output.len() - body.len();
+                // No-op when leading whitespace is already canonical spaces.
+                // count_indent returns 1 per space, 4 per tab, so byte_len == indent
+                // implies every leading byte is a space.
+                if leading_byte_len != indent {
+                    output = Cow::Owned(format!(
+                        "{}{}",
+                        " ".repeat(indent),
+                        &output[leading_byte_len..]
+                    ));
+                }
             }
             NormalizationStep::CollapseInternalWhitespace => {
                 let leading_len = output.len() - output.trim_start().len();
-                let prefix = output[..leading_len].to_string();
                 let collapsed = output[leading_len..]
                     .split_whitespace()
                     .collect::<Vec<_>>()
                     .join(" ");
-                output = format!("{prefix}{collapsed}");
+                if collapsed.len() != output.len() - leading_len {
+                    output = Cow::Owned(format!("{}{collapsed}", &output[..leading_len]));
+                }
             }
         }
     }
 
-    Some(output)
+    Some(output.into_owned())
 }
 
 pub(crate) fn trivia_tag(kind: TriviaKind) -> &'static str {
