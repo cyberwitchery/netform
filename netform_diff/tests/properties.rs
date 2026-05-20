@@ -456,8 +456,8 @@ interface Ethernet1/1
         "missing system:jumbomtu"
     );
     assert!(
-        hints.contains(&"interface:Ethernet1/1"),
-        "missing interface:Ethernet1/1"
+        hints.contains(&"interface:ethernet:1/1"),
+        "missing interface:ethernet:1/1"
     );
 }
 

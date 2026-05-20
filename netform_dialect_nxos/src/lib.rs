@@ -1,7 +1,8 @@
 //! Cisco NX-OS-oriented dialect profile for `netform_ir`.
 //!
-//! This crate re-exports [`IosLikeDialect`] parameterised to `"nxos"` and
-//! provides the [`parse_nxos`] convenience function.
+//! This crate provides a dedicated [`NxosDialect`] that customizes key-hint
+//! derivation for NX-OS-specific constructs while reusing the shared IOS-like
+//! trivia classification and line tokenization.
 //!
 //! # Example
 //!
@@ -13,23 +14,197 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::{Document, IosLikeDialect, parse_with_dialect};
+use netform_ir::{
+    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
+    parse_ios_like_parts, parse_with_dialect,
+};
+
+/// Dialect implementation for Cisco NX-OS configuration text.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NxosDialect;
 
 /// Pre-built NX-OS dialect instance.
-pub const NXOS_DIALECT: IosLikeDialect = IosLikeDialect::new("nxos");
+pub const NXOS_DIALECT: NxosDialect = NxosDialect;
 
-/// Backward-compatible type alias for the NX-OS dialect.
-pub type NxosDialect = IosLikeDialect;
-
-/// Parse text using the NX-OS dialect.
+/// Parse text using [`NxosDialect`].
 pub fn parse_nxos(input: &str) -> Document {
-    parse_with_dialect(input, &NXOS_DIALECT)
+    parse_with_dialect(input, &NxosDialect)
+}
+
+impl Dialect for NxosDialect {
+    fn dialect_hint(&self) -> DialectHint {
+        DialectHint::Named("nxos".to_string())
+    }
+
+    fn classify_trivia(&self, raw: &str) -> TriviaKind {
+        classify_ios_like_trivia(raw)
+    }
+
+    fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
+        parse_ios_like_parts(raw)
+    }
+
+    fn key_hint(
+        &self,
+        _raw: &str,
+        parsed: Option<&ParsedLineParts>,
+        trivia: TriviaKind,
+    ) -> Option<String> {
+        if trivia != TriviaKind::Content {
+            return None;
+        }
+        nxos_key_hint(parsed)
+    }
+}
+
+/// NX-OS interface type prefixes and their canonical lowercase names.
+///
+/// Order matters: longer prefixes must come first so `port-channel` matches
+/// before a hypothetical `port` prefix.
+const NXOS_INTERFACE_TYPES: &[(&str, &str)] = &[
+    ("Ethernet", "ethernet"),
+    ("ethernet", "ethernet"),
+    ("port-channel", "port-channel"),
+    ("Port-channel", "port-channel"),
+    ("Vlan", "vlan"),
+    ("vlan", "vlan"),
+    ("loopback", "loopback"),
+    ("Loopback", "loopback"),
+    ("mgmt", "mgmt"),
+    ("nve", "nve"),
+    ("Nve", "nve"),
+];
+
+/// Parse an NX-OS interface name into `(canonical_type, id)`.
+///
+/// Returns `None` if the name doesn't match any known NX-OS interface type.
+fn parse_nxos_interface(name: &str) -> Option<(&'static str, &str)> {
+    for &(prefix, canonical) in NXOS_INTERFACE_TYPES {
+        if let Some(id) = name.strip_prefix(prefix)
+            && !id.is_empty()
+        {
+            return Some((canonical, id));
+        }
+    }
+    None
+}
+
+/// Derive a stable identity key for NX-OS configuration lines.
+///
+/// Covers all IOS-like constructs plus NX-OS-specific enhancements:
+/// - Interface type normalization (`Ethernet1/1` → `interface:ethernet:1/1`)
+/// - `feature`, `vpc domain`, `role name`, `monitor session`, `ntp`, `system`
+fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+    let parsed = parsed?;
+    let head = parsed.head.as_str();
+    let args = parsed.args.as_slice();
+
+    match head {
+        "interface" => {
+            let name = args.first()?;
+            if let Some((itype, id)) = parse_nxos_interface(name) {
+                Some(format!("interface:{itype}:{id}"))
+            } else {
+                Some(format!("interface:{name}"))
+            }
+        }
+        "vlan" => args.first().map(|id| format!("vlan:{id}")),
+        "vrf" => match args {
+            [sub, name, ..] if sub == "context" => Some(format!("vrf:{name}")),
+            [name, ..] => Some(format!("vrf:{name}")),
+            _ => None,
+        },
+        "router" => match args {
+            [proto, asn, ..] if proto == "bgp" => Some(format!("router:bgp:{asn}")),
+            [proto, ..] => Some(format!("router:{proto}")),
+            _ => None,
+        },
+        "route-map" => match args {
+            [name, action, seq, ..] => Some(format!("route-map:{name}:{action}:{seq}")),
+            [name, action] => Some(format!("route-map:{name}:{action}")),
+            _ => None,
+        },
+        "class-map" => match args {
+            [_match_kind, name, ..] => Some(format!("class-map:{name}")),
+            [name] => Some(format!("class-map:{name}")),
+            _ => None,
+        },
+        "policy-map" => args.first().map(|name| format!("policy-map:{name}")),
+        "ip" => match args {
+            [next, kind, name, ..] if next == "access-list" => {
+                Some(format!("ip-access-list:{kind}:{name}"))
+            }
+            [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
+            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
+            [next, kind, name, ..] if next == "community-list" => {
+                Some(format!("ip-community-list:{kind}:{name}"))
+            }
+            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
+                Some(format!("ip-route:{vrf_name}:{prefix}"))
+            }
+            [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
+            _ => None,
+        },
+        "ipv6" => match args {
+            [next, name, ..] if next == "access-list" => Some(format!("ipv6-access-list:{name}")),
+            [next, name, ..] if next == "prefix-list" => Some(format!("ipv6-prefix-list:{name}")),
+            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
+                Some(format!("ipv6-route:{vrf_name}:{prefix}"))
+            }
+            [next, prefix, ..] if next == "route" => Some(format!("ipv6-route:{prefix}")),
+            _ => None,
+        },
+        "access-list" => args.first().map(|num| format!("access-list:{num}")),
+        "crypto" => match args {
+            [kind, sub, name, ..] if kind == "ikev2" => Some(format!("crypto:ikev2:{sub}:{name}")),
+            [kind, sub, name, ..] if kind == "ipsec" => Some(format!("crypto:ipsec:{sub}:{name}")),
+            [kind, name, ..] if kind == "map" => Some(format!("crypto:map:{name}")),
+            [kind, num, ..] if kind == "isakmp" => Some(format!("crypto:isakmp:{num}")),
+            _ => None,
+        },
+        "spanning-tree" => match args {
+            [next, id, ..] if next == "vlan" => Some(format!("spanning-tree:vlan:{id}")),
+            _ => None,
+        },
+        "line" => match args {
+            [kind, from, to, ..] => Some(format!("line:{kind}:{from}:{to}")),
+            [kind, one, ..] => Some(format!("line:{kind}:{one}")),
+            _ => None,
+        },
+        // -- NX-OS-specific constructs --
+        "feature" => args.first().map(|name| format!("feature:{name}")),
+        "vpc" => match args {
+            [sub, id, ..] if sub == "domain" => Some(format!("vpc-domain:{id}")),
+            _ => None,
+        },
+        "role" => match args {
+            [sub, name, ..] if sub == "name" => Some(format!("role:{name}")),
+            _ => None,
+        },
+        "monitor" => match args {
+            [sub, id, ..] if sub == "session" => Some(format!("monitor-session:{id}")),
+            _ => None,
+        },
+        "ntp" => match args {
+            [kind, addr, ..] if kind == "server" || kind == "peer" => {
+                Some(format!("ntp:{kind}:{addr}"))
+            }
+            _ => None,
+        },
+        "system" => match args {
+            [sub, ..] => Some(format!("system:{sub}")),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use netform_ir::{DialectHint, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts};
+
+    // -- trivia classification (inherited from IOS-like) --
 
     #[test]
     fn nxos_comment_classification_supports_bang_and_hash() {
@@ -41,6 +216,8 @@ mod tests {
         );
     }
 
+    // -- tokenization (inherited from IOS-like) --
+
     #[test]
     fn nxos_tokenization_keeps_quoted_values_together() {
         let parsed =
@@ -49,9 +226,422 @@ mod tests {
         assert_eq!(parsed.args, vec!["\"Uplink to spine\""]);
     }
 
+    // -- dialect hint --
+
     #[test]
     fn parse_nxos_sets_named_dialect_hint() {
         let doc = parse_nxos("hostname n9k-leaf-01\n");
         assert_eq!(doc.metadata.dialect_hint, DialectHint::Named("nxos".into()));
+    }
+
+    // -- key hint helper --
+
+    fn hint(line: &str) -> Option<String> {
+        let parsed = parse_ios_like_parts(line);
+        nxos_key_hint(parsed.as_ref())
+    }
+
+    // -- NX-OS interface type normalization --
+
+    #[test]
+    fn key_hint_interface_ethernet_slot_port() {
+        assert_eq!(
+            hint("interface Ethernet1/1"),
+            Some("interface:ethernet:1/1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_ethernet_fex() {
+        assert_eq!(
+            hint("interface Ethernet1/1/1"),
+            Some("interface:ethernet:1/1/1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_ethernet_subinterface() {
+        assert_eq!(
+            hint("interface Ethernet1/1.100"),
+            Some("interface:ethernet:1/1.100".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_ethernet_lowercase() {
+        assert_eq!(
+            hint("interface ethernet1/1"),
+            Some("interface:ethernet:1/1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_port_channel() {
+        assert_eq!(
+            hint("interface port-channel10"),
+            Some("interface:port-channel:10".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_port_channel_capitalized() {
+        assert_eq!(
+            hint("interface Port-channel10"),
+            Some("interface:port-channel:10".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_vlan() {
+        assert_eq!(hint("interface Vlan100"), Some("interface:vlan:100".into()),);
+    }
+
+    #[test]
+    fn key_hint_interface_vlan_lowercase() {
+        assert_eq!(hint("interface vlan100"), Some("interface:vlan:100".into()),);
+    }
+
+    #[test]
+    fn key_hint_interface_loopback() {
+        assert_eq!(
+            hint("interface loopback0"),
+            Some("interface:loopback:0".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_loopback_capitalized() {
+        assert_eq!(
+            hint("interface Loopback0"),
+            Some("interface:loopback:0".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_mgmt() {
+        assert_eq!(hint("interface mgmt0"), Some("interface:mgmt:0".into()),);
+    }
+
+    #[test]
+    fn key_hint_interface_nve() {
+        assert_eq!(hint("interface nve1"), Some("interface:nve:1".into()),);
+    }
+
+    #[test]
+    fn key_hint_interface_nve_capitalized() {
+        assert_eq!(hint("interface Nve1"), Some("interface:nve:1".into()),);
+    }
+
+    #[test]
+    fn key_hint_interface_unknown_type() {
+        // Unknown types fall back to raw name.
+        assert_eq!(
+            hint("interface GigabitEthernet0/0/0"),
+            Some("interface:GigabitEthernet0/0/0".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_interface_bare_no_hint() {
+        assert_eq!(hint("interface"), None);
+    }
+
+    // -- vlan (including ranges) --
+
+    #[test]
+    fn key_hint_vlan_single() {
+        assert_eq!(hint("vlan 100"), Some("vlan:100".into()));
+    }
+
+    #[test]
+    fn key_hint_vlan_range() {
+        assert_eq!(
+            hint("vlan 1-100,200,300-400"),
+            Some("vlan:1-100,200,300-400".into()),
+        );
+    }
+
+    // -- vrf --
+
+    #[test]
+    fn key_hint_vrf_context() {
+        assert_eq!(hint("vrf context MGMT"), Some("vrf:MGMT".into()));
+    }
+
+    #[test]
+    fn key_hint_vrf_bare() {
+        assert_eq!(hint("vrf MGMT"), Some("vrf:MGMT".into()));
+    }
+
+    // -- router --
+
+    #[test]
+    fn key_hint_router_bgp() {
+        assert_eq!(hint("router bgp 65001"), Some("router:bgp:65001".into()));
+    }
+
+    #[test]
+    fn key_hint_router_ospf() {
+        assert_eq!(hint("router ospf 1"), Some("router:ospf".into()));
+    }
+
+    // -- route-map --
+
+    #[test]
+    fn key_hint_route_map_full() {
+        assert_eq!(
+            hint("route-map REDISTRIBUTE permit 10"),
+            Some("route-map:REDISTRIBUTE:permit:10".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_route_map_no_seq() {
+        assert_eq!(
+            hint("route-map EXPORT deny"),
+            Some("route-map:EXPORT:deny".into()),
+        );
+    }
+
+    // -- ip access-list --
+
+    #[test]
+    fn key_hint_ip_access_list() {
+        assert_eq!(
+            hint("ip access-list ACL-MGMT"),
+            Some("ip-access-list:ACL-MGMT".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ip_access_list_extended() {
+        assert_eq!(
+            hint("ip access-list extended BLOCK-RFC1918"),
+            Some("ip-access-list:extended:BLOCK-RFC1918".into()),
+        );
+    }
+
+    // -- ip prefix-list --
+
+    #[test]
+    fn key_hint_ip_prefix_list() {
+        assert_eq!(
+            hint("ip prefix-list DEFAULT-ONLY"),
+            Some("prefix-list:DEFAULT-ONLY".into()),
+        );
+    }
+
+    // -- ip route --
+
+    #[test]
+    fn key_hint_ip_route() {
+        assert_eq!(
+            hint("ip route 10.0.0.0/8 192.168.1.1"),
+            Some("ip-route:10.0.0.0/8".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ip_route_vrf() {
+        assert_eq!(
+            hint("ip route vrf MGMT 0.0.0.0/0 10.0.0.1"),
+            Some("ip-route:MGMT:0.0.0.0/0".into()),
+        );
+    }
+
+    // -- feature (NX-OS specific) --
+
+    #[test]
+    fn key_hint_feature() {
+        assert_eq!(hint("feature ospf"), Some("feature:ospf".into()));
+        assert_eq!(hint("feature bgp"), Some("feature:bgp".into()));
+        assert_eq!(hint("feature vpc"), Some("feature:vpc".into()));
+        assert_eq!(
+            hint("feature interface-vlan"),
+            Some("feature:interface-vlan".into()),
+        );
+    }
+
+    // -- vpc domain (NX-OS specific) --
+
+    #[test]
+    fn key_hint_vpc_domain() {
+        assert_eq!(hint("vpc domain 10"), Some("vpc-domain:10".into()));
+        assert_eq!(hint("vpc domain 100"), Some("vpc-domain:100".into()));
+    }
+
+    #[test]
+    fn key_hint_vpc_no_domain() {
+        assert_eq!(hint("vpc orphan-ports suspend"), None);
+    }
+
+    // -- role name (NX-OS specific) --
+
+    #[test]
+    fn key_hint_role_name() {
+        assert_eq!(
+            hint("role name custom-admin"),
+            Some("role:custom-admin".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_role_no_name() {
+        assert_eq!(hint("role feature-group name"), None);
+    }
+
+    // -- monitor session (NX-OS specific) --
+
+    #[test]
+    fn key_hint_monitor_session() {
+        assert_eq!(hint("monitor session 1"), Some("monitor-session:1".into()));
+    }
+
+    #[test]
+    fn key_hint_monitor_no_session() {
+        assert_eq!(hint("monitor copp-system-p-policy"), None);
+    }
+
+    // -- ntp (NX-OS specific) --
+
+    #[test]
+    fn key_hint_ntp_server() {
+        assert_eq!(
+            hint("ntp server 10.0.0.1"),
+            Some("ntp:server:10.0.0.1".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_ntp_peer() {
+        assert_eq!(hint("ntp peer 10.0.0.2"), Some("ntp:peer:10.0.0.2".into()));
+    }
+
+    #[test]
+    fn key_hint_ntp_no_match() {
+        assert_eq!(hint("ntp source-interface mgmt0"), None);
+    }
+
+    // -- system (NX-OS specific) --
+
+    #[test]
+    fn key_hint_system() {
+        assert_eq!(hint("system jumbomtu 9216"), Some("system:jumbomtu".into()));
+        assert_eq!(
+            hint("system default switchport"),
+            Some("system:default".into()),
+        );
+    }
+
+    // -- class-map / policy-map --
+
+    #[test]
+    fn key_hint_class_map() {
+        assert_eq!(
+            hint("class-map match-all VOICE"),
+            Some("class-map:VOICE".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_policy_map() {
+        assert_eq!(
+            hint("policy-map QOS-POLICY"),
+            Some("policy-map:QOS-POLICY".into()),
+        );
+    }
+
+    // -- spanning-tree --
+
+    #[test]
+    fn key_hint_spanning_tree_vlan() {
+        assert_eq!(
+            hint("spanning-tree vlan 1-100 priority 4096"),
+            Some("spanning-tree:vlan:1-100".into()),
+        );
+    }
+
+    // -- crypto --
+
+    #[test]
+    fn key_hint_crypto_ikev2() {
+        assert_eq!(
+            hint("crypto ikev2 proposal PROP-1"),
+            Some("crypto:ikev2:proposal:PROP-1".into()),
+        );
+    }
+
+    // -- line --
+
+    #[test]
+    fn key_hint_line() {
+        assert_eq!(hint("line vty 0 4"), Some("line:vty:0:4".into()));
+        assert_eq!(hint("line con 0"), Some("line:con:0".into()));
+    }
+
+    // -- negative cases --
+
+    #[test]
+    fn key_hint_none_for_unknown() {
+        assert_eq!(hint("hostname ROUTER-1"), None);
+    }
+
+    #[test]
+    fn key_hint_none_on_empty() {
+        assert_eq!(nxos_key_hint(None), None);
+    }
+
+    // -- round-trip parsing --
+
+    #[test]
+    fn parse_nxos_round_trip() {
+        let cfg = "\
+hostname n9k-leaf-01
+!
+feature bgp
+feature interface-vlan
+feature lacp
+feature vpc
+!
+vlan 10
+  name SERVERS
+vlan 20
+  name MGMT
+!
+vpc domain 10
+  peer-keepalive destination 10.1.1.2
+!
+interface Ethernet1/1
+  description uplink-spine-a
+  mtu 9216
+  ip address 192.0.2.2/31
+  no shutdown
+interface port-channel10
+  description vpc-peer-link
+interface Vlan100
+  ip address 10.10.1.1/24
+interface loopback0
+  ip address 10.255.255.1/32
+interface mgmt0
+  ip address 10.0.0.1/24
+!
+router bgp 65001
+  router-id 10.255.255.1
+";
+        let doc = parse_nxos(cfg);
+        assert_eq!(doc.render(), cfg);
+    }
+
+    // -- key hints appear on parsed document nodes --
+
+    #[test]
+    fn parsed_document_carries_nxos_interface_hints() {
+        let cfg = "interface Ethernet1/1\n  description uplink\n";
+        let doc = parse_nxos(cfg);
+        let first = match &doc.arena[doc.roots[0].0] {
+            netform_ir::Node::Block(b) => &b.header,
+            netform_ir::Node::Line(l) => l,
+        };
+        assert_eq!(first.key_hint.as_deref(), Some("interface:ethernet:1/1"),);
     }
 }
