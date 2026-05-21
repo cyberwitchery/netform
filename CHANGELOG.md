@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+## [0.5.0] - 2026-05-22
+
 - replaced `IosLikeDialect` re-export in `netform_dialect_nxos` with a dedicated `NxosDialect` struct implementing the `Dialect` trait directly — NX-OS configs now get NX-OS-specific key-hint derivation with interface type normalization (`Ethernet1/1` → `interface:ethernet:1/1`, `port-channel10` → `interface:port-channel:10`, `Vlan100` → `interface:vlan:100`, `loopback0` → `interface:loopback:0`, `mgmt0` → `interface:mgmt:0`, `nve1` → `interface:nve:1`), NX-OS-style `vrf context` handling, and `ip access-list <name>` without the IOS-style `extended`/`standard` qualifier
 - **breaking:** `diff_documents` now returns `Result<Diff, DiffError>` instead of `Diff` — the `unreachable!()` in Myers SES and `.unwrap()` calls on edit-script iterators in `engine.rs` are replaced with proper `Result`-based error propagation; callers must handle the new `DiffError` type (library code should never panic on user input)
 - eliminated intermediate string allocations in `normalize_for_compare` by using `Cow<str>` — normalization steps that are no-ops (e.g. trimming a line with no trailing whitespace) no longer allocate, and the initial `to_string()` clone is deferred until a step actually modifies the line
