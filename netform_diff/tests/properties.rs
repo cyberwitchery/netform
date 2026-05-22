@@ -106,24 +106,26 @@ fn nxos_strategy() -> impl Strategy<Value = String> {
 
 /// Generate EOS config snippets that exercise dialect-specific key hints.
 ///
-/// EOS shares most key hints with NX-OS (via `ios_like_key_hint`) but uses
-/// different interface naming and has EOS-specific constructs like `vlan`
-/// and `router bgp` stanzas.
+/// EOS has its own dedicated `EosDialect` with EOS-specific constructs like
+/// `mlag configuration`, `management api`, `daemon`, `event-handler`,
+/// `peer-filter`, and interface type normalization.
 ///
 /// Always includes at least one block-producing construct.
 fn eos_strategy() -> impl Strategy<Value = String> {
-    let feature_line = prop::sample::select(vec!["ospf", "bgp", "pim", "vxlan", "lacp"])
-        .prop_map(|f| format!("feature {f}\n"));
-
-    let vlan_block = prop::sample::select(vec!["10", "20", "100", "4094"])
-        .prop_map(|id| format!("vlan {id}\n  name production\n"));
-
     let ntp_line = prop::sample::select(vec![
         ("server", "10.1.1.1"),
         ("server", "10.2.2.2"),
         ("peer", "10.3.3.3"),
     ])
     .prop_map(|(kind, addr)| format!("ntp {kind} {addr}\n"));
+
+    let peer_filter_line =
+        prop::sample::select(vec!["LEAF-PEERS", "SPINE-PEERS"]).prop_map(|name| {
+            format!("peer-filter {name}\n  10 match as-range 65000-65100 result accept\n")
+        });
+
+    let vlan_block = prop::sample::select(vec!["10", "20", "100", "4094"])
+        .prop_map(|id| format!("vlan {id}\n  name production\n"));
 
     let router_block = prop::sample::select(vec!["65000", "65001", "4200000001"]).prop_map(|asn| {
         format!("router bgp {asn}\n  router-id 1.1.1.1\n  neighbor 10.0.0.2 remote-as {asn}\n")
@@ -133,8 +135,15 @@ fn eos_strategy() -> impl Strategy<Value = String> {
         format!("monitor session {id}\n  source Ethernet1\n  destination Ethernet2\n")
     });
 
-    let system_block = prop::sample::select(vec!["default-switchport", "l3"])
-        .prop_map(|sub| format!("system {sub}\n  no shutdown\n"));
+    let mlag_block = Just(
+        "mlag configuration\n  domain-id MLAG-DOMAIN\n  local-interface Vlan4094\n".to_string(),
+    );
+
+    let mgmt_api_block = prop::sample::select(vec!["http-commands", "gnmi"])
+        .prop_map(|kind| format!("management api {kind}\n  no shutdown\n"));
+
+    let daemon_block = prop::sample::select(vec!["TerminAttr", "myagent"])
+        .prop_map(|name| format!("daemon {name}\n  exec /usr/bin/{name}\n"));
 
     let iface_block = prop::sample::select(vec![
         "Ethernet1",
@@ -145,13 +154,15 @@ fn eos_strategy() -> impl Strategy<Value = String> {
     ])
     .prop_map(|name| format!("interface {name}\n  description uplink\n  no shutdown\n"));
 
-    let leaf = prop_oneof![feature_line, ntp_line,];
+    let leaf = prop_oneof![ntp_line, peer_filter_line,];
 
     let block = prop_oneof![
         1 => vlan_block,
         1 => router_block,
         1 => monitor_block,
-        1 => system_block,
+        1 => mlag_block,
+        1 => mgmt_api_block,
+        1 => daemon_block,
         2 => iface_block,
     ];
 
@@ -397,12 +408,14 @@ proptest! {
             .filter_map(|l| l.key_hint.as_deref())
             .collect();
         let _ = hints.iter().any(|h| {
-            h.starts_with("feature:")
+            h.starts_with("mlag")
+                || h.starts_with("management-api:")
+                || h.starts_with("daemon:")
+                || h.starts_with("peer-filter:")
                 || h.starts_with("vlan:")
                 || h.starts_with("router:")
                 || h.starts_with("monitor-session:")
                 || h.starts_with("ntp:")
-                || h.starts_with("system:")
         });
     }
 }
@@ -465,18 +478,28 @@ interface Ethernet1/1
 #[test]
 fn eos_dialect_constructs_produce_expected_hints() {
     let input = "\
-feature bgp
 vlan 100
   name production
+vrf instance MGMT
+  rd 10.255.255.1:1000
+mlag configuration
+  domain-id MLAG-DOMAIN
+management api http-commands
+  no shutdown
+daemon TerminAttr
+  exec /usr/bin/TerminAttr
+event-handler lnterface-recovery
+  action bash /mnt/flash/scripts/recovery.sh
+peer-filter LEAF-PEERS
+  10 match as-range 65000-65100 result accept
 router bgp 65000
   router-id 1.1.1.1
 monitor session 2
   source Ethernet1
-ntp server 10.1.1.1
-system l3
-  no shutdown
 interface Ethernet1
   description uplink
+interface Management1
+  ip address 10.0.0.1/24
 ";
     let dialect = netform_dialect_eos::EOS_DIALECT;
     let doc = parse_with_dialect(input, &dialect);
@@ -488,6 +511,24 @@ interface Ethernet1
         .collect();
 
     assert!(hints.contains(&"vlan:100"), "missing vlan:100");
+    assert!(hints.contains(&"vrf:MGMT"), "missing vrf:MGMT");
+    assert!(hints.contains(&"mlag"), "missing mlag");
+    assert!(
+        hints.contains(&"management-api:http-commands"),
+        "missing management-api:http-commands"
+    );
+    assert!(
+        hints.contains(&"daemon:TerminAttr"),
+        "missing daemon:TerminAttr"
+    );
+    assert!(
+        hints.contains(&"event-handler:lnterface-recovery"),
+        "missing event-handler:lnterface-recovery"
+    );
+    assert!(
+        hints.contains(&"peer-filter:LEAF-PEERS"),
+        "missing peer-filter:LEAF-PEERS"
+    );
     assert!(
         hints.contains(&"router:bgp:65000"),
         "missing router:bgp:65000"
@@ -496,10 +537,13 @@ interface Ethernet1
         hints.contains(&"monitor-session:2"),
         "missing monitor-session:2"
     );
-    assert!(hints.contains(&"system:l3"), "missing system:l3");
     assert!(
-        hints.contains(&"interface:Ethernet1"),
-        "missing interface:Ethernet1"
+        hints.contains(&"interface:ethernet:1"),
+        "missing interface:ethernet:1"
+    );
+    assert!(
+        hints.contains(&"interface:management:1"),
+        "missing interface:management:1"
     );
 }
 

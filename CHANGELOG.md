@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+- replaced `IosLikeDialect` re-export in `netform_dialect_eos` with a dedicated `EosDialect` struct implementing the `Dialect` trait directly — EOS configs now get EOS-specific key-hint derivation with interface type normalization (`Ethernet1` → `interface:ethernet:1`, `Port-Channel10` → `interface:port-channel:10`, `Vlan100` → `interface:vlan:100`, `Loopback0` → `interface:loopback:0`, `Management1` → `interface:management:1`, `Vxlan1` → `interface:vxlan:1`), EOS-style `vrf instance` handling, and EOS-specific constructs: `mlag configuration`, `management api`, `daemon`, `event-handler`, and `peer-filter`
+
 ## [0.5.0] - 2026-05-22
 
 - replaced `IosLikeDialect` re-export in `netform_dialect_nxos` with a dedicated `NxosDialect` struct implementing the `Dialect` trait directly — NX-OS configs now get NX-OS-specific key-hint derivation with interface type normalization (`Ethernet1/1` → `interface:ethernet:1/1`, `port-channel10` → `interface:port-channel:10`, `Vlan100` → `interface:vlan:100`, `loopback0` → `interface:loopback:0`, `mgmt0` → `interface:mgmt:0`, `nve1` → `interface:nve:1`), NX-OS-style `vrf context` handling, and `ip access-list <name>` without the IOS-style `extended`/`standard` qualifier
