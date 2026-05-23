@@ -427,11 +427,17 @@ fn detect_dialect(input: &str) -> CliDialect {
     let (best_dialect, best_score) = sorted[0];
     let (_, second_score) = sorted[1];
 
-    // Require a minimum score and a clear margin over the runner-up.
+    // Require a minimum score.
     if best_score < 3 {
         return CliDialect::Generic;
     }
-    if best_score > 0 && second_score > 0 && best_score < second_score * 2 {
+    // Exact ties cannot be broken by score alone — the result would
+    // depend on the arbitrary position in the candidates array.
+    if best_score == second_score {
+        return CliDialect::Generic;
+    }
+    // Require a clear margin (2×) over the runner-up.
+    if best_score < second_score * 2 {
         return CliDialect::Generic;
     }
 
@@ -603,6 +609,20 @@ set hostname myrouter
 interface Ethernet1
 ";
         // Both junos/fortios and eos get mild scores — should fall back.
+        assert_eq!(detect_dialect(input), CliDialect::Generic);
+    }
+
+    #[test]
+    fn detect_generic_on_exact_tie() {
+        // Craft input where NX-OS and EOS each score exactly 3.
+        // `feature ospf` → nxos += 3
+        // `ip access-list ACL-IN` → eos += 2
+        // `10 permit tcp any any` → eos += 1  (numbered ACL entry)
+        let input = "\
+feature ospf
+ip access-list ACL-IN
+   10 permit tcp any any
+";
         assert_eq!(detect_dialect(input), CliDialect::Generic);
     }
 
