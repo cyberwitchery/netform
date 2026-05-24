@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+- extracted `common_key_hint` in `netform_ir` to deduplicate ~12 identical match arms (`vlan`, `route-map`, `class-map`, `policy-map`, `ipv6`, `access-list`, `crypto`, `spanning-tree`, `line`, `monitor`, `ntp`) that were copied across `ios_like_key_hint`, `eos_key_hint`, and `nxos_key_hint` — each dialect-specific function now handles only its own constructs and falls back to `common_key_hint` for the shared ones
+- **breaking:** removed NX-OS-specific arms (`feature`, `vpc`, `role`, `system`) from `ios_like_key_hint` — these now live only in `nxos_key_hint` where they belong; callers using `IosLikeDialect` (i.e. IOS XE) will no longer produce key hints for NX-OS-only constructs
 - replaced `IosLikeDialect` re-export in `netform_dialect_eos` with a dedicated `EosDialect` struct implementing the `Dialect` trait directly — EOS configs now get EOS-specific key-hint derivation with interface type normalization (`Ethernet1` → `interface:ethernet:1`, `Port-Channel10` → `interface:port-channel:10`, `Vlan100` → `interface:vlan:100`, `Loopback0` → `interface:loopback:0`, `Management1` → `interface:management:1`, `Vxlan1` → `interface:vxlan:1`), EOS-style `vrf instance` handling, and EOS-specific constructs: `mlag configuration`, `management api`, `daemon`, `event-handler`, and `peer-filter`
 
 ## [0.5.0] - 2026-05-22

@@ -16,7 +16,7 @@
 
 use netform_ir::{
     Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
-    parse_ios_like_parts, parse_with_dialect,
+    common_key_hint, parse_ios_like_parts, parse_with_dialect,
 };
 
 /// Dialect implementation for Cisco NX-OS configuration text.
@@ -93,13 +93,19 @@ fn parse_nxos_interface(name: &str) -> Option<(&'static str, &str)> {
 
 /// Derive a stable identity key for NX-OS configuration lines.
 ///
-/// Covers all IOS-like constructs plus NX-OS-specific enhancements:
+/// Handles NX-OS-specific constructs first, then delegates to
+/// [`common_key_hint`] for shared IOS-like arms.
+///
+/// NX-OS-specific enhancements:
 /// - Interface type normalization (`Ethernet1/1` → `interface:ethernet:1/1`)
-/// - `feature`, `vpc domain`, `role name`, `monitor session`, `ntp`, `system`
+/// - `vrf context` syntax
+/// - `router ospf` with process ID
+/// - `ip access-list` bare form (without `extended`/`standard`)
+/// - `feature`, `vpc domain`, `role name`, `system`
 fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
-    let parsed = parsed?;
-    let head = parsed.head.as_str();
-    let args = parsed.args.as_slice();
+    let parsed_ref = parsed?;
+    let head = parsed_ref.head.as_str();
+    let args = parsed_ref.args.as_slice();
 
     match head {
         "interface" => {
@@ -110,7 +116,6 @@ fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
                 Some(format!("interface:{name}"))
             }
         }
-        "vlan" => args.first().map(|id| format!("vlan:{id}")),
         "vrf" => match args {
             [sub, name, ..] if sub == "context" => Some(format!("vrf:{name}")),
             [name, ..] => Some(format!("vrf:{name}")),
@@ -122,17 +127,6 @@ fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             [proto, ..] => Some(format!("router:{proto}")),
             _ => None,
         },
-        "route-map" => match args {
-            [name, action, seq, ..] => Some(format!("route-map:{name}:{action}:{seq}")),
-            [name, action] => Some(format!("route-map:{name}:{action}")),
-            _ => None,
-        },
-        "class-map" => match args {
-            [_match_kind, name, ..] => Some(format!("class-map:{name}")),
-            [name] => Some(format!("class-map:{name}")),
-            _ => None,
-        },
-        "policy-map" => args.first().map(|name| format!("policy-map:{name}")),
         "ip" => match args {
             [next, kind, name, ..] if next == "access-list" => {
                 Some(format!("ip-access-list:{kind}:{name}"))
@@ -148,32 +142,6 @@ fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
             _ => None,
         },
-        "ipv6" => match args {
-            [next, name, ..] if next == "access-list" => Some(format!("ipv6-access-list:{name}")),
-            [next, name, ..] if next == "prefix-list" => Some(format!("ipv6-prefix-list:{name}")),
-            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
-                Some(format!("ipv6-route:{vrf_name}:{prefix}"))
-            }
-            [next, prefix, ..] if next == "route" => Some(format!("ipv6-route:{prefix}")),
-            _ => None,
-        },
-        "access-list" => args.first().map(|num| format!("access-list:{num}")),
-        "crypto" => match args {
-            [kind, sub, name, ..] if kind == "ikev2" => Some(format!("crypto:ikev2:{sub}:{name}")),
-            [kind, sub, name, ..] if kind == "ipsec" => Some(format!("crypto:ipsec:{sub}:{name}")),
-            [kind, name, ..] if kind == "map" => Some(format!("crypto:map:{name}")),
-            [kind, num, ..] if kind == "isakmp" => Some(format!("crypto:isakmp:{num}")),
-            _ => None,
-        },
-        "spanning-tree" => match args {
-            [next, id, ..] if next == "vlan" => Some(format!("spanning-tree:vlan:{id}")),
-            _ => None,
-        },
-        "line" => match args {
-            [kind, from, to, ..] => Some(format!("line:{kind}:{from}:{to}")),
-            [kind, one, ..] => Some(format!("line:{kind}:{one}")),
-            _ => None,
-        },
         // -- NX-OS-specific constructs --
         "feature" => args.first().map(|name| format!("feature:{name}")),
         "vpc" => match args {
@@ -184,21 +152,11 @@ fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             [sub, name, ..] if sub == "name" => Some(format!("role:{name}")),
             _ => None,
         },
-        "monitor" => match args {
-            [sub, id, ..] if sub == "session" => Some(format!("monitor-session:{id}")),
-            _ => None,
-        },
-        "ntp" => match args {
-            [kind, addr, ..] if kind == "server" || kind == "peer" => {
-                Some(format!("ntp:{kind}:{addr}"))
-            }
-            _ => None,
-        },
         "system" => match args {
             [sub, ..] => Some(format!("system:{sub}")),
             _ => None,
         },
-        _ => None,
+        _ => common_key_hint(parsed),
     }
 }
 
