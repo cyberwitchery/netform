@@ -33,7 +33,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: kunobi-ninja/kache-action@v1
+        with:
+          cache-key-prefix: kache-clippy
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
@@ -42,7 +44,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: kunobi-ninja/kache-action@v1
+        with:
+          cache-key-prefix: kache-test
       - run: cargo test --workspace --all-targets
       - name: replay fixtures
         run: cargo run -q -p netform_cli --bin netform-replay-fixtures
@@ -55,7 +59,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: kunobi-ninja/kache-action@v1
+        with:
+          cache-key-prefix: kache-doc
       - run: cargo doc --workspace --no-deps
 
   deny:
@@ -76,7 +82,9 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - uses: Swatinem/rust-cache@v2
+      - uses: kunobi-ninja/kache-action@v1
+        with:
+          cache-key-prefix: kache-coverage
       - run: cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 80
 
   success:
