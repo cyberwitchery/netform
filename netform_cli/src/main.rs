@@ -427,16 +427,10 @@ fn detect_dialect(input: &str) -> CliDialect {
     let (best_dialect, best_score) = sorted[0];
     let (_, second_score) = sorted[1];
 
-    // Require a minimum score.
+    // Require a minimum score and a clear margin (2×) over the runner-up.
     if best_score < 3 {
         return CliDialect::Generic;
     }
-    // Exact ties cannot be broken by score alone — the result would
-    // depend on the arbitrary position in the candidates array.
-    if best_score == second_score {
-        return CliDialect::Generic;
-    }
-    // Require a clear margin (2×) over the runner-up.
     if best_score < second_score * 2 {
         return CliDialect::Generic;
     }
