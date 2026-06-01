@@ -1072,6 +1072,48 @@ fn config_diff_policy_override_invalid_policy_fails() {
 }
 
 #[test]
+fn config_diff_auto_dialect_disagreement_falls_back_to_generic() {
+    // File A is strongly Junos; file B is strongly FortiOS.
+    // Auto-detection disagrees → should fall back to Generic.
+    let junos_file = temp_file_path("left-disagree-junos");
+    let fortios_file = temp_file_path("right-disagree-fortios");
+    fs::write(
+        &junos_file,
+        "interfaces {\n    ge-0/0/0 {\n        description \"uplink\";\n        mtu 9216;\n    }\n}\n",
+    )
+    .expect("write junos file");
+    fs::write(
+        &fortios_file,
+        "config system global\n    set hostname \"FGT\"\n    set timezone 04\nend\n",
+    )
+    .expect("write fortios file");
+
+    let auto_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&junos_file)
+        .arg(&fortios_file)
+        .output()
+        .expect("run config-diff (auto, disagreement)");
+
+    let generic_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("generic")
+        .arg("--json")
+        .arg(&junos_file)
+        .arg(&fortios_file)
+        .output()
+        .expect("run config-diff --dialect generic");
+
+    assert!(auto_output.status.success());
+    assert_eq!(
+        auto_output.stdout, generic_output.stdout,
+        "auto-detection disagreement should produce same output as explicit --dialect generic"
+    );
+}
+
+#[test]
 fn replay_fixtures_cli_runs_successfully() {
     let output = Command::new(env!("CARGO_BIN_EXE_netform-replay-fixtures"))
         .output()
