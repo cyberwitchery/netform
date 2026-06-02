@@ -20,6 +20,8 @@
 //! assert_eq!(doc.render(), input);
 //! ```
 
+pub mod detect;
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -2,6 +2,7 @@
 
 ## [unreleased]
 
+- extracted dialect auto-detection (`detect_dialect`, `auto_parse`) from the CLI binary into `netform_ir::detect` — library consumers can now use score-based dialect detection without depending on `netform_cli`; `detect_dialect` returns `DialectHint` instead of the CLI-internal `CliDialect` enum, and `auto_parse` provides a one-call detect-and-parse convenience function
 - extracted `common_key_hint` in `netform_ir` to deduplicate ~12 identical match arms (`vlan`, `route-map`, `class-map`, `policy-map`, `ipv6`, `access-list`, `crypto`, `spanning-tree`, `line`, `monitor`, `ntp`) that were copied across `ios_like_key_hint`, `eos_key_hint`, and `nxos_key_hint` — each dialect-specific function now handles only its own constructs and falls back to `common_key_hint` for the shared ones
 - **breaking:** removed NX-OS-specific arms (`feature`, `vpc`, `role`, `system`) from `ios_like_key_hint` — these now live only in `nxos_key_hint` where they belong; callers using `IosLikeDialect` (i.e. IOS XE) will no longer produce key hints for NX-OS-only constructs
 - fixed dialect auto-detection tie-breaking: when two dialects score equally, `detect_dialect` now explicitly falls back to `Generic` rather than relying on array-position tie-breaking that happened to be caught by the margin check — makes the behavior immune to future changes in the margin threshold or candidate ordering
