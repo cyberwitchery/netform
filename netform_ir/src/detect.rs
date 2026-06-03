@@ -13,14 +13,14 @@
 //!
 //! | Weight | Meaning | Examples |
 //! |--------|---------|---------|
-//! | [`STRONG_SIGNAL`] (3) | Highly distinctive, near-unique to one dialect | FortiOS `config <section>`, NX-OS `feature <name>`, Junos stanza names |
-//! | [`MODERATE_SIGNAL`] (2) | Moderately distinctive | FortiOS `end`/`next`, Junos brace blocks, EOS non-slot interfaces |
-//! | [`WEAK_SIGNAL`] (1) | Weakly suggestive, shared across dialects | Junos semicolons, FortiOS plain `set`, IOS XE wildcard masks |
+//! | `STRONG_SIGNAL` (3) | Highly distinctive, near-unique to one dialect | FortiOS `config <section>`, NX-OS `feature <name>`, Junos stanza names |
+//! | `MODERATE_SIGNAL` (2) | Moderately distinctive | FortiOS `end`/`next`, Junos brace blocks, EOS non-slot interfaces |
+//! | `WEAK_SIGNAL` (1) | Weakly suggestive, shared across dialects | Junos semicolons, FortiOS plain `set`, IOS XE wildcard masks |
 //!
 //! After scoring, the highest-scoring dialect is accepted only if:
-//! 1. Its score meets [`MIN_CONFIDENCE_SCORE`] (currently 3 — at least one
+//! 1. Its score meets `MIN_CONFIDENCE_SCORE` (currently 3 — at least one
 //!    strong signal or multiple weaker ones).
-//! 2. Its score is at least [`MARGIN_FACTOR`]× the runner-up's score, ensuring
+//! 2. Its score is at least `MARGIN_FACTOR`× the runner-up's score, ensuring
 //!    the winner stands clearly above the noise.
 //!
 //! Both checks must pass; otherwise the result is [`DialectHint::Generic`].
