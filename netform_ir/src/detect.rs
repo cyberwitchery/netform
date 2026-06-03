@@ -5,6 +5,26 @@
 //! [`DialectHint::Generic`] when the top score is too low or when the margin
 //! between the top two candidates is too narrow.
 //!
+//! # Scoring algorithm
+//!
+//! Each input line is tested against a set of pattern rules per dialect.  When a
+//! rule matches, the corresponding dialect's score is incremented by a weight
+//! that reflects how distinctive the pattern is:
+//!
+//! | Weight | Meaning | Examples |
+//! |--------|---------|---------|
+//! | `STRONG_SIGNAL` (3) | Highly distinctive, near-unique to one dialect | FortiOS `config <section>`, NX-OS `feature <name>`, Junos stanza names |
+//! | `MODERATE_SIGNAL` (2) | Moderately distinctive | FortiOS `end`/`next`, Junos brace blocks, EOS non-slot interfaces |
+//! | `WEAK_SIGNAL` (1) | Weakly suggestive, shared across dialects | Junos semicolons, FortiOS plain `set`, IOS XE wildcard masks |
+//!
+//! After scoring, the highest-scoring dialect is accepted only if:
+//! 1. Its score meets `MIN_CONFIDENCE_SCORE` (currently 3 — at least one
+//!    strong signal or multiple weaker ones).
+//! 2. Its score is at least `MARGIN_FACTOR`× the runner-up's score, ensuring
+//!    the winner stands clearly above the noise.
+//!
+//! Both checks must pass; otherwise the result is [`DialectHint::Generic`].
+//!
 //! # Example
 //!
 //! ```rust
@@ -18,6 +38,34 @@
 //! ```
 
 use crate::{DialectHint, Document, parse_generic};
+
+// ---------------------------------------------------------------------------
+// Scoring constants
+// ---------------------------------------------------------------------------
+
+/// Score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
+/// `config <section>`, NX-OS `feature <name>`, Junos top-level stanza names).
+const STRONG_SIGNAL: i32 = 3;
+
+/// Score for a moderately distinctive pattern (e.g. FortiOS `end`/`next`,
+/// Junos brace open/close, EOS non-slot Ethernet interfaces).
+const MODERATE_SIGNAL: i32 = 2;
+
+/// Score for a pattern that weakly suggests a dialect (e.g. Junos trailing
+/// semicolons, FortiOS plain `set <field>`, IOS XE wildcard masks in ACLs).
+const WEAK_SIGNAL: i32 = 1;
+
+// ---------------------------------------------------------------------------
+// Decision thresholds
+// ---------------------------------------------------------------------------
+
+/// Minimum total score a dialect must reach to be considered detected.  Below
+/// this threshold, the input is too short or too ambiguous to identify.
+const MIN_CONFIDENCE_SCORE: i32 = 3;
+
+/// The winning dialect must outscore the runner-up by at least this factor.
+/// A value of 2 means the winner needs ≥ 2× the runner-up's score.
+const MARGIN_FACTOR: i32 = 2;
 
 /// Detect the likely network-device dialect from configuration text.
 ///
@@ -47,48 +95,48 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             && !line.contains('{')
             && line.split_whitespace().count() >= 2
         {
-            fortios += 3;
+            fortios += STRONG_SIGNAL;
         }
         if line.starts_with("edit ") {
-            fortios += 3;
+            fortios += STRONG_SIGNAL;
         }
         if line == "end" {
-            fortios += 2;
+            fortios += MODERATE_SIGNAL;
         }
         if line == "next" {
-            fortios += 2;
+            fortios += MODERATE_SIGNAL;
         }
         if line.starts_with("set ") || line.starts_with("unset ") {
             let second = line.split_whitespace().nth(1).unwrap_or("");
             if is_junos_stanza_name(second) {
                 // `set interfaces ...`, `set protocols ...` etc — Junos set-style.
-                junos += 3;
+                junos += STRONG_SIGNAL;
             } else {
                 // Plain `set <field> <value>` leans FortiOS (inside config blocks).
-                fortios += 1;
+                fortios += WEAK_SIGNAL;
             }
         }
 
         // --- Junos signals ---
         // Brace-and-semicolon syntax is highly distinctive.
         if line.ends_with('{') {
-            junos += 2;
+            junos += MODERATE_SIGNAL;
         }
         if line == "}" || line.ends_with("};") {
-            junos += 2;
+            junos += MODERATE_SIGNAL;
         }
         if line.ends_with(';') && !line.ends_with("};") {
-            junos += 1;
+            junos += WEAK_SIGNAL;
         }
         // Junos-specific stanza names at top-level (hierarchical style).
         if is_junos_stanza_name(line.split_whitespace().next().unwrap_or("")) {
-            junos += 3;
+            junos += STRONG_SIGNAL;
         }
 
         // --- NX-OS signals ---
         // `feature <name>` is unique to NX-OS among supported dialects.
         if line.starts_with("feature ") {
-            nxos += 3;
+            nxos += STRONG_SIGNAL;
         }
         // Slot/port interfaces: Ethernet1/1, port-channel1, etc.
         if line.starts_with("interface ") {
@@ -96,58 +144,58 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             if iface.starts_with("Ethernet") && iface.contains('/') {
                 // NX-OS uses plain Ethernet with slot/port (Ethernet1/1).
                 // IOS XE uses GigabitEthernet, TenGigabitEthernet etc. with slashes.
-                nxos += 3;
+                nxos += STRONG_SIGNAL;
             } else if iface.starts_with("Ethernet") || iface.starts_with("Management") {
                 // No slot → could be EOS.
-                eos += 2;
+                eos += MODERATE_SIGNAL;
             }
         }
         if line.starts_with("vpc ") {
-            nxos += 3;
+            nxos += STRONG_SIGNAL;
         }
         if line.starts_with("role name ") {
-            nxos += 2;
+            nxos += MODERATE_SIGNAL;
         }
 
         // --- IOS XE signals ---
         // `ip access-list extended` is a strong IOS XE marker.
         if line.starts_with("ip access-list extended ") {
-            iosxe += 3;
+            iosxe += STRONG_SIGNAL;
         }
         // Dotted subnet masks with `ip address` (IOS XE uses masks, not CIDR).
         if line.starts_with("ip address ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 4 && looks_like_dotted_mask(parts[3]) {
-                iosxe += 2;
+                iosxe += MODERATE_SIGNAL;
             }
         }
         // `network ... mask ...` in BGP address-family.
         if line.contains(" mask ") && line.starts_with("network ") {
-            iosxe += 2;
+            iosxe += MODERATE_SIGNAL;
         }
         // Wildcard masks in ACL permit/deny lines.
         if (line.starts_with("permit ") || line.starts_with("deny "))
             && line.split_whitespace().any(looks_like_dotted_mask)
         {
-            iosxe += 1;
+            iosxe += WEAK_SIGNAL;
         }
 
         // --- EOS signals ---
         if line.starts_with("ip access-list ") && !line.contains("extended") {
-            eos += 2;
+            eos += MODERATE_SIGNAL;
         }
         // Numbered ACL entries (EOS style: `10 permit ...`).
         if let Some(first) = line.split_whitespace().next()
             && first.parse::<u32>().is_ok()
             && (line.contains(" permit ") || line.contains(" deny "))
         {
-            eos += 1;
+            eos += WEAK_SIGNAL;
         }
         // EOS uses CIDR notation for ip addresses (no dotted mask).
         if line.starts_with("ip address ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 && parts[2].contains('/') {
-                eos += 2;
+                eos += MODERATE_SIGNAL;
             }
         }
     }
@@ -166,11 +214,10 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     let (best_name, best_score) = sorted[0];
     let (_, second_score) = sorted[1];
 
-    // Require a minimum score and a clear margin (2×) over the runner-up.
-    if best_score < 3 {
+    if best_score < MIN_CONFIDENCE_SCORE {
         return DialectHint::Generic;
     }
-    if best_score < second_score * 2 {
+    if best_score < second_score * MARGIN_FACTOR {
         return DialectHint::Generic;
     }
 
@@ -373,6 +420,107 @@ ip access-list ACL-IN
    10 permit tcp any any
 ";
         assert_eq!(detect_dialect(input), DialectHint::Generic);
+    }
+
+    // -- Edge case tests near score margins --
+
+    #[test]
+    fn detect_at_minimum_score_single_strong_signal() {
+        // One STRONG_SIGNAL (3) with no competition → exactly MIN_CONFIDENCE_SCORE.
+        let input = "feature ospf\n";
+        assert_eq!(detect_dialect(input), DialectHint::Named("nxos".into()));
+    }
+
+    #[test]
+    fn detect_below_minimum_score_single_moderate_signal() {
+        // One MODERATE_SIGNAL (2) → below MIN_CONFIDENCE_SCORE → Generic.
+        let input = "role name admin\n";
+        assert_eq!(detect_dialect(input), DialectHint::Generic);
+    }
+
+    #[test]
+    fn detect_margin_exact_boundary_passes() {
+        // iosxe = STRONG(3) + WEAK(1) = 4, eos = MODERATE(2).
+        // 4 >= 2 * MARGIN_FACTOR(2) → passes margin check.
+        let input = "\
+ip access-list extended ACL-IN
+  permit tcp any 0.0.0.255 any
+interface Ethernet1
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_margin_just_below_boundary_fails() {
+        // iosxe = STRONG(3), eos = MODERATE(2).
+        // 3 < 2 * MARGIN_FACTOR(2) = 4 → fails margin check → Generic.
+        let input = "\
+ip access-list extended ACL-IN
+interface Ethernet1
+";
+        assert_eq!(detect_dialect(input), DialectHint::Generic);
+    }
+
+    #[test]
+    fn detect_clear_winner_no_runner_up() {
+        // Two STRONG_SIGNAL NX-OS features, everything else at zero.
+        // nxos = 6, second = 0 → 6 >= 0 → clear win.
+        let input = "\
+feature bgp
+feature ospf
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("nxos".into()));
+    }
+
+    #[test]
+    fn detect_strong_signal_drowned_by_cross_dialect_noise() {
+        // NX-OS gets one strong signal, but Junos accumulates more from
+        // brace/semicolon syntax surrounding it.
+        // nxos = STRONG(3)
+        // junos = STRONG(3) [interfaces stanza] + MODERATE(2) [open brace]
+        //       + WEAK(1) [semicolon] + MODERATE(2) [close brace] = 8
+        // junos 8 >= 3*2 → junos wins.
+        let input = "\
+feature ospf
+interfaces {
+    mtu 9216;
+}
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("junos".into()));
+    }
+
+    #[test]
+    fn detect_two_moderate_signals_reach_margin() {
+        // Two MODERATE_SIGNAL FortiOS lines: end(2) + next(2) = 4.
+        // 4 >= MIN_CONFIDENCE_SCORE(3) ✓, second = 0, 4 >= 0 ✓ → detected.
+        let input = "\
+end
+next
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("fortios".into()));
+    }
+
+    #[test]
+    fn detect_only_weak_signals_below_threshold() {
+        // Two WEAK_SIGNAL lines: junos semicolons.
+        // junos = 1 + 1 = 2 → below MIN_CONFIDENCE_SCORE → Generic.
+        let input = "\
+mtu 9216;
+description uplink;
+";
+        assert_eq!(detect_dialect(input), DialectHint::Generic);
+    }
+
+    #[test]
+    fn detect_three_weak_signals_reach_threshold() {
+        // Three WEAK_SIGNAL junos semicolons = 3 → exactly MIN_CONFIDENCE_SCORE.
+        // No competition → detected.
+        let input = "\
+mtu 9216;
+description uplink;
+no-readvertise;
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("junos".into()));
     }
 
     #[test]
