@@ -156,6 +156,11 @@ fn iosxe_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
         },
         // -- IOS XE-specific constructs --
         "crypto" => match args {
+            [kind, sub1, sub2, name, ..]
+                if kind == "pki" && sub1 == "certificate" && sub2 == "chain" =>
+            {
+                Some(format!("crypto:pki:certificate-chain:{name}"))
+            }
             [kind, sub, name, ..] if kind == "pki" => Some(format!("crypto:pki:{sub}:{name}")),
             _ => common_key_hint(parsed),
         },
@@ -588,7 +593,7 @@ mod tests {
     fn key_hint_crypto_pki_certificate_chain() {
         assert_eq!(
             hint("crypto pki certificate chain MY-CA"),
-            Some("crypto:pki:certificate:chain".into()),
+            Some("crypto:pki:certificate-chain:MY-CA".into()),
         );
     }
 
