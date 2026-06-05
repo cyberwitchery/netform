@@ -67,8 +67,8 @@ const EOS_INTERFACE_TYPES: &[&str] = &[
     "management",
     "ethernet",
     "loopback",
-    "vlan",
     "vxlan",
+    "vlan",
 ];
 
 /// Derive a stable identity key for EOS configuration lines.
