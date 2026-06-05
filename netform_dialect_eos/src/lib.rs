@@ -16,7 +16,7 @@
 
 use netform_ir::{
     Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
-    common_key_hint, parse_ios_like_parts, parse_with_dialect,
+    common_key_hint, parse_interface, parse_ios_like_parts, parse_with_dialect,
 };
 
 /// Dialect implementation for Arista EOS configuration text.
@@ -67,27 +67,9 @@ const EOS_INTERFACE_TYPES: &[&str] = &[
     "management",
     "ethernet",
     "loopback",
-    "vlan",
     "vxlan",
+    "vlan",
 ];
-
-/// Parse an EOS interface name into `(canonical_type, id)`.
-///
-/// Uses case-insensitive prefix matching so that any casing of a known
-/// interface type normalizes to the canonical lowercase form.
-///
-/// Returns `None` if the name doesn't match any known EOS interface type
-/// or has no ID portion after the prefix.
-fn parse_eos_interface(name: &str) -> Option<(&'static str, &str)> {
-    let lower = name.to_ascii_lowercase();
-    for &canonical in EOS_INTERFACE_TYPES {
-        if lower.starts_with(canonical) && name.len() > canonical.len() {
-            let id = &name[canonical.len()..];
-            return Some((canonical, id));
-        }
-    }
-    None
-}
 
 /// Derive a stable identity key for EOS configuration lines.
 ///
@@ -109,7 +91,7 @@ fn eos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     match head {
         "interface" => {
             let name = args.first()?;
-            if let Some((itype, id)) = parse_eos_interface(name) {
+            if let Some((itype, id)) = parse_interface(name, EOS_INTERFACE_TYPES) {
                 Some(format!("interface:{itype}:{id}"))
             } else {
                 Some(format!("interface:{name}"))

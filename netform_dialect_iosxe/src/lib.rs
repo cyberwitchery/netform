@@ -16,7 +16,7 @@
 
 use netform_ir::{
     Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
-    common_key_hint, parse_ios_like_parts, parse_with_dialect,
+    common_key_hint, parse_interface, parse_ios_like_parts, parse_with_dialect,
 };
 
 /// Dialect implementation for Cisco IOS XE configuration text.
@@ -81,24 +81,6 @@ const IOSXE_INTERFACE_TYPES: &[&str] = &[
     "bdi",
 ];
 
-/// Parse an IOS XE interface name into `(canonical_type, id)`.
-///
-/// Uses case-insensitive prefix matching so that any casing of a known
-/// interface type normalizes to the canonical lowercase form.
-///
-/// Returns `None` if the name doesn't match any known IOS XE interface type
-/// or has no ID portion after the prefix.
-fn parse_iosxe_interface(name: &str) -> Option<(&'static str, &str)> {
-    let lower = name.to_ascii_lowercase();
-    for &canonical in IOSXE_INTERFACE_TYPES {
-        if lower.starts_with(canonical) && name.len() > canonical.len() {
-            let id = &name[canonical.len()..];
-            return Some((canonical, id));
-        }
-    }
-    None
-}
-
 /// Derive a stable identity key for IOS XE configuration lines.
 ///
 /// Handles IOS XE-specific constructs first, then delegates to
@@ -121,7 +103,7 @@ fn iosxe_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     match head {
         "interface" => {
             let name = args.first()?;
-            if let Some((itype, id)) = parse_iosxe_interface(name) {
+            if let Some((itype, id)) = parse_interface(name, IOSXE_INTERFACE_TYPES) {
                 Some(format!("interface:{itype}:{id}"))
             } else {
                 Some(format!("interface:{name}"))

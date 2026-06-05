@@ -677,6 +677,41 @@ pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     }
 }
 
+/// Parse an interface name into `(canonical_type, id)` using the given type
+/// prefix table.
+///
+/// Uses case-insensitive prefix matching so that any casing of a known
+/// interface type normalizes to the canonical lowercase form.  The `types`
+/// slice must be ordered longest-prefix-first so that e.g. `tengigabitethernet`
+/// matches before `gigabitethernet`.
+///
+/// Returns `None` if the name doesn't match any entry in `types` or has no ID
+/// portion after the prefix.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_ir::parse_interface;
+///
+/// const TYPES: &[&str] = &["ethernet", "loopback"];
+/// assert_eq!(parse_interface("Ethernet1", TYPES), Some(("ethernet", "1")));
+/// assert_eq!(parse_interface("Loopback0", TYPES), Some(("loopback", "0")));
+/// assert_eq!(parse_interface("Serial0/0", TYPES), None);
+/// ```
+pub fn parse_interface<'a>(
+    name: &'a str,
+    types: &[&'static str],
+) -> Option<(&'static str, &'a str)> {
+    let lower = name.to_ascii_lowercase();
+    for &canonical in types {
+        if lower.starts_with(canonical) && name.len() > canonical.len() {
+            let id = &name[canonical.len()..];
+            return Some((canonical, id));
+        }
+    }
+    None
+}
+
 /// Classify trivia for IOS-like dialects (EOS, IOS XE).
 ///
 /// Lines starting with `!` or `#` (after leading whitespace) are comments;
