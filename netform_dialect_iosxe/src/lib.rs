@@ -15,8 +15,9 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
-    common_key_hint, parse_interface, parse_ios_like_parts, parse_with_dialect,
+    Dialect, DialectHint, Document, IosKeyHintConfig, ParsedLineParts, TriviaKind,
+    classify_ios_like_trivia, common_key_hint, ios_family_key_hint, parse_ios_like_parts,
+    parse_with_dialect,
 };
 
 /// Dialect implementation for Cisco IOS XE configuration text.
@@ -81,62 +82,29 @@ const IOSXE_INTERFACE_TYPES: &[&str] = &[
     "bdi",
 ];
 
+/// IOS XE-specific configuration for [`ios_family_key_hint`].
+const IOSXE_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
+    interface_types: IOSXE_INTERFACE_TYPES,
+    vrf_keyword: "definition",
+    extra_router_protos: &["eigrp"],
+};
+
 /// Derive a stable identity key for IOS XE configuration lines.
 ///
-/// Handles IOS XE-specific constructs first, then delegates to
-/// [`common_key_hint`] for shared IOS-like arms.
-///
-/// IOS XE-specific enhancements:
-/// - Interface type normalization (`GigabitEthernet0/0/0` →
-///   `interface:gigabitethernet:0/0/0`)
-/// - `vrf definition` syntax (IOS XE uses `vrf definition NAME`)
-/// - `router ospf` and `router eigrp` with process/AS identifiers
-/// - `ip access-list` bare form (without `extended`/`standard`)
-/// - `crypto pki` trustpoints and certificate chains
-/// - `redundancy`, `parameter-map`, `track`, `zone security`,
-///   `zone-pair security`
+/// Delegates `interface`, `vrf`, `router`, and `ip` to
+/// [`ios_family_key_hint`], handles IOS XE-specific constructs (`crypto pki`,
+/// `redundancy`, `parameter-map`, `track`, `zone`, `zone-pair`), then falls
+/// back to [`common_key_hint`] for the remaining shared arms.
 fn iosxe_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+    if let Some(hint) = ios_family_key_hint(parsed, &IOSXE_KEY_HINT_CONFIG) {
+        return Some(hint);
+    }
+
     let parsed_ref = parsed?;
     let head = parsed_ref.head.as_str();
     let args = parsed_ref.args.as_slice();
 
     match head {
-        "interface" => {
-            let name = args.first()?;
-            if let Some((itype, id)) = parse_interface(name, IOSXE_INTERFACE_TYPES) {
-                Some(format!("interface:{itype}:{id}"))
-            } else {
-                Some(format!("interface:{name}"))
-            }
-        }
-        "vrf" => match args {
-            [sub, name, ..] if sub == "definition" => Some(format!("vrf:{name}")),
-            [name, ..] => Some(format!("vrf:{name}")),
-            _ => None,
-        },
-        "router" => match args {
-            [proto, asn, ..] if proto == "bgp" => Some(format!("router:bgp:{asn}")),
-            [proto, id, ..] if proto == "ospf" => Some(format!("router:ospf:{id}")),
-            [proto, id, ..] if proto == "eigrp" => Some(format!("router:eigrp:{id}")),
-            [proto, ..] => Some(format!("router:{proto}")),
-            _ => None,
-        },
-        "ip" => match args {
-            [next, kind, name, ..] if next == "access-list" => {
-                Some(format!("ip-access-list:{kind}:{name}"))
-            }
-            [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
-            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
-            [next, kind, name, ..] if next == "community-list" => {
-                Some(format!("ip-community-list:{kind}:{name}"))
-            }
-            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
-                Some(format!("ip-route:{vrf_name}:{prefix}"))
-            }
-            [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
-            _ => None,
-        },
-        // -- IOS XE-specific constructs --
         "crypto" => match args {
             [kind, sub1, sub2, name, ..]
                 if kind == "pki" && sub1 == "certificate" && sub2 == "chain" =>

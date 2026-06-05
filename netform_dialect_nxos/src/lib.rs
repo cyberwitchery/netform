@@ -15,8 +15,9 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
-    common_key_hint, parse_interface, parse_ios_like_parts, parse_with_dialect,
+    Dialect, DialectHint, Document, IosKeyHintConfig, ParsedLineParts, TriviaKind,
+    classify_ios_like_trivia, common_key_hint, ios_family_key_hint, parse_ios_like_parts,
+    parse_with_dialect,
 };
 
 /// Dialect implementation for Cisco NX-OS configuration text.
@@ -73,58 +74,29 @@ const NXOS_INTERFACE_TYPES: &[&str] = &[
     "nve",
 ];
 
+/// NX-OS-specific configuration for [`ios_family_key_hint`].
+const NXOS_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
+    interface_types: NXOS_INTERFACE_TYPES,
+    vrf_keyword: "context",
+    extra_router_protos: &[],
+};
+
 /// Derive a stable identity key for NX-OS configuration lines.
 ///
-/// Handles NX-OS-specific constructs first, then delegates to
-/// [`common_key_hint`] for shared IOS-like arms.
-///
-/// NX-OS-specific enhancements:
-/// - Interface type normalization (`Ethernet1/1` → `interface:ethernet:1/1`)
-/// - `vrf context` syntax
-/// - `router ospf` with process ID
-/// - `ip access-list` bare form (without `extended`/`standard`)
-/// - `feature`, `vpc domain`, `role name`, `system`
+/// Delegates `interface`, `vrf`, `router`, and `ip` to
+/// [`ios_family_key_hint`], handles NX-OS-specific constructs (`feature`,
+/// `vpc`, `role`, `system`), then falls back to [`common_key_hint`] for the
+/// remaining shared arms.
 fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+    if let Some(hint) = ios_family_key_hint(parsed, &NXOS_KEY_HINT_CONFIG) {
+        return Some(hint);
+    }
+
     let parsed_ref = parsed?;
     let head = parsed_ref.head.as_str();
     let args = parsed_ref.args.as_slice();
 
     match head {
-        "interface" => {
-            let name = args.first()?;
-            if let Some((itype, id)) = parse_interface(name, NXOS_INTERFACE_TYPES) {
-                Some(format!("interface:{itype}:{id}"))
-            } else {
-                Some(format!("interface:{name}"))
-            }
-        }
-        "vrf" => match args {
-            [sub, name, ..] if sub == "context" => Some(format!("vrf:{name}")),
-            [name, ..] => Some(format!("vrf:{name}")),
-            _ => None,
-        },
-        "router" => match args {
-            [proto, asn, ..] if proto == "bgp" => Some(format!("router:bgp:{asn}")),
-            [proto, id, ..] if proto == "ospf" => Some(format!("router:ospf:{id}")),
-            [proto, ..] => Some(format!("router:{proto}")),
-            _ => None,
-        },
-        "ip" => match args {
-            [next, kind, name, ..] if next == "access-list" => {
-                Some(format!("ip-access-list:{kind}:{name}"))
-            }
-            [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
-            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
-            [next, kind, name, ..] if next == "community-list" => {
-                Some(format!("ip-community-list:{kind}:{name}"))
-            }
-            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
-                Some(format!("ip-route:{vrf_name}:{prefix}"))
-            }
-            [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
-            _ => None,
-        },
-        // -- NX-OS-specific constructs --
         "feature" => args.first().map(|name| format!("feature:{name}")),
         "vpc" => match args {
             [sub, id, ..] if sub == "domain" => Some(format!("vpc-domain:{id}")),
