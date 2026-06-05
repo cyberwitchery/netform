@@ -576,6 +576,74 @@ pub fn tokenize(raw: &str, punctuation: &[char]) -> Vec<String> {
     tokens
 }
 
+/// Configuration for [`ios_family_key_hint`], parameterizing the constructs
+/// that differ across IOS-family dialects while sharing the common structure.
+pub struct IosKeyHintConfig {
+    /// Interface type prefixes for normalization (longest-prefix-first).
+    pub interface_types: &'static [&'static str],
+    /// The VRF sub-command keyword (`"instance"`, `"definition"`, `"context"`).
+    pub vrf_keyword: &'static str,
+    /// Router protocols (beyond BGP and OSPF) whose second argument should be
+    /// included in the hint — e.g. `&["eigrp"]` for IOS XE.
+    pub extra_router_protos: &'static [&'static str],
+}
+
+/// Derive a key hint for constructs shared across IOS-family dialects.
+///
+/// Handles `interface`, `vrf`, `router`, and `ip` using the provided
+/// [`IosKeyHintConfig`].  Returns `None` when the head keyword is not one of
+/// these four, allowing the caller to try dialect-specific arms before falling
+/// back to [`common_key_hint`].
+pub fn ios_family_key_hint(
+    parsed: Option<&ParsedLineParts>,
+    config: &IosKeyHintConfig,
+) -> Option<String> {
+    let parsed_ref = parsed?;
+    let head = parsed_ref.head.as_str();
+    let args = parsed_ref.args.as_slice();
+
+    match head {
+        "interface" => {
+            let name = args.first()?;
+            if let Some((itype, id)) = parse_interface(name, config.interface_types) {
+                Some(format!("interface:{itype}:{id}"))
+            } else {
+                Some(format!("interface:{name}"))
+            }
+        }
+        "vrf" => match args {
+            [sub, name, ..] if sub == config.vrf_keyword => Some(format!("vrf:{name}")),
+            [name, ..] => Some(format!("vrf:{name}")),
+            _ => None,
+        },
+        "router" => match args {
+            [proto, id, ..] if proto == "bgp" => Some(format!("router:bgp:{id}")),
+            [proto, id, ..] if proto == "ospf" => Some(format!("router:ospf:{id}")),
+            [proto, id, ..] if config.extra_router_protos.contains(&proto.as_str()) => {
+                Some(format!("router:{proto}:{id}"))
+            }
+            [proto, ..] => Some(format!("router:{proto}")),
+            _ => None,
+        },
+        "ip" => match args {
+            [next, kind, name, ..] if next == "access-list" => {
+                Some(format!("ip-access-list:{kind}:{name}"))
+            }
+            [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
+            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
+            [next, kind, name, ..] if next == "community-list" => {
+                Some(format!("ip-community-list:{kind}:{name}"))
+            }
+            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
+                Some(format!("ip-route:{vrf_name}:{prefix}"))
+            }
+            [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Derive a stable identity key for constructs shared across all IOS-like
 /// dialects (EOS, IOS XE, NX-OS).
 ///

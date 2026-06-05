@@ -15,8 +15,9 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_ios_like_trivia,
-    common_key_hint, parse_interface, parse_ios_like_parts, parse_with_dialect,
+    Dialect, DialectHint, Document, IosKeyHintConfig, ParsedLineParts, TriviaKind,
+    classify_ios_like_trivia, common_key_hint, ios_family_key_hint, parse_ios_like_parts,
+    parse_with_dialect,
 };
 
 /// Dialect implementation for Arista EOS configuration text.
@@ -71,59 +72,29 @@ const EOS_INTERFACE_TYPES: &[&str] = &[
     "vlan",
 ];
 
+/// EOS-specific configuration for [`ios_family_key_hint`].
+const EOS_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
+    interface_types: EOS_INTERFACE_TYPES,
+    vrf_keyword: "instance",
+    extra_router_protos: &[],
+};
+
 /// Derive a stable identity key for EOS configuration lines.
 ///
-/// Handles EOS-specific constructs first, then delegates to
-/// [`common_key_hint`] for shared IOS-like arms.
-///
-/// EOS-specific enhancements:
-/// - Interface type normalization (`Ethernet1` → `interface:ethernet:1`)
-/// - `vrf instance` syntax (EOS uses `vrf instance NAME`, not `vrf context`)
-/// - `router ospf` with process ID
-/// - `ip access-list` bare form (without `extended`/`standard`)
-/// - `mlag configuration`, `management api`, `daemon`, `event-handler`,
-///   `peer-filter`
+/// Delegates `interface`, `vrf`, `router`, and `ip` to
+/// [`ios_family_key_hint`], handles EOS-specific constructs (`mlag`,
+/// `management`, `daemon`, `event-handler`, `peer-filter`), then falls back to
+/// [`common_key_hint`] for the remaining shared arms.
 fn eos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+    if let Some(hint) = ios_family_key_hint(parsed, &EOS_KEY_HINT_CONFIG) {
+        return Some(hint);
+    }
+
     let parsed_ref = parsed?;
     let head = parsed_ref.head.as_str();
     let args = parsed_ref.args.as_slice();
 
     match head {
-        "interface" => {
-            let name = args.first()?;
-            if let Some((itype, id)) = parse_interface(name, EOS_INTERFACE_TYPES) {
-                Some(format!("interface:{itype}:{id}"))
-            } else {
-                Some(format!("interface:{name}"))
-            }
-        }
-        "vrf" => match args {
-            [sub, name, ..] if sub == "instance" => Some(format!("vrf:{name}")),
-            [name, ..] => Some(format!("vrf:{name}")),
-            _ => None,
-        },
-        "router" => match args {
-            [proto, asn, ..] if proto == "bgp" => Some(format!("router:bgp:{asn}")),
-            [proto, id, ..] if proto == "ospf" => Some(format!("router:ospf:{id}")),
-            [proto, ..] => Some(format!("router:{proto}")),
-            _ => None,
-        },
-        "ip" => match args {
-            [next, kind, name, ..] if next == "access-list" => {
-                Some(format!("ip-access-list:{kind}:{name}"))
-            }
-            [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
-            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
-            [next, kind, name, ..] if next == "community-list" => {
-                Some(format!("ip-community-list:{kind}:{name}"))
-            }
-            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
-                Some(format!("ip-route:{vrf_name}:{prefix}"))
-            }
-            [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
-            _ => None,
-        },
-        // -- EOS-specific constructs --
         "mlag" => match args {
             [sub, ..] if sub == "configuration" => Some("mlag".into()),
             _ => None,
