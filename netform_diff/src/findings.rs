@@ -97,17 +97,9 @@ fn collect_extracted_key_ambiguity_findings(
     ctx: &DiffContext,
     out: &mut Vec<Finding>,
 ) {
-    let mut keys = ctx
-        .ambiguous_extracted_keys
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>();
-    keys.sort();
-    for key in keys {
-        let (left_count, right_count) = ctx
-            .ambiguous_extracted_keys
-            .get(&key)
-            .expect("key from map iteration");
+    let mut entries: Vec<_> = ctx.ambiguous_extracted_keys.iter().collect();
+    entries.sort_by_key(|&(k, _)| k);
+    for (key, &(left_count, right_count)) in entries {
         push_ambiguity_finding(
             a_view,
             b_view,
@@ -188,17 +180,9 @@ fn collect_ambiguity_findings(
     ctx: &DiffContext,
     out: &mut Vec<Finding>,
 ) {
-    let mut keys = ctx
-        .ambiguous_content_keys
-        .keys()
-        .copied()
-        .collect::<Vec<_>>();
-    keys.sort_unstable();
-    for key in keys {
-        let (left_count, right_count) = ctx
-            .ambiguous_content_keys
-            .get(&key)
-            .expect("key from map iteration");
+    let mut entries: Vec<_> = ctx.ambiguous_content_keys.iter().collect();
+    entries.sort_unstable_by_key(|&(&k, _)| k);
+    for (&key, &(left_count, right_count)) in entries {
         push_ambiguity_finding(
             a_view,
             b_view,
