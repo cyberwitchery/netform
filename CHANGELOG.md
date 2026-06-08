@@ -1,6 +1,6 @@
 # changelog
 
-## [unreleased]
+## [0.6.0] - 2026-06-08
 
 - added `netform_ir::IosKeyHintConfig` and `netform_ir::ios_family_key_hint` — a shared parameterized function that consolidates the duplicated `interface`, `vrf`, `router`, and `ip` key-hint logic from `eos_key_hint`, `iosxe_key_hint`, and `nxos_key_hint`; dialect differences (interface type tables, VRF keyword, extra router protocols) are captured in a static config struct, eliminating ~120 lines of copy-pasted match arms across the three dialect crates
 - added `netform_ir::parse_interface` — shared generic interface-name parser parameterized by a type-prefix table; replaces the identical `parse_iosxe_interface`, `parse_eos_interface`, and `parse_nxos_interface` functions that were duplicated across the three dialect crates
