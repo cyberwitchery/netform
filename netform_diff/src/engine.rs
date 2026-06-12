@@ -97,22 +97,18 @@ pub(crate) fn diff_views(
                     &mut pending_inserted_segments,
                 )?;
 
-                let left = a_iter
-                    .next()
-                    .ok_or_else(|| DiffError::EditScriptInconsistency {
-                        op: "Equal",
-                        side: "left",
-                        a_count: a_segment_count,
-                        b_count: b_segment_count,
-                    })?;
-                let right = b_iter
-                    .next()
-                    .ok_or_else(|| DiffError::EditScriptInconsistency {
-                        op: "Equal",
-                        side: "right",
-                        a_count: a_segment_count,
-                        b_count: b_segment_count,
-                    })?;
+                let left = a_iter.next().ok_or(DiffError::EditScriptInconsistency {
+                    op: "Equal",
+                    side: "left",
+                    a_count: a_segment_count,
+                    b_count: b_segment_count,
+                })?;
+                let right = b_iter.next().ok_or(DiffError::EditScriptInconsistency {
+                    op: "Equal",
+                    side: "right",
+                    a_count: a_segment_count,
+                    b_count: b_segment_count,
+                })?;
                 if left.is_block && right.is_block {
                     let left_children = if left.lines.len() > 1 {
                         &left.lines[1..]
@@ -134,24 +130,24 @@ pub(crate) fn diff_views(
                 }
             }
             Op::Delete => {
-                pending_deleted_segments.push(a_iter.next().ok_or_else(|| {
+                pending_deleted_segments.push(a_iter.next().ok_or(
                     DiffError::EditScriptInconsistency {
                         op: "Delete",
                         side: "left",
                         a_count: a_segment_count,
                         b_count: b_segment_count,
-                    }
-                })?);
+                    },
+                )?);
             }
             Op::Insert => {
-                pending_inserted_segments.push(b_iter.next().ok_or_else(|| {
+                pending_inserted_segments.push(b_iter.next().ok_or(
                     DiffError::EditScriptInconsistency {
                         op: "Insert",
                         side: "right",
                         a_count: a_segment_count,
                         b_count: b_segment_count,
-                    }
-                })?);
+                    },
+                )?);
             }
         }
     }
@@ -882,10 +878,12 @@ mod tests {
         ]);
         let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(!result.edits.is_empty());
-        assert!(result
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Insert { .. })));
+        assert!(
+            result
+                .edits
+                .iter()
+                .any(|e| matches!(e, Edit::Insert { .. }))
+        );
     }
 
     #[test]
@@ -897,10 +895,12 @@ mod tests {
         let b = view(vec![cline("hostname router1", 100, vec![0])]);
         let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(!result.edits.is_empty());
-        assert!(result
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Delete { .. })));
+        assert!(
+            result
+                .edits
+                .iter()
+                .any(|e| matches!(e, Edit::Delete { .. }))
+        );
     }
 
     #[test]
