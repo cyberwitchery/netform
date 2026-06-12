@@ -44,6 +44,9 @@ pub(crate) fn diff_views(
 
     let ops = compute_ops(&a_keys, &b_keys)?;
 
+    let a_segment_count = a_segments.len();
+    let b_segment_count = b_segments.len();
+
     let mut edits = Vec::new();
     let mut fallback_contexts = Vec::new();
     let mut a_iter = a_segments.into_iter();
@@ -95,14 +98,20 @@ pub(crate) fn diff_views(
                 )?;
 
                 let left = a_iter.next().ok_or_else(|| {
-                    DiffError::EditScriptInconsistency(
-                        "left segment iterator exhausted on Equal op".into(),
-                    )
+                    DiffError::EditScriptInconsistency {
+                        op: "Equal",
+                        side: "left",
+                        a_count: a_segment_count,
+                        b_count: b_segment_count,
+                    }
                 })?;
                 let right = b_iter.next().ok_or_else(|| {
-                    DiffError::EditScriptInconsistency(
-                        "right segment iterator exhausted on Equal op".into(),
-                    )
+                    DiffError::EditScriptInconsistency {
+                        op: "Equal",
+                        side: "right",
+                        a_count: a_segment_count,
+                        b_count: b_segment_count,
+                    }
                 })?;
                 if left.is_block && right.is_block {
                     let left_children = if left.lines.len() > 1 {
@@ -126,16 +135,22 @@ pub(crate) fn diff_views(
             }
             Op::Delete => {
                 pending_deleted_segments.push(a_iter.next().ok_or_else(|| {
-                    DiffError::EditScriptInconsistency(
-                        "left segment iterator exhausted on Delete op".into(),
-                    )
+                    DiffError::EditScriptInconsistency {
+                        op: "Delete",
+                        side: "left",
+                        a_count: a_segment_count,
+                        b_count: b_segment_count,
+                    }
                 })?);
             }
             Op::Insert => {
                 pending_inserted_segments.push(b_iter.next().ok_or_else(|| {
-                    DiffError::EditScriptInconsistency(
-                        "right segment iterator exhausted on Insert op".into(),
-                    )
+                    DiffError::EditScriptInconsistency {
+                        op: "Insert",
+                        side: "right",
+                        a_count: a_segment_count,
+                        b_count: b_segment_count,
+                    }
                 })?);
             }
         }
@@ -485,7 +500,10 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
         trace.push(v.clone());
     }
 
-    Err(DiffError::SesNotConverged)
+    Err(DiffError::SesNotConverged {
+        a_len: a.len(),
+        b_len: b.len(),
+    })
 }
 
 fn backtrack_ops(a: &[u64], b: &[u64], trace: &[Vec<isize>], offset: isize) -> Vec<Op> {
@@ -937,6 +955,163 @@ mod tests {
         let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(!result.edits.is_empty());
         assert!(!result.fallback_contexts.is_empty());
+    }
+
+    // ── flush_segment_fallback (exercised through diff_views) ──
+
+    #[test]
+    fn fallback_delete_only_emits_deletes() {
+        // Side A has a block; side B is empty.  All segments are deleted,
+        // triggering the fallback with only deletions.
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description a", 101, vec![0, 0]),
+        ]);
+        let b = view(vec![]);
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        assert!(!result.edits.is_empty());
+        assert!(
+            result
+                .edits
+                .iter()
+                .all(|e| matches!(e, Edit::Delete { .. })),
+            "delete-only fallback should produce only Delete edits"
+        );
+        assert!(
+            !result.fallback_contexts.is_empty(),
+            "delete-only fallback should record a fallback context"
+        );
+    }
+
+    #[test]
+    fn fallback_insert_only_emits_inserts() {
+        // Side A is empty; side B has a block.  All segments are inserted,
+        // triggering the fallback with only insertions.
+        let a = view(vec![]);
+        let b = view(vec![
+            cline("router bgp 65000", 200, vec![0]),
+            cline("  neighbor 10.0.0.1", 201, vec![0, 0]),
+        ]);
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        assert!(!result.edits.is_empty());
+        assert!(
+            result
+                .edits
+                .iter()
+                .all(|e| matches!(e, Edit::Insert { .. })),
+            "insert-only fallback should produce only Insert edits"
+        );
+        assert!(
+            !result.fallback_contexts.is_empty(),
+            "insert-only fallback should record a fallback context"
+        );
+    }
+
+    #[test]
+    fn fallback_multiple_segments_flushed_together() {
+        // Both sides have multiple unrelated segments — none of the segment
+        // keys match, so all segments accumulate as pending and are flushed
+        // together at the end via the fallback path.
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description a", 101, vec![0, 0]),
+            cline("interface Eth2", 300, vec![1]),
+            cline("  description b", 301, vec![1, 0]),
+        ]);
+        let b = view(vec![
+            cline("router bgp 65000", 200, vec![0]),
+            cline("  neighbor 10.0.0.1", 201, vec![0, 0]),
+            cline("router ospf 1", 400, vec![1]),
+            cline("  network 10.0.0.0/24", 401, vec![1, 0]),
+        ]);
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        assert!(!result.edits.is_empty());
+        assert!(
+            !result.fallback_contexts.is_empty(),
+            "multi-segment replacement should use fallback"
+        );
+        // The fallback flattens all pending segments into lines before
+        // diffing, so we should see individual line-level edits.
+        let total_edit_lines: usize = result
+            .edits
+            .iter()
+            .map(|e| match e {
+                Edit::Delete { lines, .. } => lines.len(),
+                Edit::Insert { lines, .. } => lines.len(),
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => old_lines.len() + new_lines.len(),
+            })
+            .sum();
+        assert!(
+            total_edit_lines > 0,
+            "fallback should produce line-level edits"
+        );
+    }
+
+    #[test]
+    fn fallback_flushed_before_equal_segment() {
+        // A has [block-X, block-Y], B has [block-Z, block-Y].
+        // block-Z is unrelated to block-X (different keys) so X→Delete and
+        // Z→Insert accumulate.  When block-Y matches (Equal), the pending
+        // segments must be flushed via fallback before the Equal is processed.
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description a", 101, vec![0, 0]),
+            cline("hostname router1", 500, vec![1]),
+        ]);
+        let b = view(vec![
+            cline("router bgp 65000", 200, vec![0]),
+            cline("  neighbor 10.0.0.1", 201, vec![0, 0]),
+            cline("hostname router1", 500, vec![1]),
+        ]);
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        assert!(
+            !result.fallback_contexts.is_empty(),
+            "pending segments before Equal should be flushed via fallback"
+        );
+        // The shared segment (hostname) should not appear in edits.
+        let all_edit_texts: Vec<&str> = result
+            .edits
+            .iter()
+            .flat_map(|e| match e {
+                Edit::Delete { lines, .. } => lines.iter().map(|l| l.text.as_str()).collect(),
+                Edit::Insert { lines, .. } => lines.iter().map(|l| l.text.as_str()).collect(),
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => old_lines
+                    .iter()
+                    .chain(new_lines.iter())
+                    .map(|l| l.text.as_str())
+                    .collect(),
+            })
+            .collect();
+        assert!(
+            !all_edit_texts.contains(&"hostname router1"),
+            "shared segment should not appear in edits"
+        );
+    }
+
+    #[test]
+    fn fallback_not_triggered_when_segments_match() {
+        // When all segments match, no fallback should be invoked.
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description old", 101, vec![0, 0]),
+        ]);
+        let b = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description new", 201, vec![0, 0]),
+        ]);
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        assert!(
+            result.fallback_contexts.is_empty(),
+            "matching segment headers should use child diffing, not fallback"
+        );
     }
 
     // ── line_diff (ordered) ──

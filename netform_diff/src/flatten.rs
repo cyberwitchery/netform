@@ -8,6 +8,12 @@ use crate::model::{
 };
 use crate::normalize::normalize_for_compare;
 
+/// Maximum nesting depth for `flatten_node` recursion.  Real-world network
+/// configs rarely exceed 10–15 levels; a limit of 128 is generous enough to
+/// handle any legitimate document while preventing stack overflow on
+/// pathologically deep (or cyclic) input.
+const MAX_NESTING_DEPTH: usize = 128;
+
 #[derive(Debug, Default)]
 struct KeyAllocator {
     counters: HashMap<(u64, KeyKind, u64), u64>,
@@ -94,6 +100,10 @@ fn flatten_node(
     keys: &mut KeyAllocator,
     options: &NormalizeOptions,
 ) {
+    if path.len() >= MAX_NESTING_DEPTH {
+        return;
+    }
+
     let Some(node) = doc.node(node_id) else {
         return;
     };
@@ -843,5 +853,104 @@ mod tests {
         // only the header should appear; the invalid child is skipped.
         assert_eq!(view.lines.len(), 1);
         assert_eq!(view.lines[0].normalized, "parent");
+    }
+
+    #[test]
+    fn flatten_respects_max_nesting_depth() {
+        // Build a document that nests blocks deeper than MAX_NESTING_DEPTH.
+        // The flattener should silently stop recursing beyond the limit.
+        let mut doc = Document::default();
+
+        // Start with the deepest leaf.
+        let leaf = doc.insert_node(Node::Line(LineNode {
+            raw: "  deep leaf".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(MAX_NESTING_DEPTH + 2),
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        }));
+
+        // Wrap it in MAX_NESTING_DEPTH layers of blocks.
+        let mut inner = leaf;
+        for depth in (1..=MAX_NESTING_DEPTH).rev() {
+            inner = doc.insert_node(Node::Block(BlockNode {
+                header: LineNode {
+                    raw: format!("level-{depth}"),
+                    line_ending: "\n".to_string(),
+                    span: dummy_span(depth),
+                    parsed: None,
+                    key_hint: None,
+                    trivia: TriviaKind::Content,
+                },
+                children: vec![inner],
+                footer: None,
+                kind_label: None,
+            }));
+        }
+        doc.roots.push(inner);
+
+        let view = build_comparison_view(&doc, &default_opts());
+
+        // The leaf sits at depth MAX_NESTING_DEPTH + 1 (root header is
+        // depth 1, its child header is depth 2, …). The guard truncates
+        // at MAX_NESTING_DEPTH so the leaf must be absent.
+        assert!(
+            !view.lines.iter().any(|l| l.normalized == "  deep leaf"),
+            "leaf beyond MAX_NESTING_DEPTH should be excluded"
+        );
+
+        // Headers up to the limit should still be present.
+        assert!(
+            view.lines.iter().any(|l| l.normalized == "level-1"),
+            "top-level header should be present"
+        );
+    }
+
+    #[test]
+    fn flatten_within_depth_limit_includes_everything() {
+        // A modest nesting depth should not be truncated.
+        let mut doc = Document::default();
+        let leaf = doc.insert_node(Node::Line(LineNode {
+            raw: "  deep leaf".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(4),
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        }));
+        let mid = doc.insert_node(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "mid".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(2),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            },
+            children: vec![leaf],
+            footer: None,
+            kind_label: None,
+        }));
+        doc.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "top".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            },
+            children: vec![mid],
+            footer: None,
+            kind_label: None,
+        }));
+
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 3);
+        assert_eq!(view.lines[0].normalized, "top");
+        assert_eq!(view.lines[1].normalized, "mid");
+        assert_eq!(view.lines[2].normalized, "  deep leaf");
     }
 }
