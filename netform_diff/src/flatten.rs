@@ -48,6 +48,43 @@ pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> Comp
     ComparisonView { lines: out }
 }
 
+/// Compute keys for a line and push a [`ComparisonLine`] onto the output.
+fn push_comparison_line(
+    out: &mut Vec<ComparisonLine>,
+    keys: &mut KeyAllocator,
+    parent_signature: u64,
+    kind: KeyKind,
+    line: &netform_ir::LineNode,
+    normalized: String,
+    path: &[usize],
+) -> u64 {
+    let key_material = key_material_for_line(
+        kind,
+        line.trivia,
+        line.key_hint.as_deref(),
+        normalized.as_str(),
+    );
+    let (content_key, occurrence_key) = keys.next_keys(
+        parent_signature,
+        kind,
+        line.trivia,
+        key_material.for_hash.as_str(),
+    );
+
+    out.push(ComparisonLine {
+        content_key,
+        occurrence_key,
+        key_hint: key_material.hint,
+        normalized,
+        original: line.raw.clone(),
+        path: Path(path.to_vec()),
+        span: line.span.clone(),
+        trivia: line.trivia,
+    });
+
+    content_key
+}
+
 fn flatten_node(
     doc: &Document,
     node_id: NodeId,
@@ -64,58 +101,30 @@ fn flatten_node(
     match node {
         Node::Line(line) => {
             if let Some(normalized) = normalize_for_compare(&line.raw, line.trivia, options) {
-                let key_material = key_material_for_line(
-                    KeyKind::Line,
-                    line.trivia,
-                    line.key_hint.as_deref(),
-                    normalized.as_str(),
-                );
-                let (content_key, occurrence_key) = keys.next_keys(
+                push_comparison_line(
+                    out,
+                    keys,
                     parent_signature,
                     KeyKind::Line,
-                    line.trivia,
-                    key_material.for_hash.as_str(),
-                );
-
-                out.push(ComparisonLine {
-                    content_key,
-                    occurrence_key,
-                    key_hint: key_material.hint,
+                    line,
                     normalized,
-                    original: line.raw.clone(),
-                    path: Path(path.clone()),
-                    span: line.span.clone(),
-                    trivia: line.trivia,
-                });
+                    path,
+                );
             }
         }
         Node::Block(block) => {
             if let Some(normalized) =
                 normalize_for_compare(&block.header.raw, block.header.trivia, options)
             {
-                let key_material = key_material_for_line(
-                    KeyKind::BlockHeader,
-                    block.header.trivia,
-                    block.header.key_hint.as_deref(),
-                    normalized.as_str(),
-                );
-                let (header_content_key, header_occurrence_key) = keys.next_keys(
+                let header_content_key = push_comparison_line(
+                    out,
+                    keys,
                     parent_signature,
                     KeyKind::BlockHeader,
-                    block.header.trivia,
-                    key_material.for_hash.as_str(),
-                );
-
-                out.push(ComparisonLine {
-                    content_key: header_content_key,
-                    occurrence_key: header_occurrence_key,
-                    key_hint: key_material.hint,
+                    &block.header,
                     normalized,
-                    original: block.header.raw.clone(),
-                    path: Path(path.clone()),
-                    span: block.header.span.clone(),
-                    trivia: block.header.trivia,
-                });
+                    path,
+                );
 
                 for (child_idx, child_id) in block.children.iter().copied().enumerate() {
                     path.push(child_idx);
@@ -129,29 +138,15 @@ fn flatten_node(
                     if let Some(footer_normalized) =
                         normalize_for_compare(&footer.raw, footer.trivia, options)
                     {
-                        let key_material = key_material_for_line(
-                            KeyKind::BlockFooter,
-                            footer.trivia,
-                            footer.key_hint.as_deref(),
-                            footer_normalized.as_str(),
-                        );
-                        let (footer_content_key, footer_occurrence_key) = keys.next_keys(
+                        push_comparison_line(
+                            out,
+                            keys,
                             header_content_key,
                             KeyKind::BlockFooter,
-                            footer.trivia,
-                            key_material.for_hash.as_str(),
+                            footer,
+                            footer_normalized,
+                            path,
                         );
-
-                        out.push(ComparisonLine {
-                            content_key: footer_content_key,
-                            occurrence_key: footer_occurrence_key,
-                            key_hint: key_material.hint,
-                            normalized: footer_normalized,
-                            original: footer.raw.clone(),
-                            path: Path(path.clone()),
-                            span: footer.span.clone(),
-                            trivia: footer.trivia,
-                        });
                     }
 
                     path.pop();
@@ -611,5 +606,242 @@ mod tests {
         let view = build_comparison_view(&doc, &default_opts());
 
         assert_ne!(view.lines[1].content_key, view.lines[2].content_key);
+    }
+
+    // ── edge case tests ──
+
+    #[test]
+    fn empty_document_default_produces_empty_view() {
+        let doc = Document::default();
+        let view = build_comparison_view(&doc, &default_opts());
+        assert!(view.lines.is_empty());
+    }
+
+    #[test]
+    fn block_with_no_children_and_no_footer() {
+        let mut doc = Document::default();
+        doc.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "empty-block".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            },
+            children: Vec::new(),
+            footer: None,
+            kind_label: None,
+        }));
+
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 1);
+        assert_eq!(view.lines[0].normalized, "empty-block");
+        assert_eq!(view.lines[0].path, Path(vec![0]));
+    }
+
+    #[test]
+    fn block_with_no_children_but_has_footer() {
+        let mut doc = Document::default();
+        doc.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "begin".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            },
+            children: Vec::new(),
+            footer: Some(LineNode {
+                raw: "end".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(2),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            }),
+            kind_label: None,
+        }));
+
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 2);
+        assert_eq!(view.lines[0].normalized, "begin");
+        assert_eq!(view.lines[0].path, Path(vec![0]));
+        assert_eq!(view.lines[1].normalized, "end");
+        // Footer path index equals children.len() (0 children → index 0).
+        assert_eq!(view.lines[1].path, Path(vec![0, 0]));
+    }
+
+    #[test]
+    fn block_with_only_comment_children() {
+        let doc = parse_generic("parent\n  ! comment one\n  # comment two\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        // Header + two comment children.
+        assert_eq!(view.lines.len(), 3);
+        assert_eq!(view.lines[0].trivia, TriviaKind::Content);
+        assert_eq!(view.lines[1].trivia, TriviaKind::Comment);
+        assert_eq!(view.lines[2].trivia, TriviaKind::Comment);
+    }
+
+    #[test]
+    fn block_with_only_comment_children_ignored_leaves_header() {
+        let doc = parse_generic("parent\n  ! comment one\n  # comment two\n");
+        let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
+        let view = build_comparison_view(&doc, &opts);
+
+        // Comments are filtered out; only the header remains.
+        assert_eq!(view.lines.len(), 1);
+        assert_eq!(view.lines[0].normalized, "parent");
+    }
+
+    #[test]
+    fn only_blank_lines_document() {
+        let doc = parse_generic("\n\n\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        // Blank lines are trivia, but included by default.
+        for line in &view.lines {
+            assert_eq!(line.trivia, TriviaKind::Blank);
+        }
+    }
+
+    #[test]
+    fn only_blank_lines_ignored() {
+        let doc = parse_generic("\n\n\n");
+        let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreBlankLines]);
+        let view = build_comparison_view(&doc, &opts);
+
+        assert!(view.lines.is_empty());
+    }
+
+    #[test]
+    fn only_comment_lines_document() {
+        let doc = parse_generic("! first\n# second\n");
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 2);
+        assert!(view.lines.iter().all(|l| l.trivia == TriviaKind::Comment));
+    }
+
+    #[test]
+    fn only_comment_lines_ignored() {
+        let doc = parse_generic("! first\n# second\n");
+        let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
+        let view = build_comparison_view(&doc, &opts);
+
+        assert!(view.lines.is_empty());
+    }
+
+    #[test]
+    fn deeply_nested_blocks_flatten_with_correct_paths() {
+        // Build a 10-level deep nesting chain: each block has one child block,
+        // with a single leaf at the bottom.
+        let mut doc = Document::default();
+
+        let leaf = doc.insert_node(Node::Line(LineNode {
+            raw: "          leaf".to_string(),
+            line_ending: "\n".to_string(),
+            span: dummy_span(11),
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        }));
+
+        let mut current_child = leaf;
+        for depth in (1..=10).rev() {
+            let indent = "  ".repeat(depth - 1);
+            current_child = doc.insert_node(Node::Block(BlockNode {
+                header: LineNode {
+                    raw: format!("{indent}level-{depth}"),
+                    line_ending: "\n".to_string(),
+                    span: dummy_span(depth),
+                    parsed: None,
+                    key_hint: None,
+                    trivia: TriviaKind::Content,
+                },
+                children: vec![current_child],
+                footer: None,
+                kind_label: None,
+            }));
+        }
+
+        doc.roots.push(current_child);
+        let view = build_comparison_view(&doc, &default_opts());
+
+        // 10 block headers + 1 leaf = 11 lines.
+        assert_eq!(view.lines.len(), 11);
+
+        // Each line should have a path one element longer than the previous.
+        for (i, line) in view.lines.iter().enumerate() {
+            assert_eq!(
+                line.path.0.len(),
+                i + 1,
+                "line {i} should have path depth {}",
+                i + 1
+            );
+            // All children are index 0 under their parent.
+            assert!(
+                line.path.0.iter().all(|&idx| idx == 0),
+                "all path indices should be 0 for a single-child chain"
+            );
+        }
+
+        assert_eq!(view.lines[0].normalized, "level-1");
+        assert_eq!(view.lines[10].normalized, "          leaf");
+    }
+
+    #[test]
+    fn single_line_document_preserves_span() {
+        let mut doc = Document::default();
+        doc.insert_root(Node::Line(LineNode {
+            raw: "hostname edge-01".to_string(),
+            line_ending: "\n".to_string(),
+            span: Span {
+                line: 1,
+                start_byte: 0,
+                end_byte: 16,
+            },
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        }));
+
+        let view = build_comparison_view(&doc, &default_opts());
+
+        assert_eq!(view.lines.len(), 1);
+        assert_eq!(view.lines[0].span.line, 1);
+        assert_eq!(view.lines[0].span.start_byte, 0);
+        assert_eq!(view.lines[0].span.end_byte, 16);
+    }
+
+    #[test]
+    fn invalid_node_id_is_silently_skipped() {
+        // Build a block whose child list references a node ID that doesn't
+        // exist in the arena.  flatten_node should skip it gracefully.
+        let mut doc = Document::default();
+        let bogus_id = netform_ir::NodeId(999);
+        doc.insert_root(Node::Block(BlockNode {
+            header: LineNode {
+                raw: "parent".to_string(),
+                line_ending: "\n".to_string(),
+                span: dummy_span(1),
+                parsed: None,
+                key_hint: None,
+                trivia: TriviaKind::Content,
+            },
+            children: vec![bogus_id],
+            footer: None,
+            kind_label: None,
+        }));
+
+        let view = build_comparison_view(&doc, &default_opts());
+
+        // Only the header should appear; the invalid child is skipped.
+        assert_eq!(view.lines.len(), 1);
+        assert_eq!(view.lines[0].normalized, "parent");
     }
 }
