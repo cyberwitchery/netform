@@ -46,7 +46,7 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = CliOrderPolicy::Ordered)]
     order_policy: CliOrderPolicy,
 
-    /// Per-context order-policy override.  Format: PATH:POLICY where PATH
+    /// per-context order-policy override.  Format: PATH:POLICY where PATH
     /// is a dot-separated context prefix (e.g. "0.1") and POLICY is one of
     /// ordered, unordered, or keyed-stable.  May be repeated.
     #[arg(long, value_parser = parse_policy_override)]
@@ -55,25 +55,25 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = CliDialect::Auto)]
     dialect: CliDialect,
 
-    /// Output format for the human-readable report.
+    /// output format for the human-readable report.
     #[arg(long, value_enum, default_value_t = CliFormat::Unified)]
     format: CliFormat,
 
-    /// Maximum number of lines shown per side of each edit before
+    /// maximum number of lines shown per side of each edit before
     /// truncating with "and N more".  Applies to unified and markdown
     /// output (ignored with --json / --plan-json).
     #[arg(long, default_value_t = DEFAULT_CONTEXT_LINES)]
     context_lines: usize,
 
-    /// Force colored output even when stdout is not a TTY.
+    /// force colored output even when stdout is not a TTY.
     #[arg(long, conflicts_with = "no_color")]
     color: bool,
 
-    /// Disable colored output.
+    /// disable colored output.
     #[arg(long)]
     no_color: bool,
 
-    /// Suppress exit code 1 when configs differ.  By default config-diff
+    /// suppress exit code 1 when configs differ.  By default config-diff
     /// exits 1 when the configs differ (like `diff(1)`).  Pass this flag
     /// to exit 0 instead.  Exit code 2 (I/O or serialization error) is
     /// never suppressed.
@@ -177,7 +177,7 @@ fn main() {
             if a_hint == b_hint {
                 CliDialect::from_hint(&a_hint)
             } else {
-                // Disagreement: fall back to Generic rather than risk
+                // disagreement: fall back to Generic rather than risk
                 // parsing two files with different grammars.
                 CliDialect::Generic
             }

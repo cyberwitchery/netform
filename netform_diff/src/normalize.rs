@@ -36,7 +36,7 @@ pub(crate) fn normalize_for_compare(
                 let indent = count_indent(&output);
                 let body = output.trim_start_matches([' ', '\t']);
                 let leading_byte_len = output.len() - body.len();
-                // No-op when leading whitespace is already canonical spaces.
+                // no-op when leading whitespace is already canonical spaces.
                 // count_indent returns 1 per space, 4 per tab, so byte_len == indent
                 // implies every leading byte is a space.
                 if leading_byte_len != indent {

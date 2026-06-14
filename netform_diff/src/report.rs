@@ -4,10 +4,10 @@ use owo_colors::OwoColorize;
 
 use crate::model::{Diff, DiffLine, Edit};
 
-/// Default maximum number of lines shown per side of an edit before truncating.
+/// default maximum number of lines shown per side of an edit before truncating.
 pub const DEFAULT_CONTEXT_LINES: usize = 10;
 
-/// Format a markdown-oriented human report from a diff result.
+/// format a markdown-oriented human report from a diff result.
 ///
 /// `max_lines_shown` controls how many lines are printed per side of each edit
 /// before the output is truncated with an "and N more" message.
@@ -66,15 +66,15 @@ pub fn format_markdown_report(
     out
 }
 
-/// Format a colored unified-diff-style report from a diff result.
+/// format a colored unified-diff-style report from a diff result.
 ///
-/// Uses ANSI colors when enabled via `owo_colors`:
+/// uses ANSI colors when enabled via `owo_colors`:
 /// - `---`/`+++` file headers: bold
 /// - `@@` hunk headers: cyan
 /// - `-` deletion lines: red
 /// - `+` insertion lines: green
 ///
-/// Call `owo_colors::set_override(false)` before invoking this function
+/// call `owo_colors::set_override(false)` before invoking this function
 /// to suppress ANSI escapes (e.g. when stdout is not a TTY).
 pub fn format_unified_diff(
     diff: &Diff,
@@ -404,7 +404,7 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 2);
 
-        // Should show 2 lines then truncation message
+        // should show 2 lines then truncation message
         assert!(report.contains("... and 3 more"));
     }
 
@@ -565,7 +565,7 @@ mod tests {
         };
         let result = format_unified_diff(&diff, "a", "b", 10);
 
-        // Should not have the extra newline that precedes findings
+        // should not have the extra newline that precedes findings
         let lines: Vec<&str> = result.lines().collect();
         let last = lines.last().unwrap();
         assert!(!last.is_empty()); // no trailing blank from findings block

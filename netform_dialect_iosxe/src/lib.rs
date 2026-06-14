@@ -1,6 +1,6 @@
 //! Cisco IOS XE-oriented dialect profile for `netform_ir`.
 //!
-//! This crate provides a dedicated [`IosxeDialect`] that customizes key-hint
+//! this crate provides a dedicated [`IosxeDialect`] that customizes key-hint
 //! derivation for IOS XE-specific constructs while reusing the shared IOS-like
 //! trivia classification and line tokenization.
 //!
@@ -20,14 +20,14 @@ use netform_ir::{
     parse_with_dialect,
 };
 
-/// Dialect implementation for Cisco IOS XE configuration text.
+/// dialect implementation for Cisco IOS XE configuration text.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IosxeDialect;
 
-/// Pre-built IOS XE dialect instance.
+/// pre-built IOS XE dialect instance.
 pub const IOSXE_DIALECT: IosxeDialect = IosxeDialect;
 
-/// Parse text using [`IosxeDialect`].
+/// parse text using [`IosxeDialect`].
 pub fn parse_iosxe(input: &str) -> Document {
     parse_with_dialect(input, &IosxeDialect)
 }
@@ -60,7 +60,7 @@ impl Dialect for IosxeDialect {
 
 /// IOS XE interface type prefixes in canonical lowercase form.
 ///
-/// Order matters: longer prefixes must come first so that e.g.
+/// order matters: longer prefixes must come first so that e.g.
 /// `tengigabitethernet` matches before `gigabitethernet`.  Matching is
 /// case-insensitive so that `GigabitEthernet0/0/0`, `gigabitethernet0/0/0`,
 /// and `GIGABITETHERNET0/0/0` all normalize the same way.
@@ -89,9 +89,9 @@ const IOSXE_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
     extra_router_protos: &["eigrp"],
 };
 
-/// Derive a stable identity key for IOS XE configuration lines.
+/// derive a stable identity key for IOS XE configuration lines.
 ///
-/// Delegates `interface`, `vrf`, `router`, and `ip` to
+/// delegates `interface`, `vrf`, `router`, and `ip` to
 /// [`ios_family_key_hint`], handles IOS XE-specific constructs (`crypto pki`,
 /// `redundancy`, `parameter-map`, `track`, `zone`, `zone-pair`), then falls
 /// back to [`common_key_hint`] for the remaining shared arms.

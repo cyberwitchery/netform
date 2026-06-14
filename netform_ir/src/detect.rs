@@ -1,13 +1,13 @@
-//! Score-based dialect auto-detection from configuration text.
+//! score-based dialect auto-detection from configuration text.
 //!
-//! Scans lines for dialect-specific patterns, accumulates per-dialect scores,
+//! scans lines for dialect-specific patterns, accumulates per-dialect scores,
 //! and returns the highest-scoring dialect as a [`DialectHint`].  Falls back to
 //! [`DialectHint::Generic`] when the top score is too low or when the margin
 //! between the top two candidates is too narrow.
 //!
 //! # Scoring algorithm
 //!
-//! Each input line is tested against a set of pattern rules per dialect.  When a
+//! each input line is tested against a set of pattern rules per dialect.  When a
 //! rule matches, the corresponding dialect's score is incremented by a weight
 //! that reflects how distinctive the pattern is:
 //!
@@ -17,13 +17,13 @@
 //! | `MODERATE_SIGNAL` (2) | Moderately distinctive | FortiOS `end`/`next`, Junos brace blocks, EOS non-slot interfaces |
 //! | `WEAK_SIGNAL` (1) | Weakly suggestive, shared across dialects | Junos semicolons, FortiOS plain `set`, IOS XE wildcard masks |
 //!
-//! After scoring, the highest-scoring dialect is accepted only if:
+//! after scoring, the highest-scoring dialect is accepted only if:
 //! 1. Its score meets `MIN_CONFIDENCE_SCORE` (currently 3 — at least one
 //!    strong signal or multiple weaker ones).
 //! 2. Its score is at least `MARGIN_FACTOR`× the runner-up's score, ensuring
 //!    the winner stands clearly above the noise.
 //!
-//! Both checks must pass; otherwise the result is [`DialectHint::Generic`].
+//! both checks must pass; otherwise the result is [`DialectHint::Generic`].
 //!
 //! # Example
 //!
@@ -40,36 +40,36 @@
 use crate::{DialectHint, Document, parse_generic};
 
 // ---------------------------------------------------------------------------
-// Scoring constants
+// scoring constants
 // ---------------------------------------------------------------------------
 
-/// Score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
+/// score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
 /// `config <section>`, NX-OS `feature <name>`, Junos top-level stanza names).
 const STRONG_SIGNAL: i32 = 3;
 
-/// Score for a moderately distinctive pattern (e.g. FortiOS `end`/`next`,
+/// score for a moderately distinctive pattern (e.g. FortiOS `end`/`next`,
 /// Junos brace open/close, EOS non-slot Ethernet interfaces).
 const MODERATE_SIGNAL: i32 = 2;
 
-/// Score for a pattern that weakly suggests a dialect (e.g. Junos trailing
+/// score for a pattern that weakly suggests a dialect (e.g. Junos trailing
 /// semicolons, FortiOS plain `set <field>`, IOS XE wildcard masks in ACLs).
 const WEAK_SIGNAL: i32 = 1;
 
 // ---------------------------------------------------------------------------
-// Decision thresholds
+// decision thresholds
 // ---------------------------------------------------------------------------
 
-/// Minimum total score a dialect must reach to be considered detected.  Below
+/// minimum total score a dialect must reach to be considered detected.  Below
 /// this threshold, the input is too short or too ambiguous to identify.
 const MIN_CONFIDENCE_SCORE: i32 = 3;
 
-/// The winning dialect must outscore the runner-up by at least this factor.
-/// A value of 2 means the winner needs ≥ 2× the runner-up's score.
+/// the winning dialect must outscore the runner-up by at least this factor.
+/// a value of 2 means the winner needs ≥ 2× the runner-up's score.
 const MARGIN_FACTOR: i32 = 2;
 
-/// Detect the likely network-device dialect from configuration text.
+/// detect the likely network-device dialect from configuration text.
 ///
-/// Returns a [`DialectHint`] identifying the detected dialect:
+/// returns a [`DialectHint`] identifying the detected dialect:
 /// - `DialectHint::Named("eos")` — Arista EOS
 /// - `DialectHint::Named("fortios")` — Fortinet FortiOS
 /// - `DialectHint::Named("iosxe")` — Cisco IOS XE
@@ -112,13 +112,13 @@ pub fn detect_dialect(input: &str) -> DialectHint {
                 // `set interfaces ...`, `set protocols ...` etc — Junos set-style.
                 junos += STRONG_SIGNAL;
             } else {
-                // Plain `set <field> <value>` leans FortiOS (inside config blocks).
+                // plain `set <field> <value>` leans FortiOS (inside config blocks).
                 fortios += WEAK_SIGNAL;
             }
         }
 
         // --- Junos signals ---
-        // Brace-and-semicolon syntax is highly distinctive.
+        // brace-and-semicolon syntax is highly distinctive.
         if line.ends_with('{') {
             junos += MODERATE_SIGNAL;
         }
@@ -128,7 +128,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         if line.ends_with(';') && !line.ends_with("};") {
             junos += WEAK_SIGNAL;
         }
-        // Junos-specific stanza names at top-level (hierarchical style).
+        // junos-specific stanza names at top-level (hierarchical style).
         if is_junos_stanza_name(line.split_whitespace().next().unwrap_or("")) {
             junos += STRONG_SIGNAL;
         }
@@ -138,7 +138,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         if line.starts_with("feature ") {
             nxos += STRONG_SIGNAL;
         }
-        // Slot/port interfaces: Ethernet1/1, port-channel1, etc.
+        // slot/port interfaces: Ethernet1/1, port-channel1, etc.
         if line.starts_with("interface ") {
             let iface = line.trim_start_matches("interface ");
             if iface.starts_with("Ethernet") && iface.contains('/') {
@@ -146,7 +146,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
                 // IOS XE uses GigabitEthernet, TenGigabitEthernet etc. with slashes.
                 nxos += STRONG_SIGNAL;
             } else if iface.starts_with("Ethernet") || iface.starts_with("Management") {
-                // No slot → could be EOS.
+                // no slot → could be EOS.
                 eos += MODERATE_SIGNAL;
             }
         }
@@ -162,7 +162,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         if line.starts_with("ip access-list extended ") {
             iosxe += STRONG_SIGNAL;
         }
-        // Dotted subnet masks with `ip address` (IOS XE uses masks, not CIDR).
+        // dotted subnet masks with `ip address` (IOS XE uses masks, not CIDR).
         if line.starts_with("ip address ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 4 && looks_like_dotted_mask(parts[3]) {
@@ -173,7 +173,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         if line.contains(" mask ") && line.starts_with("network ") {
             iosxe += MODERATE_SIGNAL;
         }
-        // Wildcard masks in ACL permit/deny lines.
+        // wildcard masks in ACL permit/deny lines.
         if (line.starts_with("permit ") || line.starts_with("deny "))
             && line.split_whitespace().any(looks_like_dotted_mask)
         {
@@ -184,7 +184,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         if line.starts_with("ip access-list ") && !line.contains("extended") {
             eos += MODERATE_SIGNAL;
         }
-        // Numbered ACL entries (EOS style: `10 permit ...`).
+        // numbered ACL entries (EOS style: `10 permit ...`).
         if let Some(first) = line.split_whitespace().next()
             && first.parse::<u32>().is_ok()
             && (line.contains(" permit ") || line.contains(" deny "))
@@ -224,13 +224,13 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     DialectHint::Named(best_name.to_string())
 }
 
-/// Parse input with automatic dialect detection.
+/// parse input with automatic dialect detection.
 ///
-/// Runs [`detect_dialect`] to identify the dialect from the input text, then
+/// runs [`detect_dialect`] to identify the dialect from the input text, then
 /// parses with the generic parser and sets the detected [`DialectHint`] in the
 /// document metadata.
 ///
-/// For full dialect-specific parsing (Junos brace handling, FortiOS block
+/// for full dialect-specific parsing (Junos brace handling, FortiOS block
 /// structure, etc.), call [`detect_dialect`] directly and dispatch to the
 /// appropriate dialect parser.
 pub fn auto_parse(input: &str) -> Document {
@@ -240,7 +240,7 @@ pub fn auto_parse(input: &str) -> Document {
     doc
 }
 
-/// Returns `true` if `name` is a well-known Junos top-level stanza name.
+/// returns `true` if `name` is a well-known Junos top-level stanza name.
 fn is_junos_stanza_name(name: &str) -> bool {
     matches!(
         name,
@@ -262,7 +262,7 @@ fn is_junos_stanza_name(name: &str) -> bool {
     )
 }
 
-/// Returns `true` if `s` looks like a dotted-decimal subnet or wildcard mask
+/// returns `true` if `s` looks like a dotted-decimal subnet or wildcard mask
 /// (e.g. `255.255.255.0` or `0.0.0.255`).
 fn looks_like_dotted_mask(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
@@ -399,18 +399,18 @@ some random config line
 
     #[test]
     fn detect_generic_when_ambiguous() {
-        // Minimal content with weak signals from multiple dialects.
+        // minimal content with weak signals from multiple dialects.
         let input = "\
 set hostname myrouter
 interface Ethernet1
 ";
-        // Both junos/fortios and eos get mild scores — should fall back.
+        // both junos/fortios and eos get mild scores — should fall back.
         assert_eq!(detect_dialect(input), DialectHint::Generic);
     }
 
     #[test]
     fn detect_generic_on_exact_tie() {
-        // Craft input where NX-OS and EOS each score exactly 3.
+        // craft input where NX-OS and EOS each score exactly 3.
         // `feature ospf` → nxos += 3
         // `ip access-list ACL-IN` → eos += 2
         // `10 permit tcp any any` → eos += 1  (numbered ACL entry)
@@ -426,14 +426,14 @@ ip access-list ACL-IN
 
     #[test]
     fn detect_at_minimum_score_single_strong_signal() {
-        // One STRONG_SIGNAL (3) with no competition → exactly MIN_CONFIDENCE_SCORE.
+        // one STRONG_SIGNAL (3) with no competition → exactly MIN_CONFIDENCE_SCORE.
         let input = "feature ospf\n";
         assert_eq!(detect_dialect(input), DialectHint::Named("nxos".into()));
     }
 
     #[test]
     fn detect_below_minimum_score_single_moderate_signal() {
-        // One MODERATE_SIGNAL (2) → below MIN_CONFIDENCE_SCORE → Generic.
+        // one MODERATE_SIGNAL (2) → below MIN_CONFIDENCE_SCORE → Generic.
         let input = "role name admin\n";
         assert_eq!(detect_dialect(input), DialectHint::Generic);
     }
@@ -463,7 +463,7 @@ interface Ethernet1
 
     #[test]
     fn detect_clear_winner_no_runner_up() {
-        // Two STRONG_SIGNAL NX-OS features, everything else at zero.
+        // two STRONG_SIGNAL NX-OS features, everything else at zero.
         // nxos = 6, second = 0 → 6 >= 0 → clear win.
         let input = "\
 feature bgp
@@ -491,7 +491,7 @@ interfaces {
 
     #[test]
     fn detect_two_moderate_signals_reach_margin() {
-        // Two MODERATE_SIGNAL FortiOS lines: end(2) + next(2) = 4.
+        // two MODERATE_SIGNAL FortiOS lines: end(2) + next(2) = 4.
         // 4 >= MIN_CONFIDENCE_SCORE(3) ✓, second = 0, 4 >= 0 ✓ → detected.
         let input = "\
 end
@@ -502,7 +502,7 @@ next
 
     #[test]
     fn detect_only_weak_signals_below_threshold() {
-        // Two WEAK_SIGNAL lines: junos semicolons.
+        // two WEAK_SIGNAL lines: junos semicolons.
         // junos = 1 + 1 = 2 → below MIN_CONFIDENCE_SCORE → Generic.
         let input = "\
 mtu 9216;
@@ -513,8 +513,8 @@ description uplink;
 
     #[test]
     fn detect_three_weak_signals_reach_threshold() {
-        // Three WEAK_SIGNAL junos semicolons = 3 → exactly MIN_CONFIDENCE_SCORE.
-        // No competition → detected.
+        // three WEAK_SIGNAL junos semicolons = 3 → exactly MIN_CONFIDENCE_SCORE.
+        // no competition → detected.
         let input = "\
 mtu 9216;
 description uplink;

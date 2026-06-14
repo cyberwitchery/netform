@@ -1,6 +1,6 @@
 //! FortiOS-oriented dialect profile for `netform_ir`.
 //!
-//! Fortinet FortiOS configuration uses `config`/`end` block markers for
+//! fortinet FortiOS configuration uses `config`/`end` block markers for
 //! sections, `edit`/`next` for entries within sections, and `set`/`unset`
 //! keywords for key-value assignments.  Comments use `#`.
 //!
@@ -19,11 +19,11 @@ use netform_ir::{
     parse_ios_like_parts, parse_with_dialect,
 };
 
-/// Dialect implementation for FortiOS configuration text.
+/// dialect implementation for FortiOS configuration text.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FortiosDialect;
 
-/// Parse text using [`FortiosDialect`].
+/// parse text using [`FortiosDialect`].
 pub fn parse_fortios(input: &str) -> Document {
     parse_with_dialect(input, &FortiosDialect)
 }
@@ -54,24 +54,24 @@ impl Dialect for FortiosDialect {
     }
 }
 
-/// Classify trivia for FortiOS configs.
+/// classify trivia for FortiOS configs.
 ///
-/// Lines starting with `#` (after leading whitespace) are comments;
+/// lines starting with `#` (after leading whitespace) are comments;
 /// blank/whitespace-only lines are blank; everything else is content.
 fn classify_fortios_trivia(raw: &str) -> TriviaKind {
     classify_trivia_with_prefixes(raw, &["#"])
 }
 
-/// Strip surrounding double-quotes from a token, if present.
+/// strip surrounding double-quotes from a token, if present.
 fn unquote(s: &str) -> &str {
     s.strip_prefix('"')
         .and_then(|s| s.strip_suffix('"'))
         .unwrap_or(s)
 }
 
-/// Derive a stable identity key for FortiOS configuration lines.
+/// derive a stable identity key for FortiOS configuration lines.
 ///
-/// Recognized patterns:
+/// recognized patterns:
 /// - `config <section> [<subsection>...]` → `config:<section>[:<subsection>...]`
 /// - `edit <name>` → `edit:<name>` (quotes stripped)
 /// - `set <field> ...` → `set:<field>` (stable across value changes)
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn key_hint_set_bare_no_hint() {
-        // Bare "set" with no field name — shouldn't happen but must not panic.
+        // bare "set" with no field name — shouldn't happen but must not panic.
         assert_eq!(hint("    set"), None);
     }
 
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn key_hint_set_description_quoted_value() {
-        // The key hint captures the parameter name, not the value.
+        // the key hint captures the parameter name, not the value.
         assert_eq!(
             hint("        set description \"Production web server\""),
             Some("set:description".into()),
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn key_hint_config_empty_no_hint() {
-        // Bare "config" with no section — shouldn't happen in practice but
+        // bare "config" with no section — shouldn't happen in practice but
         // must not panic.
         assert_eq!(hint("config"), None);
     }

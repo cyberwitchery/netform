@@ -1,6 +1,6 @@
 //! Arista EOS-oriented dialect profile for `netform_ir`.
 //!
-//! This crate provides a dedicated [`EosDialect`] that customizes key-hint
+//! this crate provides a dedicated [`EosDialect`] that customizes key-hint
 //! derivation for EOS-specific constructs while reusing the shared IOS-like
 //! trivia classification and line tokenization.
 //!
@@ -20,14 +20,14 @@ use netform_ir::{
     parse_with_dialect,
 };
 
-/// Dialect implementation for Arista EOS configuration text.
+/// dialect implementation for Arista EOS configuration text.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EosDialect;
 
-/// Pre-built EOS dialect instance.
+/// pre-built EOS dialect instance.
 pub const EOS_DIALECT: EosDialect = EosDialect;
 
-/// Parse text using [`EosDialect`].
+/// parse text using [`EosDialect`].
 pub fn parse_eos(input: &str) -> Document {
     parse_with_dialect(input, &EosDialect)
 }
@@ -60,7 +60,7 @@ impl Dialect for EosDialect {
 
 /// EOS interface type prefixes in canonical lowercase form.
 ///
-/// Order matters: longer prefixes must come first so `port-channel` matches
+/// order matters: longer prefixes must come first so `port-channel` matches
 /// before a hypothetical `port` prefix. Matching is case-insensitive so that
 /// `Ethernet1`, `ethernet1`, and `ETHERNET1` all normalize the same way.
 const EOS_INTERFACE_TYPES: &[&str] = &[
@@ -79,9 +79,9 @@ const EOS_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
     extra_router_protos: &[],
 };
 
-/// Derive a stable identity key for EOS configuration lines.
+/// derive a stable identity key for EOS configuration lines.
 ///
-/// Delegates `interface`, `vrf`, `router`, and `ip` to
+/// delegates `interface`, `vrf`, `router`, and `ip` to
 /// [`ios_family_key_hint`], handles EOS-specific constructs (`mlag`,
 /// `management`, `daemon`, `event-handler`, `peer-filter`), then falls back to
 /// [`common_key_hint`] for the remaining shared arms.

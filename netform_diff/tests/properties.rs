@@ -13,7 +13,7 @@ fn text_strategy() -> impl Strategy<Value = String> {
     })
 }
 
-/// Generate IOS-like config snippets with realistic structure.
+/// generate IOS-like config snippets with realistic structure.
 fn ios_like_strategy() -> impl Strategy<Value = String> {
     let iface_name = prop::sample::select(vec![
         "Ethernet1",
@@ -27,7 +27,7 @@ fn ios_like_strategy() -> impl Strategy<Value = String> {
     prop::collection::vec(iface_block, 1..5).prop_map(|blocks| blocks.join(""))
 }
 
-/// Generate FortiOS config snippets with realistic structure.
+/// generate FortiOS config snippets with realistic structure.
 fn fortios_strategy() -> impl Strategy<Value = String> {
     let hostname = prop::sample::select(vec!["FGT-A", "FGT-B", "FGT-C"]);
     hostname.prop_map(|name| {
@@ -35,7 +35,7 @@ fn fortios_strategy() -> impl Strategy<Value = String> {
     })
 }
 
-/// Generate Junos config snippets with realistic structure.
+/// generate Junos config snippets with realistic structure.
 fn junos_strategy() -> impl Strategy<Value = String> {
     let iface_name = prop::sample::select(vec!["ge-0/0/0", "ge-0/0/1", "lo0", "ae0"]);
     iface_name.prop_map(|name| {
@@ -43,12 +43,12 @@ fn junos_strategy() -> impl Strategy<Value = String> {
     })
 }
 
-/// Generate NX-OS config snippets that exercise dialect-specific key hints.
+/// generate NX-OS config snippets that exercise dialect-specific key hints.
 ///
-/// Produces blocks using `feature`, `vpc domain`, `role name`, `monitor session`,
+/// produces blocks using `feature`, `vpc domain`, `role name`, `monitor session`,
 /// `ntp server/peer`, and `system` constructs alongside interfaces.
 ///
-/// Always includes at least one block-producing construct (with indented children)
+/// always includes at least one block-producing construct (with indented children)
 /// to ensure key hints are exposed on block headers.
 fn nxos_strategy() -> impl Strategy<Value = String> {
     let feature_line = prop::sample::select(vec!["ospf", "bgp", "vpc", "lacp", "nv overlay"])
@@ -80,10 +80,10 @@ fn nxos_strategy() -> impl Strategy<Value = String> {
         prop::sample::select(vec!["Ethernet1/1", "Ethernet1/2", "Loopback0", "mgmt0"])
             .prop_map(|name| format!("interface {name}\n  description link\n  no shutdown\n"));
 
-    // Leaf-line constructs (hints used for content_key stability, not exposed on ComparisonLine).
+    // leaf-line constructs (hints used for content_key stability, not exposed on ComparisonLine).
     let leaf = prop_oneof![feature_line, ntp_line,];
 
-    // Block-header constructs (hints exposed on ComparisonLine.key_hint).
+    // block-header constructs (hints exposed on ComparisonLine.key_hint).
     let block = prop_oneof![
         1 => vpc_block,
         1 => role_block,
@@ -92,7 +92,7 @@ fn nxos_strategy() -> impl Strategy<Value = String> {
         2 => iface_block,
     ];
 
-    // Always include at least one block + 1-3 leaves + 1-3 more blocks.
+    // always include at least one block + 1-3 leaves + 1-3 more blocks.
     (
         prop::collection::vec(leaf, 1..4),
         prop::collection::vec(block, 1..4),
@@ -104,13 +104,13 @@ fn nxos_strategy() -> impl Strategy<Value = String> {
         })
 }
 
-/// Generate EOS config snippets that exercise dialect-specific key hints.
+/// generate EOS config snippets that exercise dialect-specific key hints.
 ///
 /// EOS has its own dedicated `EosDialect` with EOS-specific constructs like
 /// `mlag configuration`, `management api`, `daemon`, `event-handler`,
 /// `peer-filter`, and interface type normalization.
 ///
-/// Always includes at least one block-producing construct.
+/// always includes at least one block-producing construct.
 fn eos_strategy() -> impl Strategy<Value = String> {
     let ntp_line = prop::sample::select(vec![
         ("server", "10.1.1.1"),
@@ -355,7 +355,7 @@ proptest! {
             .iter()
             .filter_map(|l| l.key_hint.as_deref())
             .collect();
-        // Every generated config has at least one block header with a key hint.
+        // every generated config has at least one block header with a key hint.
         prop_assert!(!hints.is_empty(), "NX-OS strategy should produce key hints, got none");
     }
 
@@ -382,7 +382,7 @@ proptest! {
             .iter()
             .filter_map(|l| l.key_hint.as_deref())
             .collect();
-        // At least one hint should match a dialect-specific prefix (not just "interface:").
+        // at least one hint should match a dialect-specific prefix (not just "interface:").
         let has_dialect_specific = hints.iter().any(|h| {
             h.starts_with("feature:")
                 || h.starts_with("vpc-domain:")
@@ -391,9 +391,9 @@ proptest! {
                 || h.starts_with("ntp:")
                 || h.starts_with("system:")
         });
-        // This won't always hold for every single sample (interface-heavy samples exist),
+        // this won't always hold for every single sample (interface-heavy samples exist),
         // so we just check that the union of all hint prefixes seen is correct.
-        // The test below uses a fixed corpus for deterministic coverage.
+        // the test below uses a fixed corpus for deterministic coverage.
         let _ = has_dialect_specific;
     }
 
@@ -422,9 +422,9 @@ proptest! {
 
 // -- deterministic key-hint coverage (not property-based) --
 
-/// Verify that NX-OS block-header constructs produce expected key hints.
+/// verify that NX-OS block-header constructs produce expected key hints.
 ///
-/// Leaf lines (feature, ntp) have their hints folded into content_key hashes
+/// leaf lines (feature, ntp) have their hints folded into content_key hashes
 /// but not exposed on ComparisonLine.key_hint — those are tested via
 /// content_key_stability below.
 #[test]
@@ -454,7 +454,7 @@ interface Ethernet1/1
         .filter_map(|l| l.key_hint.as_deref())
         .collect();
 
-    // Block-header hints (exposed on ComparisonLine).
+    // block-header hints (exposed on ComparisonLine).
     assert!(hints.contains(&"vpc-domain:10"), "missing vpc-domain:10");
     assert!(
         hints.contains(&"role:network-admin"),
@@ -474,7 +474,7 @@ interface Ethernet1/1
     );
 }
 
-/// Verify that EOS block-header constructs produce expected key hints.
+/// verify that EOS block-header constructs produce expected key hints.
 #[test]
 fn eos_dialect_constructs_produce_expected_hints() {
     let input = "\
@@ -547,9 +547,9 @@ interface Management1
     );
 }
 
-/// Verify that leaf-line key hints (feature, ntp) produce stable content_keys.
+/// verify that leaf-line key hints (feature, ntp) produce stable content_keys.
 ///
-/// Leaf hints aren't exposed on ComparisonLine.key_hint but DO stabilise
+/// leaf hints aren't exposed on ComparisonLine.key_hint but DO stabilise
 /// the content_key hash. Two lines with the same text must get the same key.
 #[test]
 fn nxos_leaf_hints_stabilise_content_keys() {
@@ -563,7 +563,7 @@ ntp peer 172.16.0.1
     let doc = parse_with_dialect(input, &dialect);
     let view = build_comparison_view(&doc, &NormalizeOptions::default());
 
-    // Parse the same input again — content_keys must be identical.
+    // parse the same input again — content_keys must be identical.
     let doc2 = parse_with_dialect(input, &dialect);
     let view2 = build_comparison_view(&doc2, &NormalizeOptions::default());
 
@@ -571,7 +571,7 @@ ntp peer 172.16.0.1
     let keys2: Vec<u64> = view2.lines.iter().map(|l| l.content_key).collect();
     assert_eq!(keys1, keys2, "content_keys should be stable across parses");
 
-    // Each distinct leaf line should have a distinct content_key.
+    // each distinct leaf line should have a distinct content_key.
     let feature_ospf = view.lines[0].content_key;
     let feature_vpc = view.lines[1].content_key;
     let ntp_server = view.lines[2].content_key;

@@ -1,6 +1,6 @@
-//! Junos-oriented dialect profile for `netform_ir`.
+//! junos-oriented dialect profile for `netform_ir`.
 //!
-//! This crate provides a conservative Junos profile that customizes:
+//! this crate provides a conservative Junos profile that customizes:
 //! - comment classification (`#`, `/*`, `*`, `*/`)
 //! - line tokenization for braces/semicolons and quoted strings
 //!
@@ -19,11 +19,11 @@ use netform_ir::{
     parse_with_dialect, tokenize,
 };
 
-/// Dialect implementation for Junos-like configuration text.
+/// dialect implementation for Junos-like configuration text.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct JunosDialect;
 
-/// Parse text using [`JunosDialect`].
+/// parse text using [`JunosDialect`].
 pub fn parse_junos(input: &str) -> Document {
     parse_with_dialect(input, &JunosDialect)
 }

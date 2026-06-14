@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use netform_ir::{Path, Span, TriviaKind};
 
-/// Errors that can occur during diff computation.
+/// errors that can occur during diff computation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffError {
-    /// The Myers shortest-edit-script algorithm did not converge within
+    /// the Myers shortest-edit-script algorithm did not converge within
     /// the expected number of steps.
     SesNotConverged,
-    /// The edit-script operation sequence was inconsistent with the input
+    /// the edit-script operation sequence was inconsistent with the input
     /// data (e.g., referenced more elements than present in one side).
     EditScriptInconsistency(String),
 }
@@ -31,7 +31,7 @@ impl std::fmt::Display for DiffError {
 
 impl std::error::Error for DiffError {}
 
-/// One ordered normalization step in the comparison pipeline.
+/// one ordered normalization step in the comparison pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NormalizationStep {
@@ -42,7 +42,7 @@ pub enum NormalizationStep {
     CollapseInternalWhitespace,
 }
 
-/// Ordering behavior used when comparing sibling lines in a context.
+/// ordering behavior used when comparing sibling lines in a context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OrderPolicy {
@@ -51,14 +51,14 @@ pub enum OrderPolicy {
     KeyedStable,
 }
 
-/// Path-based policy override for specific subtree contexts.
+/// path-based policy override for specific subtree contexts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrderPolicyOverride {
     pub context_prefix: Vec<usize>,
     pub policy: OrderPolicy,
 }
 
-/// Ordering policy configuration with a default and longest-prefix overrides.
+/// ordering policy configuration with a default and longest-prefix overrides.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrderPolicyConfig {
     pub default: OrderPolicy,
@@ -89,7 +89,7 @@ impl OrderPolicyConfig {
     }
 }
 
-/// Options controlling normalization and ordering semantics for diffing.
+/// options controlling normalization and ordering semantics for diffing.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NormalizeOptions {
     pub steps: Vec<NormalizationStep>,
@@ -97,7 +97,7 @@ pub struct NormalizeOptions {
 }
 
 impl NormalizeOptions {
-    /// Create options with an explicit ordered normalization step list.
+    /// create options with an explicit ordered normalization step list.
     pub fn new(steps: Vec<NormalizationStep>) -> Self {
         Self {
             steps,
@@ -105,7 +105,7 @@ impl NormalizeOptions {
         }
     }
 
-    /// Override ordering policy configuration.
+    /// override ordering policy configuration.
     pub fn with_order_policy(mut self, order_policy: OrderPolicyConfig) -> Self {
         self.order_policy = order_policy;
         self
@@ -116,7 +116,7 @@ impl NormalizeOptions {
     }
 }
 
-/// One normalized line in the internal comparison view.
+/// one normalized line in the internal comparison view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComparisonLine {
     pub content_key: u64,
@@ -129,13 +129,13 @@ pub struct ComparisonLine {
     pub trivia: TriviaKind,
 }
 
-/// Flattened line-oriented view derived from a document.
+/// flattened line-oriented view derived from a document.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ComparisonView {
     pub lines: Vec<ComparisonLine>,
 }
 
-/// Serializable line payload embedded in diff edits.
+/// serializable line payload embedded in diff edits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiffLine {
     pub content_key: u64,
@@ -145,14 +145,14 @@ pub struct DiffLine {
     pub span: Span,
 }
 
-/// Path/span anchor for edit placement and diagnostics.
+/// path/span anchor for edit placement and diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EditAnchor {
     pub path: Path,
     pub span: Span,
 }
 
-/// Edit script operation emitted by the diff engine.
+/// edit script operation emitted by the diff engine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
 pub enum Edit {
@@ -178,7 +178,7 @@ pub enum Edit {
     },
 }
 
-/// Aggregate counters for diff output.
+/// aggregate counters for diff output.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct DiffStats {
     pub inserts: usize,
@@ -190,7 +190,7 @@ pub struct DiffStats {
     pub replaced_new_lines: usize,
 }
 
-/// Machine-readable diagnostic codes used in [`Finding`] and [`PlanFinding`].
+/// machine-readable diagnostic codes used in [`Finding`] and [`PlanFinding`].
 pub mod finding_code {
     pub const MISSING_ANCHOR: &str = "missing_anchor";
     pub const AMBIGUOUS_KEY_MATCH: &str = "ambiguous_key_match";
@@ -198,7 +198,7 @@ pub mod finding_code {
     pub const DIFF_UNRELIABLE_REGION: &str = "diff_unreliable_region";
 }
 
-/// Warning/info emitted during parse propagation or diff uncertainty handling.
+/// warning/info emitted during parse propagation or diff uncertainty handling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Finding {
     pub code: String,
@@ -208,7 +208,7 @@ pub struct Finding {
     pub span: Option<Span>,
 }
 
-/// Severity level for a [`Finding`].
+/// severity level for a [`Finding`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FindingLevel {
@@ -225,7 +225,7 @@ impl std::fmt::Display for FindingLevel {
     }
 }
 
-/// Top-level diff output contract.
+/// top-level diff output contract.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Diff {
     pub normalization_steps: Vec<NormalizationStep>,
@@ -236,7 +236,7 @@ pub struct Diff {
     pub findings: Vec<Finding>,
 }
 
-/// Transport-neutral action plan derived from a [`Diff`].
+/// transport-neutral action plan derived from a [`Diff`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Plan {
     pub version: String,
@@ -244,7 +244,7 @@ pub struct Plan {
     pub findings: Vec<PlanFinding>,
 }
 
-/// Action variants emitted in a [`Plan`].
+/// action variants emitted in a [`Plan`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PlanAction {
@@ -259,14 +259,14 @@ pub enum PlanAction {
     },
 }
 
-/// One line-oriented edit in `apply_line_edits_under_context`.
+/// one line-oriented edit in `apply_line_edits_under_context`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlanLineEdit {
     pub kind: PlanLineEditKind,
     pub text: String,
 }
 
-/// Line operation kind for [`PlanLineEdit`].
+/// line operation kind for [`PlanLineEdit`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PlanLineEditKind {
@@ -275,7 +275,7 @@ pub enum PlanLineEditKind {
     Replace,
 }
 
-/// Plan-level warning (for example missing anchors).
+/// plan-level warning (for example missing anchors).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlanFinding {
     pub code: String,
@@ -288,7 +288,7 @@ pub struct PlanFinding {
     pub span: Option<Span>,
 }
 
-/// Key namespace discriminator used when hashing comparison identities.
+/// key namespace discriminator used when hashing comparison identities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyKind {
@@ -298,7 +298,7 @@ pub enum KeyKind {
 }
 
 impl KeyKind {
-    /// The `Debug` representation as a byte slice, matching what `{:?}` produces.
+    /// the `Debug` representation as a byte slice, matching what `{:?}` produces.
     fn as_bytes(self) -> &'static [u8] {
         match self {
             Self::Line => b"Line",
@@ -308,7 +308,7 @@ impl KeyKind {
     }
 }
 
-/// Format a `u64` as decimal digits into a stack buffer, returning the slice.
+/// format a `u64` as decimal digits into a stack buffer, returning the slice.
 struct U64Buf {
     buf: [u8; 20], // u64::MAX = 18446744073709551615 (20 digits)
     start: usize,
@@ -336,9 +336,9 @@ impl U64Buf {
     }
 }
 
-/// Derive a content key from parent signature, key kind, trivia, and normalized text.
+/// derive a content key from parent signature, key kind, trivia, and normalized text.
 ///
-/// Uses incremental xxh3 hashing to avoid the intermediate `String` allocation
+/// uses incremental xxh3 hashing to avoid the intermediate `String` allocation
 /// that `format!()` would require.  The byte sequence fed to the hasher is
 /// identical to what the old `format!()` call produced, so hash values are
 /// unchanged.
@@ -360,9 +360,9 @@ pub fn derive_content_key(
     h.digest()
 }
 
-/// Derive an occurrence key from content key and 1-based ordinal.
+/// derive an occurrence key from content key and 1-based ordinal.
 ///
-/// Uses incremental xxh3 hashing to avoid the intermediate `String` allocation.
+/// uses incremental xxh3 hashing to avoid the intermediate `String` allocation.
 pub fn derive_occurrence_key(content_key: u64, ordinal: u64) -> u64 {
     let mut h = xxhash_rust::xxh3::Xxh3Default::new();
     h.update(b"c=");
@@ -612,7 +612,7 @@ mod tests {
 
     // --- Hash stability tests (incremental == one-shot) ---
 
-    /// Reference implementation using the old format!() + xxh3_64() approach.
+    /// reference implementation using the old format!() + xxh3_64() approach.
     fn derive_content_key_reference(
         parent_signature: u64,
         kind: KeyKind,

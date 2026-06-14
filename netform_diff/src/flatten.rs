@@ -33,7 +33,7 @@ impl KeyAllocator {
     }
 }
 
-/// Build a flattened comparison view from a parsed document.
+/// build a flattened comparison view from a parsed document.
 pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> ComparisonView {
     let mut out = Vec::new();
     let mut keys = KeyAllocator::default();
@@ -48,7 +48,7 @@ pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> Comp
     ComparisonView { lines: out }
 }
 
-/// Compute keys for a line and push a [`ComparisonLine`] onto the output.
+/// compute keys for a line and push a [`ComparisonLine`] onto the output.
 fn push_comparison_line(
     out: &mut Vec<ComparisonLine>,
     keys: &mut KeyAllocator,
@@ -173,7 +173,7 @@ fn key_material_for_line(
     {
         match kind {
             KeyKind::BlockHeader => {
-                // Keep a stable and explicit namespace prefix for extracted keys.
+                // keep a stable and explicit namespace prefix for extracted keys.
                 let for_hash = format!("stanza:{hint}");
                 return KeyMaterial {
                     for_hash,
@@ -181,7 +181,7 @@ fn key_material_for_line(
                 };
             }
             KeyKind::Line => {
-                // Leaf-line hints (e.g. FortiOS `set:<field>`) stabilise content
+                // leaf-line hints (e.g. FortiOS `set:<field>`) stabilise content
                 // keys across value changes.  We intentionally do NOT expose the
                 // hint on ComparisonLine — leaf hints repeat across many sibling
                 // blocks and would flood extracted-key ambiguity findings.
@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn leaf_line_hint_stabilises_content_key_across_value_changes() {
-        // Two lines with the same key hint but different text should share a
+        // two lines with the same key hint but different text should share a
         // content key (under the same parent), so the diff engine treats a
         // value change as a modification rather than delete + add.
         let mut doc_a = Document::default();
@@ -560,17 +560,17 @@ mod tests {
         let view_a = build_comparison_view(&doc_a, &default_opts());
         let view_b = build_comparison_view(&doc_b, &default_opts());
 
-        // The set lines should share a content key despite different text.
+        // the set lines should share a content key despite different text.
         assert_eq!(view_a.lines[1].content_key, view_b.lines[1].content_key);
 
-        // The hint should NOT be exposed on the ComparisonLine (avoids
+        // the hint should NOT be exposed on the ComparisonLine (avoids
         // extracted-key ambiguity noise).
         assert_eq!(view_a.lines[1].key_hint, None);
     }
 
     #[test]
     fn leaf_line_without_hint_keys_on_normalized_text() {
-        // Lines without key hints should still use full normalized text,
+        // lines without key hints should still use full normalized text,
         // so different text produces different content keys.
         let mut doc = Document::default();
         let child_a = doc.insert_node(Node::Line(LineNode {
@@ -671,7 +671,7 @@ mod tests {
         assert_eq!(view.lines[0].normalized, "begin");
         assert_eq!(view.lines[0].path, Path(vec![0]));
         assert_eq!(view.lines[1].normalized, "end");
-        // Footer path index equals children.len() (0 children → index 0).
+        // footer path index equals children.len() (0 children → index 0).
         assert_eq!(view.lines[1].path, Path(vec![0, 0]));
     }
 
@@ -680,7 +680,7 @@ mod tests {
         let doc = parse_generic("parent\n  ! comment one\n  # comment two\n");
         let view = build_comparison_view(&doc, &default_opts());
 
-        // Header + two comment children.
+        // header + two comment children.
         assert_eq!(view.lines.len(), 3);
         assert_eq!(view.lines[0].trivia, TriviaKind::Content);
         assert_eq!(view.lines[1].trivia, TriviaKind::Comment);
@@ -693,7 +693,7 @@ mod tests {
         let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
         let view = build_comparison_view(&doc, &opts);
 
-        // Comments are filtered out; only the header remains.
+        // comments are filtered out; only the header remains.
         assert_eq!(view.lines.len(), 1);
         assert_eq!(view.lines[0].normalized, "parent");
     }
@@ -703,7 +703,7 @@ mod tests {
         let doc = parse_generic("\n\n\n");
         let view = build_comparison_view(&doc, &default_opts());
 
-        // Blank lines are trivia, but included by default.
+        // blank lines are trivia, but included by default.
         for line in &view.lines {
             assert_eq!(line.trivia, TriviaKind::Blank);
         }
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn deeply_nested_blocks_flatten_with_correct_paths() {
-        // Build a 10-level deep nesting chain: each block has one child block,
+        // build a 10-level deep nesting chain: each block has one child block,
         // with a single leaf at the bottom.
         let mut doc = Document::default();
 
@@ -775,7 +775,7 @@ mod tests {
         // 10 block headers + 1 leaf = 11 lines.
         assert_eq!(view.lines.len(), 11);
 
-        // Each line should have a path one element longer than the previous.
+        // each line should have a path one element longer than the previous.
         for (i, line) in view.lines.iter().enumerate() {
             assert_eq!(
                 line.path.0.len(),
@@ -783,7 +783,7 @@ mod tests {
                 "line {i} should have path depth {}",
                 i + 1
             );
-            // All children are index 0 under their parent.
+            // all children are index 0 under their parent.
             assert!(
                 line.path.0.iter().all(|&idx| idx == 0),
                 "all path indices should be 0 for a single-child chain"
@@ -820,7 +820,7 @@ mod tests {
 
     #[test]
     fn invalid_node_id_is_silently_skipped() {
-        // Build a block whose child list references a node ID that doesn't
+        // build a block whose child list references a node ID that doesn't
         // exist in the arena.  flatten_node should skip it gracefully.
         let mut doc = Document::default();
         let bogus_id = netform_ir::NodeId(999);
@@ -840,7 +840,7 @@ mod tests {
 
         let view = build_comparison_view(&doc, &default_opts());
 
-        // Only the header should appear; the invalid child is skipped.
+        // only the header should appear; the invalid child is skipped.
         assert_eq!(view.lines.len(), 1);
         assert_eq!(view.lines[0].normalized, "parent");
     }

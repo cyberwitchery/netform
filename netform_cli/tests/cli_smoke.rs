@@ -378,7 +378,7 @@ fn config_diff_nxos_keyed_stable_matches_interfaces() {
 fn config_diff_fortios_dialect_produces_diff() {
     let left = temp_file_path("left-fortios");
     let right = temp_file_path("right-fortios");
-    // Use structural change (add a line) to produce a diff — FortiOS leaf-line
+    // use structural change (add a line) to produce a diff — FortiOS leaf-line
     // hints stabilize content keys across value changes, so changing a set value
     // alone does not produce edits in ordered mode.
     fs::write(
@@ -436,7 +436,7 @@ fn config_diff_fortios_dialect_no_changes() {
 fn config_diff_fortios_unified_output() {
     let left = temp_file_path("left-fortios-unified");
     let right = temp_file_path("right-fortios-unified");
-    // Structural change (remove a line) to produce unified diff output.
+    // structural change (remove a line) to produce unified diff output.
     fs::write(
         &left,
         "config system global\n    set hostname \"FGT\"\n    set timezone 04\nend\n",
@@ -677,7 +677,7 @@ fn config_diff_auto_dialect_detects_junos() {
     )
     .expect("write right");
 
-    // Without --dialect (defaults to auto), should behave like --dialect junos.
+    // without --dialect (defaults to auto), should behave like --dialect junos.
     let auto_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
         .arg("--no-exit-code")
         .arg("--json")
@@ -865,7 +865,7 @@ fn config_diff_auto_dialect_detects_iosxe() {
 
 #[test]
 fn config_diff_explicit_dialect_overrides_auto() {
-    // Feed Junos content but force --dialect generic — the explicit flag wins.
+    // feed Junos content but force --dialect generic — the explicit flag wins.
     let left = temp_file_path("left-override");
     let right = temp_file_path("right-override");
     fs::write(
@@ -908,7 +908,7 @@ fn config_diff_explicit_dialect_overrides_auto() {
 
 #[test]
 fn config_diff_auto_dialect_accepts_value() {
-    // Verify the CLI accepts `--dialect auto` explicitly.
+    // verify the CLI accepts `--dialect auto` explicitly.
     let path = temp_file_path("auto-value");
     fs::write(&path, "hostname router\n").expect("write file");
 
@@ -931,7 +931,7 @@ fn config_diff_auto_dialect_accepts_value() {
 fn config_diff_policy_override_makes_subtree_unordered() {
     let left = temp_file_path("left-override-sub");
     let right = temp_file_path("right-override-sub");
-    // Two top-level blocks: "router bgp" (index 0) has reordered children.
+    // two top-level blocks: "router bgp" (index 0) has reordered children.
     fs::write(
         &left,
         "router bgp 65000\n  neighbor 10.0.0.1\n  neighbor 10.0.0.2\n",
@@ -943,7 +943,7 @@ fn config_diff_policy_override_makes_subtree_unordered() {
     )
     .expect("write right");
 
-    // Without override: ordered default sees changes.
+    // without override: ordered default sees changes.
     let ordered_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
         .arg("--json")
         .arg("--no-exit-code")
@@ -960,7 +960,7 @@ fn config_diff_policy_override_makes_subtree_unordered() {
         "ordered default should see reordering as a change"
     );
 
-    // With --policy-override 0:unordered, the subtree ignores order.
+    // with --policy-override 0:unordered, the subtree ignores order.
     let override_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
         .arg("--json")
         .arg("--policy-override")
@@ -994,7 +994,7 @@ fn config_diff_multiple_policy_overrides() {
     )
     .expect("write right");
 
-    // Multiple --policy-override flags are accepted.
+    // multiple --policy-override flags are accepted.
     let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
         .arg("--json")
         .arg("--policy-override")
@@ -1008,7 +1008,7 @@ fn config_diff_multiple_policy_overrides() {
 
     assert!(output.status.success());
     let diff_json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
-    // The overrides should be present in the output JSON.
+    // the overrides should be present in the output JSON.
     let overrides = &diff_json["order_policy"]["overrides"];
     assert_eq!(overrides.as_array().map(|a| a.len()), Some(2));
 }
@@ -1040,7 +1040,7 @@ fn config_diff_policy_override_invalid_format_fails() {
     let path = temp_file_path("override-bad");
     fs::write(&path, "hostname router\n").expect("write file");
 
-    // Missing colon separator.
+    // missing colon separator.
     let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
         .arg("--policy-override")
         .arg("0-unordered")
@@ -1073,8 +1073,8 @@ fn config_diff_policy_override_invalid_policy_fails() {
 
 #[test]
 fn config_diff_auto_dialect_disagreement_falls_back_to_generic() {
-    // File A is strongly Junos; file B is strongly FortiOS.
-    // Auto-detection disagrees → should fall back to Generic.
+    // file A is strongly Junos; file B is strongly FortiOS.
+    // auto-detection disagrees → should fall back to Generic.
     let junos_file = temp_file_path("left-disagree-junos");
     let fortios_file = temp_file_path("right-disagree-fortios");
     fs::write(

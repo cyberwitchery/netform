@@ -1,6 +1,6 @@
 //! Cisco NX-OS-oriented dialect profile for `netform_ir`.
 //!
-//! This crate provides a dedicated [`NxosDialect`] that customizes key-hint
+//! this crate provides a dedicated [`NxosDialect`] that customizes key-hint
 //! derivation for NX-OS-specific constructs while reusing the shared IOS-like
 //! trivia classification and line tokenization.
 //!
@@ -20,14 +20,14 @@ use netform_ir::{
     parse_with_dialect,
 };
 
-/// Dialect implementation for Cisco NX-OS configuration text.
+/// dialect implementation for Cisco NX-OS configuration text.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NxosDialect;
 
-/// Pre-built NX-OS dialect instance.
+/// pre-built NX-OS dialect instance.
 pub const NXOS_DIALECT: NxosDialect = NxosDialect;
 
-/// Parse text using [`NxosDialect`].
+/// parse text using [`NxosDialect`].
 pub fn parse_nxos(input: &str) -> Document {
     parse_with_dialect(input, &NxosDialect)
 }
@@ -60,7 +60,7 @@ impl Dialect for NxosDialect {
 
 /// NX-OS interface type prefixes in canonical lowercase form.
 ///
-/// Order matters: longer prefixes must come first so `port-channel` matches
+/// order matters: longer prefixes must come first so `port-channel` matches
 /// before a hypothetical `port` prefix. Matching is case-insensitive so that
 /// `Ethernet1/1`, `ethernet1/1`, and `ETHERNET1/1` all normalize the same way.
 const NXOS_INTERFACE_TYPES: &[&str] = &[
@@ -81,9 +81,9 @@ const NXOS_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
     extra_router_protos: &[],
 };
 
-/// Derive a stable identity key for NX-OS configuration lines.
+/// derive a stable identity key for NX-OS configuration lines.
 ///
-/// Delegates `interface`, `vrf`, `router`, and `ip` to
+/// delegates `interface`, `vrf`, `router`, and `ip` to
 /// [`ios_family_key_hint`], handles NX-OS-specific constructs (`feature`,
 /// `vpc`, `role`, `system`), then falls back to [`common_key_hint`] for the
 /// remaining shared arms.
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn key_hint_interface_unknown_type() {
-        // Unknown types fall back to raw name.
+        // unknown types fall back to raw name.
         assert_eq!(
             hint("interface GigabitEthernet0/0/0"),
             Some("interface:GigabitEthernet0/0/0".into()),

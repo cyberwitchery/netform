@@ -923,12 +923,12 @@ fn emits_finding_for_ambiguous_extracted_stanza_keys() {
 
 // ── order policy behavioral contrasts (diff_documents level) ──
 //
-// These tests run the same parsed documents through all three policies and
+// these tests run the same parsed documents through all three policies and
 // assert the different outcomes, documenting when and how the policies diverge.
 
 #[test]
 fn reordered_block_children_only_changed_under_ordered_policy() {
-    // Identical block children in swapped order.  Ordered treats this as
+    // identical block children in swapped order.  Ordered treats this as
     // drift; Unordered and KeyedStable do not.
     let a = parse_generic("interface Ethernet1\n  description uplink\n  mtu 9000\n  no shutdown\n");
     let b = parse_generic("interface Ethernet1\n  no shutdown\n  description uplink\n  mtu 9000\n");
@@ -959,7 +959,7 @@ fn fortios_set_value_change_keyed_stable_emits_replace_unordered_emits_delete_in
     // FortiOS `set` commands produce key_hints (e.g. `set:hostname`), which
     // give lines a stable content_key independent of the actual value.
     //
-    // When a value changes:
+    // when a value changes:
     //   KeyedStable → pairs by content_key → Replace
     //   Unordered   → hashes normalized text → different buckets → Delete + Insert
     let a = parse_fortios("config system global\n    set hostname \"edge-1\"\nend\n");
@@ -1022,7 +1022,7 @@ fn fortios_set_value_change_keyed_stable_emits_replace_unordered_emits_delete_in
 
 #[test]
 fn fortios_reorder_plus_value_change_three_way_contrast() {
-    // Two `set` fields under the same block: reordered AND one value changes.
+    // two `set` fields under the same block: reordered AND one value changes.
     //
     // Ordered  → sees both the reorder and the value change.
     // Unordered → ignores reorder; sees value change as Delete + Insert.
@@ -1045,7 +1045,7 @@ fn fortios_reorder_plus_value_change_three_way_contrast() {
     let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered)).unwrap();
     let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable)).unwrap();
 
-    // All three detect changes (the hostname value changed).
+    // all three detect changes (the hostname value changed).
     assert!(ordered.has_changes);
     assert!(unordered.has_changes);
     assert!(keyed.has_changes);

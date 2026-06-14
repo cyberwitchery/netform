@@ -349,7 +349,7 @@ where
         let mut bucket_deletes = Vec::new();
         let mut bucket_inserts = Vec::new();
 
-        // Paired lines share a content key but may differ in text (e.g.
+        // paired lines share a content key but may differ in text (e.g.
         // FortiOS `set` lines matched by field name with different values).
         for idx in 0..common {
             if left[idx].normalized != right[idx].normalized {
@@ -454,10 +454,10 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
     let mut trace: Vec<Vec<isize>> = Vec::with_capacity((max + 1) as usize);
 
     for d in 0..=max {
-        // Diagonals are visited in steps of 2, so writes to v[idx] (diagonal k)
+        // diagonals are visited in steps of 2, so writes to v[idx] (diagonal k)
         // never collide with reads from v[idx-1] (k-1) or v[idx+1] (k+1) —
         // those diagonals have opposite parity and still hold their d-1 values.
-        // This lets us mutate v in-place and snapshot once, instead of cloning
+        // this lets us mutate v in-place and snapshot once, instead of cloning
         // v into a working copy and then cloning that copy into the trace.
         let mut k = -d;
         while k <= d {
@@ -1091,13 +1091,13 @@ mod tests {
 
     // ── order policy behavioral contrasts ──
     //
-    // Each test runs the same input through all three policies and asserts the
+    // each test runs the same input through all three policies and asserts the
     // different outcomes side by side.  These complement the per-policy tests
     // above by showing *when* the policies diverge on identical data.
 
     #[test]
     fn same_content_key_different_text_diverges_across_all_three_policies() {
-        // Two lines whose content_key matches (simulating dialect key_hints like
+        // two lines whose content_key matches (simulating dialect key_hints like
         // FortiOS `set hostname`) but whose normalized text differs.
         //
         // Ordered sees matching content_keys → SES emits Equal → 0 edits.
@@ -1150,7 +1150,7 @@ mod tests {
 
     #[test]
     fn reorder_plus_value_change_diverges_across_all_three_policies() {
-        // Lines are reordered AND one line's text changes (same content_key).
+        // lines are reordered AND one line's text changes (same content_key).
         //
         // Ordered sees key sequence [10, 20] vs [20, 10] → reorder edits.
         // Unordered ignores order, only sees the text change → Delete + Insert.
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn pure_reorder_only_ordered_reports_change() {
-        // Identical content in different order.  Ordered is the only policy
+        // identical content in different order.  Ordered is the only policy
         // that treats this as a change.
         let a = vec![
             cline("  description uplink", 10, vec![0, 0]),

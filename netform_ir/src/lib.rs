@@ -1,11 +1,11 @@
-//! Lossless intermediate representation (IR) for network device configuration text.
+//! lossless intermediate representation (IR) for network device configuration text.
 //!
-//! This crate provides:
+//! this crate provides:
 //! - a tree model (`Document`, `Node`, `LineNode`, `BlockNode`)
 //! - a conservative parser (`parse_generic`, `parse_with_dialect`)
 //! - a lossless renderer (`Document::render`)
 //!
-//! The parser is intentionally conservative for pre-alpha use:
+//! the parser is intentionally conservative for pre-alpha use:
 //! - it only uses indentation as a structural cue
 //! - unknown patterns are preserved as regular lines
 //! - no input lines are dropped
@@ -25,15 +25,15 @@ pub mod detect;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Stable arena identifier for a node in a [`Document`].
+/// stable arena identifier for a node in a [`Document`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub usize);
 
-/// Location path used by diffs and diagnostics (`root_index`, then child indices).
+/// location path used by diffs and diagnostics (`root_index`, then child indices).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Path(pub Vec<usize>);
 
-/// Source span pointing to a single line and byte range in the original input.
+/// source span pointing to a single line and byte range in the original input.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
     pub line: usize,
@@ -41,14 +41,14 @@ pub struct Span {
     pub end_byte: usize,
 }
 
-/// Minimal tokenized representation of a content line.
+/// minimal tokenized representation of a content line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParsedLineParts {
     pub head: String,
     pub args: Vec<String>,
 }
 
-/// Lightweight classification used by parser, normalization, and diff views.
+/// lightweight classification used by parser, normalization, and diff views.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TriviaKind {
     Blank,
@@ -57,7 +57,7 @@ pub enum TriviaKind {
     Unknown,
 }
 
-/// Leaf node preserving original raw text and parse metadata for one line.
+/// leaf node preserving original raw text and parse metadata for one line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineNode {
     pub raw: String,
@@ -68,7 +68,7 @@ pub struct LineNode {
     pub trivia: TriviaKind,
 }
 
-/// Structured block node with a header line and nested children.
+/// structured block node with a header line and nested children.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockNode {
     pub header: LineNode,
@@ -77,14 +77,14 @@ pub struct BlockNode {
     pub kind_label: Option<String>,
 }
 
-/// Arena node variant.
+/// arena node variant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Node {
     Line(LineNode),
     Block(BlockNode),
 }
 
-/// Document metadata attached during parsing.
+/// document metadata attached during parsing.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct DocumentMetadata {
     pub source_name: Option<String>,
@@ -94,7 +94,7 @@ pub struct DocumentMetadata {
     pub parse_findings: Vec<ParseFinding>,
 }
 
-/// Declared parser dialect used for this document.
+/// declared parser dialect used for this document.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DialectHint {
@@ -104,7 +104,7 @@ pub enum DialectHint {
     Named(String),
 }
 
-/// Parser-level uncertainty note attached to a source span.
+/// parser-level uncertainty note attached to a source span.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParseFinding {
     pub code: String,
@@ -112,7 +112,7 @@ pub struct ParseFinding {
     pub span: Span,
 }
 
-/// Lossless parsed document backed by an arena and root node list.
+/// lossless parsed document backed by an arena and root node list.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Document {
     pub metadata: DocumentMetadata,
@@ -121,7 +121,7 @@ pub struct Document {
 }
 
 impl Document {
-    /// Create an empty document with caller-supplied metadata.
+    /// create an empty document with caller-supplied metadata.
     pub fn new(metadata: DocumentMetadata) -> Self {
         Self {
             metadata,
@@ -130,28 +130,28 @@ impl Document {
         }
     }
 
-    /// Insert a node and register it as a root.
+    /// insert a node and register it as a root.
     pub fn insert_root(&mut self, node: Node) -> NodeId {
         let id = self.insert_node(node);
         self.roots.push(id);
         id
     }
 
-    /// Insert a node into the arena and return its stable [`NodeId`].
+    /// insert a node into the arena and return its stable [`NodeId`].
     pub fn insert_node(&mut self, node: Node) -> NodeId {
         let id = NodeId(self.arena.len());
         self.arena.push(node);
         id
     }
 
-    /// Borrow a node by id.
+    /// borrow a node by id.
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.arena.get(id.0)
     }
 
-    /// Append `child` to `parent` if parent is a block.
+    /// append `child` to `parent` if parent is a block.
     ///
-    /// Returns `true` when attached, `false` when `parent` is not a block.
+    /// returns `true` when attached, `false` when `parent` is not a block.
     pub fn add_child(&mut self, parent: NodeId, child: NodeId) -> bool {
         match self.arena.get_mut(parent.0) {
             Some(Node::Block(block)) => {
@@ -162,9 +162,9 @@ impl Document {
         }
     }
 
-    /// Render the document as exact original line bytes.
+    /// render the document as exact original line bytes.
     ///
-    /// For documents created with this crate's parser, this guarantees lossless
+    /// for documents created with this crate's parser, this guarantees lossless
     /// round-trip text rendering.
     pub fn render(&self) -> String {
         let mut out = String::new();
@@ -197,22 +197,22 @@ impl Document {
     }
 }
 
-/// Parse input using the built-in generic dialect.
+/// parse input using the built-in generic dialect.
 pub fn parse_generic(input: &str) -> Document {
     parse_with_dialect(input, &GenericDialect)
 }
 
-/// Dialect extension point for trivia classification and line tokenization.
+/// dialect extension point for trivia classification and line tokenization.
 pub trait Dialect {
-    /// Report a dialect hint to store in [`DocumentMetadata`].
+    /// report a dialect hint to store in [`DocumentMetadata`].
     fn dialect_hint(&self) -> DialectHint {
         DialectHint::Unknown
     }
-    /// Classify a raw line into trivia/content buckets.
+    /// classify a raw line into trivia/content buckets.
     fn classify_trivia(&self, raw: &str) -> TriviaKind;
-    /// Optionally tokenize a raw content line into `head` + `args`.
+    /// optionally tokenize a raw content line into `head` + `args`.
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts>;
-    /// Optionally derive a stable identity hint for this line.
+    /// optionally derive a stable identity hint for this line.
     fn key_hint(
         &self,
         _raw: &str,
@@ -223,9 +223,9 @@ pub trait Dialect {
     }
 }
 
-/// Parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
+/// parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
 ///
-/// All IOS-like dialects share the same trivia classification, tokenization,
+/// all IOS-like dialects share the same trivia classification, tokenization,
 /// and key-hint derivation — the only thing that varies is the hint name stored
 /// in [`DocumentMetadata`].  Construct with [`IosLikeDialect::new`]:
 ///
@@ -240,7 +240,7 @@ pub struct IosLikeDialect {
 }
 
 impl IosLikeDialect {
-    /// Create a dialect instance tagged with the given hint name.
+    /// create a dialect instance tagged with the given hint name.
     pub const fn new(name: &'static str) -> Self {
         Self { name }
     }
@@ -272,7 +272,7 @@ impl Dialect for IosLikeDialect {
     }
 }
 
-/// Conservative default dialect for vendor-agnostic parsing.
+/// conservative default dialect for vendor-agnostic parsing.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GenericDialect;
 
@@ -290,9 +290,9 @@ impl Dialect for GenericDialect {
     }
 }
 
-/// Parse input into a lossless IR using the given dialect implementation.
+/// parse input into a lossless IR using the given dialect implementation.
 ///
-/// Parsing is indentation-based and conservative:
+/// parsing is indentation-based and conservative:
 /// - open a block when next content line is more indented
 /// - close blocks on non-blank dedent
 /// - preserve all lines even when structure is uncertain
@@ -313,8 +313,8 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     );
     let mut parent_stack: Vec<(usize, NodeId)> = Vec::new();
 
-    // Pre-compute the indent of the next content line for each position in O(n).
-    // This replaces a per-line forward scan that was O(n²) on large configs.
+    // pre-compute the indent of the next content line for each position in O(n).
+    // this replaces a per-line forward scan that was O(n²) on large configs.
     let mut next_content_indent: Vec<Option<usize>> = vec![None; lines.len()];
     {
         let mut last_content_indent: Option<usize> = None;
@@ -326,7 +326,7 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
         }
     }
 
-    // Pre-compute block-opening decisions using the O(n) lookup table.
+    // pre-compute block-opening decisions using the O(n) lookup table.
     let opens_block: Vec<bool> = (0..lines.len())
         .map(|idx| {
             lines[idx].trivia == TriviaKind::Content
@@ -344,7 +344,7 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
             });
         }
 
-        // Non-blank lines can close open blocks when indentation decreases.
+        // non-blank lines can close open blocks when indentation decreases.
         if line.trivia != TriviaKind::Blank {
             while let Some((parent_indent, _)) = parent_stack.last().copied() {
                 if line.indent <= parent_indent {
@@ -423,7 +423,7 @@ fn collect_lines<D: Dialect>(
         let span = Span {
             line: line_no,
             start_byte: start,
-            // Spans currently cover the content bytes only (not trailing newline bytes).
+            // spans currently cover the content bytes only (not trailing newline bytes).
             end_byte: start + raw.len(),
         };
         let parsed = if trivia == TriviaKind::Content {
@@ -463,7 +463,7 @@ fn collect_lines<D: Dialect>(
 fn attach_node(doc: &mut Document, parent_stack: &[(usize, NodeId)], id: NodeId) {
     if let Some((_, parent_id)) = parent_stack.last() {
         if !doc.add_child(*parent_id, id) {
-            // If a parent cannot accept children for any reason, keep data by falling back to root.
+            // if a parent cannot accept children for any reason, keep data by falling back to root.
             doc.roots.push(id);
         }
     } else {
@@ -481,10 +481,10 @@ fn split_line_ending(segment: &str) -> (&str, &str) {
     }
 }
 
-/// Classify a line as blank, comment, or content based on the given comment
+/// classify a line as blank, comment, or content based on the given comment
 /// prefixes.
 ///
-/// Dialect-specific `classify_trivia` helpers delegate here so the
+/// dialect-specific `classify_trivia` helpers delegate here so the
 /// blank/comment/content logic lives in one place.
 pub fn classify_trivia_with_prefixes(raw: &str, comment_prefixes: &[&str]) -> TriviaKind {
     if raw.trim().is_empty() {
@@ -513,12 +513,12 @@ fn parse_parts(raw: &str) -> Option<ParsedLineParts> {
     })
 }
 
-/// Tokenize a raw configuration line, splitting on whitespace while preserving
+/// tokenize a raw configuration line, splitting on whitespace while preserving
 /// quoted strings. Characters in `punctuation` are emitted as their own tokens
 /// (flushing any accumulated word first), matching the Junos-style brace/semicolon
 /// handling.
 ///
-/// Pass an empty slice for flat-line dialects (EOS, IOS XE) or `&['{', '}', ';']`
+/// pass an empty slice for flat-line dialects (EOS, IOS XE) or `&['{', '}', ';']`
 /// for hierarchical-brace dialects (Junos).
 pub fn tokenize(raw: &str, punctuation: &[char]) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -576,21 +576,21 @@ pub fn tokenize(raw: &str, punctuation: &[char]) -> Vec<String> {
     tokens
 }
 
-/// Configuration for [`ios_family_key_hint`], parameterizing the constructs
+/// configuration for [`ios_family_key_hint`], parameterizing the constructs
 /// that differ across IOS-family dialects while sharing the common structure.
 pub struct IosKeyHintConfig {
-    /// Interface type prefixes for normalization (longest-prefix-first).
+    /// interface type prefixes for normalization (longest-prefix-first).
     pub interface_types: &'static [&'static str],
-    /// The VRF sub-command keyword (`"instance"`, `"definition"`, `"context"`).
+    /// the VRF sub-command keyword (`"instance"`, `"definition"`, `"context"`).
     pub vrf_keyword: &'static str,
-    /// Router protocols (beyond BGP and OSPF) whose second argument should be
+    /// router protocols (beyond BGP and OSPF) whose second argument should be
     /// included in the hint — e.g. `&["eigrp"]` for IOS XE.
     pub extra_router_protos: &'static [&'static str],
 }
 
-/// Derive a key hint for constructs shared across IOS-family dialects.
+/// derive a key hint for constructs shared across IOS-family dialects.
 ///
-/// Handles `interface`, `vrf`, `router`, and `ip` using the provided
+/// handles `interface`, `vrf`, `router`, and `ip` using the provided
 /// [`IosKeyHintConfig`].  Returns `None` when the head keyword is not one of
 /// these four, allowing the caller to try dialect-specific arms before falling
 /// back to [`common_key_hint`].
@@ -644,10 +644,10 @@ pub fn ios_family_key_hint(
     }
 }
 
-/// Derive a stable identity key for constructs shared across all IOS-like
+/// derive a stable identity key for constructs shared across all IOS-like
 /// dialects (EOS, IOS XE, NX-OS).
 ///
-/// This covers the match arms that are identical in every IOS-family dialect:
+/// this covers the match arms that are identical in every IOS-family dialect:
 /// `vlan`, `route-map`, `class-map`, `policy-map`, `ipv6`, `access-list`,
 /// `crypto`, `spanning-tree`, `line`, `monitor`, and `ntp`.  Dialect-specific
 /// functions should match their own constructs first, then fall back here.
@@ -709,9 +709,9 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     }
 }
 
-/// Derive a stable identity key for IOS-like configuration lines.
+/// derive a stable identity key for IOS-like configuration lines.
 ///
-/// Used by [`IosLikeDialect`] (and thus IOS XE).  Handles constructs
+/// used by [`IosLikeDialect`] (and thus IOS XE).  Handles constructs
 /// specific to the generic IOS-like grammar (`interface`, `vrf`, `router`,
 /// `ip`) and delegates shared constructs to [`common_key_hint`].
 pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
@@ -745,15 +745,15 @@ pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     }
 }
 
-/// Parse an interface name into `(canonical_type, id)` using the given type
+/// parse an interface name into `(canonical_type, id)` using the given type
 /// prefix table.
 ///
-/// Uses case-insensitive prefix matching so that any casing of a known
+/// uses case-insensitive prefix matching so that any casing of a known
 /// interface type normalizes to the canonical lowercase form.  The `types`
 /// slice must be ordered longest-prefix-first so that e.g. `tengigabitethernet`
 /// matches before `gigabitethernet`.
 ///
-/// Returns `None` if the name doesn't match any entry in `types` or has no ID
+/// returns `None` if the name doesn't match any entry in `types` or has no ID
 /// portion after the prefix.
 ///
 /// # Example
@@ -780,17 +780,17 @@ pub fn parse_interface<'a>(
     None
 }
 
-/// Classify trivia for IOS-like dialects (EOS, IOS XE).
+/// classify trivia for IOS-like dialects (EOS, IOS XE).
 ///
-/// Lines starting with `!` or `#` (after leading whitespace) are comments;
+/// lines starting with `!` or `#` (after leading whitespace) are comments;
 /// blank/whitespace-only lines are blank; everything else is content.
 pub fn classify_ios_like_trivia(raw: &str) -> TriviaKind {
     classify_trivia_with_prefixes(raw, &["!", "#"])
 }
 
-/// Tokenize a content line for IOS-like dialects (EOS, IOS XE).
+/// tokenize a content line for IOS-like dialects (EOS, IOS XE).
 ///
-/// Uses [`tokenize`] with no punctuation characters, then splits the result
+/// uses [`tokenize`] with no punctuation characters, then splits the result
 /// into a `head` keyword and trailing `args`.
 pub fn parse_ios_like_parts(raw: &str) -> Option<ParsedLineParts> {
     let tokens = tokenize(raw, &[]);
@@ -799,9 +799,9 @@ pub fn parse_ios_like_parts(raw: &str) -> Option<ParsedLineParts> {
     Some(ParsedLineParts { head, args })
 }
 
-/// Count the visual indentation width of a line, treating tabs as 4 spaces.
+/// count the visual indentation width of a line, treating tabs as 4 spaces.
 ///
-/// Used by the parser to determine nesting depth; also useful for
+/// used by the parser to determine nesting depth; also useful for
 /// normalization passes that need to re-indent mixed-whitespace lines.
 pub fn count_indent(raw: &str) -> usize {
     let mut width = 0usize;
@@ -838,7 +838,7 @@ impl fmt::Display for Document {
 mod tests {
     use super::*;
 
-    /// Helper: parse an IOS-like line and return the key hint.
+    /// helper: parse an IOS-like line and return the key hint.
     fn hint(line: &str) -> Option<String> {
         let parsed = parse_ios_like_parts(line);
         ios_like_key_hint(parsed.as_ref())
@@ -981,7 +981,7 @@ mod tests {
 
     #[test]
     fn key_hint_ipv6_no_match() {
-        // Other ipv6 subcommands should not produce a hint.
+        // other ipv6 subcommands should not produce a hint.
         assert_eq!(hint("ipv6 unicast-routing"), None);
         assert_eq!(hint("ipv6 nd ra suppress all"), None);
     }
@@ -1109,7 +1109,7 @@ mod tests {
 
     #[test]
     fn key_hint_spanning_tree_no_match() {
-        // Non-vlan spanning-tree commands should not produce a hint.
+        // non-vlan spanning-tree commands should not produce a hint.
         assert_eq!(hint("spanning-tree mode rapid-pvst"), None);
     }
 
@@ -1263,7 +1263,7 @@ mod tests {
 
     #[test]
     fn common_key_hint_none_for_dialect_specific() {
-        // Constructs handled by dialect-specific functions should return None.
+        // constructs handled by dialect-specific functions should return None.
         assert_eq!(common_hint("interface Ethernet1"), None);
         assert_eq!(common_hint("vrf MGMT"), None);
         assert_eq!(common_hint("router bgp 65001"), None);

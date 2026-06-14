@@ -1,9 +1,9 @@
-//! Diff engine and reporting primitives for `netform_ir::Document`.
+//! diff engine and reporting primitives for `netform_ir::Document`.
 //!
-//! This crate builds comparison views from lossless IR documents, applies
+//! this crate builds comparison views from lossless IR documents, applies
 //! explicit normalization and ordering policies, and emits deterministic edits.
 //!
-//! Primary entrypoints:
+//! primary entrypoints:
 //! - [`diff_documents`]
 //! - [`format_markdown_report`]
 //! - [`build_plan`]
@@ -41,7 +41,7 @@ pub use report::{DEFAULT_CONTEXT_LINES, format_markdown_report, format_unified_d
 
 use netform_ir::Document;
 
-/// Compute a deterministic diff between two parsed documents.
+/// compute a deterministic diff between two parsed documents.
 pub fn diff_documents(
     a: &Document,
     b: &Document,

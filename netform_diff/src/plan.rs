@@ -5,7 +5,7 @@ use crate::model::{
     finding_code,
 };
 
-/// Convert a [`Diff`] into a transport-neutral action plan.
+/// convert a [`Diff`] into a transport-neutral action plan.
 pub fn build_plan(diff: &Diff) -> Plan {
     let mut actions = Vec::new();
     let mut grouped_line_action_indices: HashMap<netform_ir::Path, usize> = HashMap::new();

@@ -16,7 +16,7 @@ fn markdown_report_mentions_keyed_replace() {
     assert!(report.contains("# Config Diff Report"));
     assert!(report.contains("Replaces: 1 (1 -> 1 lines)"));
     assert!(report.contains("Replace 1 line(s) at key 0x"));
-    // Line content is now shown under each edit
+    // line content is now shown under each edit
     assert!(
         report.contains("- description old") || report.contains("-   description old"),
         "report should show removed line text"
@@ -29,7 +29,7 @@ fn markdown_report_mentions_keyed_replace() {
 
 #[test]
 fn markdown_report_shows_added_line_in_replace() {
-    // Adding a child line to a block produces a Replace at the block level
+    // adding a child line to a block produces a Replace at the block level
     let a = parse_generic("interface Ethernet1\n");
     let b = parse_generic("interface Ethernet1\n  description added\n");
 
@@ -46,7 +46,7 @@ fn markdown_report_shows_added_line_in_replace() {
 
 #[test]
 fn markdown_report_shows_removed_line_in_replace() {
-    // Removing a child line from a block produces a Replace at the block level
+    // removing a child line from a block produces a Replace at the block level
     let a = parse_generic("interface Ethernet1\n  description removed\n");
     let b = parse_generic("interface Ethernet1\n");
 
@@ -113,14 +113,14 @@ fn markdown_report_delete_shows_removed_lines() {
 
 #[test]
 fn markdown_report_truncates_long_edits() {
-    // Create a diff with many lines to test truncation
+    // create a diff with many lines to test truncation
     let a_lines: Vec<String> = (0..20).map(|i| format!("line-a-{i}")).collect();
     let b_lines: Vec<String> = (0..20).map(|i| format!("line-b-{i}")).collect();
     let a = parse_generic(&a_lines.join("\n"));
     let b = parse_generic(&b_lines.join("\n"));
     let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
 
-    // Use max_lines_shown=3 to force truncation
+    // use max_lines_shown=3 to force truncation
     let report = format_markdown_report(&diff, "a.cfg", "b.cfg", 3);
 
     assert!(diff.has_changes);
@@ -138,7 +138,7 @@ fn markdown_report_stats_are_correct_for_multiple_edits() {
     let report = format_markdown_report(&diff, "a.cfg", "b.cfg", DEFAULT_CONTEXT_LINES);
 
     assert!(diff.has_changes);
-    // The report should have the Stats section with non-zero values
+    // the report should have the Stats section with non-zero values
     assert!(report.contains("## Stats"));
     assert!(report.contains("## Edits"));
 }
@@ -149,7 +149,7 @@ fn markdown_report_stats_are_correct_for_multiple_edits() {
 fn unified_diff_empty_for_no_changes() {
     let a = parse_generic("hostname router\n");
     let diff = diff_documents(&a, &a, NormalizeOptions::default()).unwrap();
-    // Suppress ANSI colors for test
+    // suppress ANSI colors for test
     owo_colors::set_override(false);
     let output = format_unified_diff(&diff, "a.cfg", "a.cfg", DEFAULT_CONTEXT_LINES);
     owo_colors::set_override(true);
