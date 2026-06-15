@@ -1,5 +1,10 @@
 # changelog
 
+## Unreleased
+
+- **breaking:** `DiffError::SesNotConverged` is now a struct variant carrying `a_len` and `b_len` (the input sequence sizes), and `DiffError::EditScriptInconsistency` is now a struct variant carrying `op` (the SES operation), `side` (which iterator was exhausted), `a_count`, and `b_count` — error messages now include enough context to diagnose what the diff engine was comparing when it failed
+- added `MAX_NESTING_DEPTH` (128) guard to `flatten_node` — documents nested deeper than 128 levels are silently truncated instead of risking a stack overflow
+
 ## [0.6.0] - 2026-06-08
 
 - added `netform_ir::IosKeyHintConfig` and `netform_ir::ios_family_key_hint` — a shared parameterized function that consolidates the duplicated `interface`, `vrf`, `router`, and `ip` key-hint logic from `eos_key_hint`, `iosxe_key_hint`, and `nxos_key_hint`; dialect differences (interface type tables, VRF keyword, extra router protocols) are captured in a static config struct, eliminating ~120 lines of copy-pasted match arms across the three dialect crates

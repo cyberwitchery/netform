@@ -7,23 +7,47 @@ use netform_ir::{Path, Span, TriviaKind};
 pub enum DiffError {
     /// the Myers shortest-edit-script algorithm did not converge within
     /// the expected number of steps.
-    SesNotConverged,
+    SesNotConverged {
+        /// Number of elements on the left side.
+        a_len: usize,
+        /// Number of elements on the right side.
+        b_len: usize,
+    },
     /// the edit-script operation sequence was inconsistent with the input
     /// data (e.g., referenced more elements than present in one side).
-    EditScriptInconsistency(String),
+    EditScriptInconsistency {
+        /// Which SES operation was being applied ("Equal", "Delete", or "Insert").
+        op: &'static str,
+        /// Which side's iterator was exhausted ("left" or "right").
+        side: &'static str,
+        /// Total number of segments/lines on the left side.
+        a_count: usize,
+        /// Total number of segments/lines on the right side.
+        b_count: usize,
+    },
 }
 
 impl std::fmt::Display for DiffError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SesNotConverged => {
+            Self::SesNotConverged { a_len, b_len } => {
                 write!(
                     f,
-                    "Myers SES algorithm did not converge within expected steps"
+                    "Myers SES algorithm did not converge within expected steps \
+                     (a_len={a_len}, b_len={b_len})"
                 )
             }
-            Self::EditScriptInconsistency(detail) => {
-                write!(f, "diff engine inconsistency: {detail}")
+            Self::EditScriptInconsistency {
+                op,
+                side,
+                a_count,
+                b_count,
+            } => {
+                write!(
+                    f,
+                    "diff engine inconsistency: {side} iterator exhausted on {op} op \
+                     (a_count={a_count}, b_count={b_count})"
+                )
             }
         }
     }
@@ -376,6 +400,33 @@ pub fn derive_occurrence_key(content_key: u64, ordinal: u64) -> u64 {
 mod tests {
     use super::*;
     use netform_ir::Path;
+
+    #[test]
+    fn ses_not_converged_display_includes_counts() {
+        let err = DiffError::SesNotConverged {
+            a_len: 42,
+            b_len: 99,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("a_len=42"), "should contain a_len");
+        assert!(msg.contains("b_len=99"), "should contain b_len");
+        assert!(msg.contains("Myers SES"), "should identify the algorithm");
+    }
+
+    #[test]
+    fn edit_script_inconsistency_display_includes_context() {
+        let err = DiffError::EditScriptInconsistency {
+            op: "Equal",
+            side: "left",
+            a_count: 5,
+            b_count: 3,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("left"), "should identify which side");
+        assert!(msg.contains("Equal"), "should identify the operation");
+        assert!(msg.contains("a_count=5"), "should contain a_count");
+        assert!(msg.contains("b_count=3"), "should contain b_count");
+    }
 
     #[test]
     fn policy_for_path_returns_default_with_no_overrides() {
