@@ -284,6 +284,18 @@ fn read_input(path: &Path) -> (String, String) {
     }
 }
 
+/// parse input with automatic dialect detection and full dialect dispatch.
+///
+/// runs dialect detection on the input and dispatches to the appropriate
+/// dialect-specific parser (Junos, FortiOS, EOS, IOS XE, NX-OS) so that
+/// trivia classification, tokenization, and key hints are dialect-aware.
+/// falls back to the generic parser when no dialect is detected with
+/// sufficient confidence.
+#[cfg(test)]
+fn auto_parse(input: &str) -> Document {
+    parse_config(input, CliDialect::Auto)
+}
+
 fn parse_config(input: &str, dialect: CliDialect) -> Document {
     let resolved = match dialect {
         CliDialect::Auto => CliDialect::from_hint(&netform_ir::detect::detect_dialect(input)),
@@ -303,6 +315,92 @@ fn parse_config(input: &str, dialect: CliDialect) -> Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use netform_ir::Node;
+
+    /// helper: return the key hint of the first root node's header (if block)
+    /// or the node itself (if line).
+    fn first_root_key_hint(doc: &Document) -> Option<String> {
+        let id = *doc.roots.first()?;
+        match doc.node(id)? {
+            Node::Block(b) => b.header.key_hint.clone(),
+            Node::Line(l) => l.key_hint.clone(),
+        }
+    }
+
+    // -- auto_parse dispatches to dialect-specific parsers --
+
+    #[test]
+    fn auto_parse_junos_produces_dialect_key_hints() {
+        let input = "\
+interfaces {
+    ge-0/0/0 {
+        mtu 9216;
+    }
+}
+";
+        let doc = auto_parse(input);
+        assert_eq!(
+            doc.metadata.dialect_hint,
+            DialectHint::Named("junos".into())
+        );
+        // junos parser sets key_hint = "interfaces"; generic parser would not.
+        assert_eq!(first_root_key_hint(&doc), Some("interfaces".into()));
+    }
+
+    #[test]
+    fn auto_parse_nxos_produces_dialect_key_hints() {
+        let input = "\
+feature bgp
+feature interface-vlan
+feature lacp
+interface Ethernet1/1
+  description uplink
+  no shutdown
+";
+        let doc = auto_parse(input);
+        assert_eq!(doc.metadata.dialect_hint, DialectHint::Named("nxos".into()),);
+        // nxos parser sets key_hint = "feature:bgp"; generic parser would not.
+        assert_eq!(first_root_key_hint(&doc), Some("feature:bgp".into()));
+    }
+
+    #[test]
+    fn auto_parse_eos_produces_dialect_key_hints() {
+        let input = "\
+interface Ethernet1
+   description uplink-spine-a
+   mtu 9214
+   ip address 192.0.2.2/31
+   no shutdown
+ip access-list ACL-EDGE-IN
+   10 permit tcp 10.10.1.0/24 any eq https
+   20 permit tcp 10.10.1.0/24 any eq ssh
+   90 deny ip any any log
+";
+        let doc = auto_parse(input);
+        assert_eq!(doc.metadata.dialect_hint, DialectHint::Named("eos".into()),);
+        // eos parser sets key_hint = "interface:ethernet:1"; generic would not.
+        assert!(first_root_key_hint(&doc).is_some());
+    }
+
+    #[test]
+    fn auto_parse_generic_fallback() {
+        let doc = auto_parse("hostname router\n");
+        assert_eq!(doc.metadata.dialect_hint, DialectHint::Generic);
+        // generic parser does not produce key hints.
+        assert_eq!(first_root_key_hint(&doc), None);
+    }
+
+    #[test]
+    fn auto_parse_preserves_content() {
+        let input = "\
+interfaces {
+    ge-0/0/0 {
+        mtu 9216;
+    }
+}
+";
+        assert_eq!(auto_parse(input).render(), input);
+    }
 
     #[test]
     fn parse_policy_override_simple() {

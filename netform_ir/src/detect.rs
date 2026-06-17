@@ -224,15 +224,23 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     DialectHint::Named(best_name.to_string())
 }
 
-/// parse input with automatic dialect detection.
+/// parse input with automatic dialect detection (generic parser only).
 ///
 /// runs [`detect_dialect`] to identify the dialect from the input text, then
-/// parses with the generic parser and sets the detected [`DialectHint`] in the
-/// document metadata.
+/// parses with the **generic** parser and sets the detected [`DialectHint`] in
+/// the document metadata.  The detected dialect does **not** influence parsing:
+/// trivia classification, tokenization, and key hints all use the generic
+/// dialect.
 ///
-/// for full dialect-specific parsing (Junos brace handling, FortiOS block
-/// structure, etc.), call [`detect_dialect`] directly and dispatch to the
-/// appropriate dialect parser.
+/// this function exists in `netform_ir` because the crate cannot depend on
+/// dialect-specific parser crates.  For full dialect-specific parsing (Junos
+/// brace handling, FortiOS block structure, dialect-aware key hints, etc.),
+/// call [`detect_dialect`] directly and dispatch to the appropriate dialect
+/// parser in your own code.  The CLI crate's `auto_parse` does exactly this.
+#[deprecated(
+    since = "0.7.0",
+    note = "uses the generic parser regardless of detected dialect; call detect_dialect() and dispatch to a dialect-specific parser instead"
+)]
 pub fn auto_parse(input: &str) -> Document {
     let hint = detect_dialect(input);
     let mut doc = parse_generic(input);
@@ -524,6 +532,7 @@ no-readvertise;
     }
 
     #[test]
+    #[allow(deprecated)]
     fn auto_parse_sets_dialect_hint() {
         let input = "\
 interfaces {
@@ -540,12 +549,14 @@ interfaces {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn auto_parse_generic_fallback() {
         let doc = auto_parse("hostname router\n");
         assert_eq!(doc.metadata.dialect_hint, DialectHint::Generic);
     }
 
     #[test]
+    #[allow(deprecated)]
     fn auto_parse_preserves_content() {
         let input = "interface Ethernet1\n  description uplink\n";
         let doc = auto_parse(input);
