@@ -49,12 +49,18 @@ pub(crate) fn normalize_for_compare(
             }
             NormalizationStep::CollapseInternalWhitespace => {
                 let leading_len = output.len() - output.trim_start().len();
-                let collapsed = output[leading_len..]
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if collapsed.len() != output.len() - leading_len {
-                    output = Cow::Owned(format!("{}{collapsed}", &output[..leading_len]));
+                let body = &output[leading_len..];
+                let mut parts = body.split_whitespace();
+                if let Some(first) = parts.next() {
+                    let mut collapsed = String::with_capacity(body.len());
+                    collapsed.push_str(first);
+                    for word in parts {
+                        collapsed.push(' ');
+                        collapsed.push_str(word);
+                    }
+                    if collapsed.len() != body.len() {
+                        output = Cow::Owned(format!("{}{collapsed}", &output[..leading_len]));
+                    }
                 }
             }
         }
