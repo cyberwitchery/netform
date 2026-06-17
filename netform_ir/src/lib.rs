@@ -553,15 +553,17 @@ pub fn tokenize(raw: &str, punctuation: &[char]) -> Vec<String> {
                 in_quote = Some(ch);
             }
             c if punctuation.contains(&c) => {
-                if !current.trim().is_empty() {
-                    tokens.push(current.trim().to_string());
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    tokens.push(trimmed.to_string());
                 }
                 current.clear();
                 tokens.push(ch.to_string());
             }
             c if c.is_whitespace() => {
-                if !current.trim().is_empty() {
-                    tokens.push(current.trim().to_string());
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    tokens.push(trimmed.to_string());
                     current.clear();
                 }
             }
@@ -569,8 +571,9 @@ pub fn tokenize(raw: &str, punctuation: &[char]) -> Vec<String> {
         }
     }
 
-    if !current.trim().is_empty() {
-        tokens.push(current.trim().to_string());
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        tokens.push(trimmed.to_string());
     }
 
     tokens
