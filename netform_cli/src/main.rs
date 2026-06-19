@@ -179,6 +179,12 @@ fn main() {
             } else {
                 // disagreement: fall back to Generic rather than risk
                 // parsing two files with different grammars.
+                eprintln!(
+                    "config-diff: warning: auto-detected dialects disagree ({} vs {}), \
+                     falling back to generic (use --dialect to override)",
+                    hint_label(&a_hint),
+                    hint_label(&b_hint),
+                );
                 CliDialect::Generic
             }
         }
@@ -260,6 +266,14 @@ fn main() {
 
     if !cli.no_exit_code && diff.has_changes {
         process::exit(1);
+    }
+}
+
+fn hint_label(hint: &DialectHint) -> &str {
+    match hint {
+        DialectHint::Named(name) => name.as_str(),
+        DialectHint::Generic => "generic",
+        DialectHint::Unknown => "unknown",
     }
 }
 

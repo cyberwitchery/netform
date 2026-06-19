@@ -1111,6 +1111,149 @@ fn config_diff_auto_dialect_disagreement_falls_back_to_generic() {
         auto_output.stdout, generic_output.stdout,
         "auto-detection disagreement should produce same output as explicit --dialect generic"
     );
+
+    let stderr = String::from_utf8_lossy(&auto_output.stderr);
+    assert!(
+        stderr.contains("warning") && stderr.contains("disagree"),
+        "should warn on stderr when auto-detected dialects disagree: {stderr}"
+    );
+    assert!(
+        stderr.contains("junos") && stderr.contains("fortios"),
+        "warning should name both detected dialects: {stderr}"
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_disagreement_nxos_vs_eos() {
+    let nxos_file = temp_file_path("left-disagree-nxos");
+    let eos_file = temp_file_path("right-disagree-eos");
+    fs::write(
+        &nxos_file,
+        "feature bgp\nfeature interface-vlan\ninterface Ethernet1/1\n  description uplink\n  no shutdown\n",
+    )
+    .expect("write nxos file");
+    fs::write(
+        &eos_file,
+        "interface Ethernet1\n   description uplink\n   mtu 9214\n   ip address 192.0.2.2/31\n   no shutdown\nip access-list ACL-EDGE-IN\n   10 permit tcp 10.10.1.0/24 any eq https\n   90 deny ip any any log\n",
+    )
+    .expect("write eos file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&nxos_file)
+        .arg(&eos_file)
+        .output()
+        .expect("run config-diff (auto, nxos vs eos)");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning") && stderr.contains("disagree"),
+        "should warn when nxos and eos disagree: {stderr}"
+    );
+    assert!(
+        stderr.contains("nxos") && stderr.contains("eos"),
+        "warning should name both detected dialects: {stderr}"
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_disagreement_named_vs_generic() {
+    // one file detects as a named dialect, the other is too ambiguous.
+    let junos_file = temp_file_path("left-disagree-named");
+    let ambiguous_file = temp_file_path("right-disagree-ambiguous");
+    fs::write(
+        &junos_file,
+        "interfaces {\n    ge-0/0/0 {\n        description \"uplink\";\n        mtu 9216;\n    }\n}\n",
+    )
+    .expect("write junos file");
+    fs::write(&ambiguous_file, "hostname router\n").expect("write ambiguous file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&junos_file)
+        .arg(&ambiguous_file)
+        .output()
+        .expect("run config-diff (auto, named vs generic)");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning") && stderr.contains("disagree"),
+        "should warn when named and generic disagree: {stderr}"
+    );
+    assert!(
+        stderr.contains("junos") && stderr.contains("generic"),
+        "warning should name both detected hints: {stderr}"
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_agreement_no_warning() {
+    // both files are clearly Junos — no warning should appear.
+    let left = temp_file_path("left-agree-junos");
+    let right = temp_file_path("right-agree-junos");
+    fs::write(
+        &left,
+        "interfaces {\n    ge-0/0/0 {\n        description \"a\";\n    }\n}\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "interfaces {\n    ge-0/0/0 {\n        description \"b\";\n    }\n}\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff (auto, agreement)");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("disagree"),
+        "no disagreement warning when both files detect as the same dialect: {stderr}"
+    );
+}
+
+#[test]
+fn config_diff_explicit_dialect_no_disagreement_warning() {
+    // even with mismatched content, an explicit --dialect skips auto-detection.
+    let junos_file = temp_file_path("left-explicit-no-warn");
+    let fortios_file = temp_file_path("right-explicit-no-warn");
+    fs::write(
+        &junos_file,
+        "interfaces {\n    ge-0/0/0 {\n        description \"uplink\";\n        mtu 9216;\n    }\n}\n",
+    )
+    .expect("write junos file");
+    fs::write(
+        &fortios_file,
+        "config system global\n    set hostname \"FGT\"\n    set timezone 04\nend\n",
+    )
+    .expect("write fortios file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("generic")
+        .arg("--json")
+        .arg(&junos_file)
+        .arg(&fortios_file)
+        .output()
+        .expect("run config-diff (explicit dialect, no warning)");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("disagree"),
+        "no disagreement warning when dialect is explicitly set: {stderr}"
+    );
 }
 
 #[test]

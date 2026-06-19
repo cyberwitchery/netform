@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `config-diff` now prints a warning to stderr when auto-dialect detection disagrees between the two input files, naming both detected dialects and suggesting `--dialect` to override — previously fell back to generic silently
 - markdown report now shows source line numbers on diff lines (`- L42: permit any` instead of `- permit any`) and on findings with a known span (`warning [code] (line 42): message`)
 - **breaking:** removed `netform_ir::detect::auto_parse` — it detected the dialect but always used the generic parser, discarding dialect-specific trivia classification, tokenization, and key hints; callers should use `detect_dialect()` and dispatch to the appropriate dialect parser directly (the CLI crate's `parse_config` with `CliDialect::Auto` demonstrates the correct pattern)
 - **breaking:** `DiffError::SesNotConverged` is now a struct variant carrying `a_len` and `b_len` (the input sequence sizes), and `DiffError::EditScriptInconsistency` is now a struct variant carrying `op` (the SES operation), `side` (which iterator was exhausted), `a_count`, and `b_count` — error messages now include enough context to diagnose what the diff engine was comparing when it failed
