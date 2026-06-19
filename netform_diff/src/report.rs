@@ -54,12 +54,21 @@ pub fn format_markdown_report(
     if !diff.findings.is_empty() {
         out.push_str("\n## Findings\n\n");
         for finding in &diff.findings {
-            writeln!(
-                out,
-                "- {} [{}]: {}",
-                finding.level, finding.code, finding.message
-            )
-            .unwrap();
+            if let Some(span) = &finding.span {
+                writeln!(
+                    out,
+                    "- {} [{}] (line {}): {}",
+                    finding.level, finding.code, span.line, finding.message
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    out,
+                    "- {} [{}]: {}",
+                    finding.level, finding.code, finding.message
+                )
+                .unwrap();
+            }
         }
     }
 
@@ -236,7 +245,7 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
 fn append_diff_lines(out: &mut String, prefix: &str, lines: &[DiffLine], max_lines_shown: usize) {
     let show = lines.len().min(max_lines_shown);
     for line in &lines[..show] {
-        write!(out, "\n   {prefix} {}", line.text).unwrap();
+        write!(out, "\n   {prefix} L{}: {}", line.span.line, line.text).unwrap();
     }
     let remaining = lines.len().saturating_sub(max_lines_shown);
     if remaining > 0 {
@@ -250,14 +259,14 @@ mod tests {
     use crate::model::{DiffStats, Finding, FindingLevel};
     use netform_ir::{Path, Span};
 
-    fn make_diff_line(text: &str) -> DiffLine {
+    fn make_diff_line_at(text: &str, line: usize) -> DiffLine {
         DiffLine {
             content_key: 0,
             occurrence_key: 0,
             text: text.to_string(),
             path: Path(vec![0]),
             span: Span {
-                line: 0,
+                line,
                 start_byte: 0,
                 end_byte: 0,
             },
@@ -273,7 +282,11 @@ mod tests {
             at_key: Some(42),
             left_anchor: None,
             right_anchor: None,
-            lines: lines.iter().map(|t| make_diff_line(t)).collect(),
+            lines: lines
+                .iter()
+                .enumerate()
+                .map(|(i, t)| make_diff_line_at(t, i + 1))
+                .collect(),
         }
     }
 
@@ -282,7 +295,11 @@ mod tests {
             at_key: Some(99),
             left_anchor: None,
             right_anchor: None,
-            lines: lines.iter().map(|t| make_diff_line(t)).collect(),
+            lines: lines
+                .iter()
+                .enumerate()
+                .map(|(i, t)| make_diff_line_at(t, i + 1))
+                .collect(),
         }
     }
 
@@ -292,8 +309,16 @@ mod tests {
             new_at_key: Some(20),
             left_anchor: None,
             right_anchor: None,
-            old_lines: old.iter().map(|t| make_diff_line(t)).collect(),
-            new_lines: new.iter().map(|t| make_diff_line(t)).collect(),
+            old_lines: old
+                .iter()
+                .enumerate()
+                .map(|(i, t)| make_diff_line_at(t, i + 1))
+                .collect(),
+            new_lines: new
+                .iter()
+                .enumerate()
+                .map(|(i, t)| make_diff_line_at(t, i + 1))
+                .collect(),
         }
     }
 
@@ -339,7 +364,7 @@ mod tests {
 
         assert!(report.contains("- Inserts: 1 (1 lines)"));
         assert!(report.contains("1. Insert 1 line(s) at key 0x000000000000002a"));
-        assert!(report.contains("+ permit any"));
+        assert!(report.contains("+ L1: permit any"));
         assert!(!report.contains("No changes detected."));
     }
 
@@ -358,7 +383,7 @@ mod tests {
 
         assert!(report.contains("- Deletes: 1 (1 lines)"));
         assert!(report.contains("1. Delete 1 line(s) at key 0x0000000000000063"));
-        assert!(report.contains("- deny all"));
+        assert!(report.contains("- L1: deny all"));
     }
 
     #[test]
@@ -379,8 +404,8 @@ mod tests {
         assert!(report.contains(
             "Replace 1 line(s) at key 0x000000000000000a with 1 line(s) at key 0x0000000000000014"
         ));
-        assert!(report.contains("- old line"));
-        assert!(report.contains("+ new line"));
+        assert!(report.contains("- L1: old line"));
+        assert!(report.contains("+ L1: new line"));
     }
 
     #[test]
@@ -417,8 +442,8 @@ mod tests {
         let report = format_markdown_report(&diff, "a", "b", 5);
 
         assert!(!report.contains("... and"));
-        assert!(report.contains("+ line1"));
-        assert!(report.contains("+ line2"));
+        assert!(report.contains("+ L1: line1"));
+        assert!(report.contains("+ L2: line2"));
     }
 
     #[test]
@@ -455,7 +480,7 @@ mod tests {
                 at_key: None,
                 left_anchor: None,
                 right_anchor: None,
-                lines: vec![make_diff_line("new line")],
+                lines: vec![make_diff_line_at("new line", 1)],
             }],
             ..Default::default()
         };
@@ -612,6 +637,63 @@ mod tests {
 
         assert!(report.contains("- ... and 2 more"));
         assert!(report.contains("+ ... and 4 more"));
+    }
+
+    // --- line number display ---
+
+    #[test]
+    fn markdown_diff_lines_show_source_line_numbers() {
+        let diff = Diff {
+            edits: vec![Edit::Insert {
+                at_key: Some(1),
+                left_anchor: None,
+                right_anchor: None,
+                lines: vec![
+                    make_diff_line_at("first", 10),
+                    make_diff_line_at("second", 11),
+                    make_diff_line_at("third", 12),
+                ],
+            }],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        assert!(report.contains("+ L10: first"));
+        assert!(report.contains("+ L11: second"));
+        assert!(report.contains("+ L12: third"));
+    }
+
+    #[test]
+    fn markdown_findings_with_span_show_line_number() {
+        let diff = Diff {
+            findings: vec![Finding {
+                code: "test_code".to_string(),
+                level: FindingLevel::Warning,
+                message: "something broke".to_string(),
+                path: None,
+                span: Some(Span {
+                    line: 42,
+                    start_byte: 0,
+                    end_byte: 10,
+                }),
+            }],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        assert!(report.contains("- warning [test_code] (line 42): something broke"));
+    }
+
+    #[test]
+    fn markdown_findings_without_span_omit_line_number() {
+        let diff = Diff {
+            findings: vec![make_finding(FindingLevel::Info, "no_span", "no location")],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        assert!(report.contains("- info [no_span]: no location"));
+        assert!(!report.contains("(line"));
     }
 
     // --- DEFAULT_CONTEXT_LINES ---

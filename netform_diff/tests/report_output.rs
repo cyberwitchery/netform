@@ -16,14 +16,23 @@ fn markdown_report_mentions_keyed_replace() {
     assert!(report.contains("# Config Diff Report"));
     assert!(report.contains("Replaces: 1 (1 -> 1 lines)"));
     assert!(report.contains("Replace 1 line(s) at key 0x"));
-    // line content is now shown under each edit
+    // line content is now shown under each edit, prefixed with source line number
     assert!(
-        report.contains("- description old") || report.contains("-   description old"),
+        report.contains("description old"),
         "report should show removed line text"
     );
     assert!(
-        report.contains("+ description new") || report.contains("+   description new"),
+        report.contains("description new"),
         "report should show added line text"
+    );
+    // verify line numbers are present in diff lines
+    assert!(
+        report.contains("- L"),
+        "removed lines should include source line number"
+    );
+    assert!(
+        report.contains("+ L"),
+        "added lines should include source line number"
     );
 }
 
