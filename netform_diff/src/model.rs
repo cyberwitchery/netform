@@ -362,10 +362,9 @@ impl U64Buf {
 
 /// derive a content key from parent signature, key kind, trivia, and normalized text.
 ///
-/// uses incremental xxh3 hashing to avoid the intermediate `String` allocation
-/// that `format!()` would require.  The byte sequence fed to the hasher is
-/// identical to what the old `format!()` call produced, so hash values are
-/// unchanged.
+/// uses incremental xxh3 hashing over the canonical byte sequence
+/// `p=<sig>|k=<kind>|t=<trivia>|n=<text>`, avoiding an intermediate `String`
+/// allocation.
 pub fn derive_content_key(
     parent_signature: u64,
     kind: KeyKind,
@@ -634,8 +633,6 @@ mod tests {
         assert!(config.overrides.is_empty());
     }
 
-    // --- U64Buf tests ---
-
     #[test]
     fn u64buf_zero() {
         assert_eq!(U64Buf::new(0).as_bytes(), b"0");
@@ -660,8 +657,6 @@ mod tests {
             );
         }
     }
-
-    // --- Hash stability tests (incremental == one-shot) ---
 
     /// reference implementation using the old format!() + xxh3_64() approach.
     fn derive_content_key_reference(

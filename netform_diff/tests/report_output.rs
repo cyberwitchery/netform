@@ -70,8 +70,6 @@ fn markdown_report_shows_removed_line_in_replace() {
     );
 }
 
-// -- format_markdown_report unit tests --
-
 #[test]
 fn markdown_report_no_changes_says_no_changes() {
     let a = parse_generic("hostname router\n");
@@ -151,8 +149,6 @@ fn markdown_report_stats_are_correct_for_multiple_edits() {
     assert!(report.contains("## Stats"));
     assert!(report.contains("## Edits"));
 }
-
-// -- format_unified_diff tests --
 
 #[test]
 fn unified_diff_empty_for_no_changes() {

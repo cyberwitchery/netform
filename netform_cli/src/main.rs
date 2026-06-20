@@ -341,8 +341,6 @@ mod tests {
         }
     }
 
-    // -- auto_parse dispatches to dialect-specific parsers --
-
     #[test]
     fn auto_parse_junos_produces_dialect_key_hints() {
         let input = "\

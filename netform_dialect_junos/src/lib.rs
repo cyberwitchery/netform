@@ -171,14 +171,10 @@ mod tests {
         );
     }
 
-    // -- key hint helper --
-
     fn hint(line: &str) -> Option<String> {
         let parsed = parse_junos_parts(line);
         junos_key_hint(parsed.as_ref())
     }
-
-    // -- hierarchical stanzas (existing) --
 
     #[test]
     fn key_hint_interfaces() {
@@ -202,8 +198,6 @@ mod tests {
     fn key_hint_policy_options() {
         assert_eq!(hint("policy-options {"), Some("policy-options".into()));
     }
-
-    // -- hierarchical stanzas (new) --
 
     #[test]
     fn key_hint_firewall() {
@@ -253,8 +247,6 @@ mod tests {
         assert_eq!(hint("groups {"), Some("groups".into()));
     }
 
-    // -- set-style (existing) --
-
     #[test]
     fn key_hint_set_interface() {
         assert_eq!(
@@ -278,8 +270,6 @@ mod tests {
             Some("set-protocols:bgp:65001".into()),
         );
     }
-
-    // -- set-style (new) --
 
     #[test]
     fn key_hint_set_protocols_ospf() {
@@ -419,8 +409,6 @@ mod tests {
         );
     }
 
-    // -- hierarchical stanzas (system / routing-options) --
-
     #[test]
     fn key_hint_system() {
         assert_eq!(hint("system {"), Some("system".into()));
@@ -430,8 +418,6 @@ mod tests {
     fn key_hint_routing_options() {
         assert_eq!(hint("routing-options {"), Some("routing-options".into()));
     }
-
-    // -- set-style (system sub-stanzas) --
 
     #[test]
     fn key_hint_set_system_host_name() {
@@ -481,8 +467,6 @@ mod tests {
         );
     }
 
-    // -- set-style (routing-options) --
-
     #[test]
     fn key_hint_set_routing_options() {
         assert_eq!(
@@ -498,8 +482,6 @@ mod tests {
             Some("set-routing-options".into()),
         );
     }
-
-    // -- negative cases --
 
     #[test]
     fn key_hint_none_for_unknown() {

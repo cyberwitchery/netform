@@ -137,8 +137,6 @@ mod tests {
     use super::*;
     use netform_ir::{DialectHint, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts};
 
-    // -- trivia classification (inherited from IOS-like) --
-
     #[test]
     fn iosxe_comment_classification_supports_bang_and_hash() {
         assert_eq!(classify_ios_like_trivia("!"), TriviaKind::Comment);
@@ -149,8 +147,6 @@ mod tests {
         );
     }
 
-    // -- tokenization (inherited from IOS-like) --
-
     #[test]
     fn iosxe_tokenization_keeps_quoted_values_together() {
         let parsed =
@@ -158,8 +154,6 @@ mod tests {
         assert_eq!(parsed.head, "description");
         assert_eq!(parsed.args, vec!["\"WAN uplink\""]);
     }
-
-    // -- dialect hint --
 
     #[test]
     fn parse_iosxe_sets_named_dialect_hint() {
@@ -170,14 +164,10 @@ mod tests {
         );
     }
 
-    // -- key hint helper --
-
     fn hint(line: &str) -> Option<String> {
         let parsed = parse_ios_like_parts(line);
         iosxe_key_hint(parsed.as_ref())
     }
-
-    // -- IOS XE interface type normalization --
 
     #[test]
     fn key_hint_interface_gigabitethernet() {
@@ -395,8 +385,6 @@ mod tests {
         assert_eq!(hint("interface"), None);
     }
 
-    // -- vlan --
-
     #[test]
     fn key_hint_vlan_single() {
         assert_eq!(hint("vlan 100"), Some("vlan:100".into()));
@@ -410,8 +398,6 @@ mod tests {
         );
     }
 
-    // -- vrf --
-
     #[test]
     fn key_hint_vrf_definition() {
         assert_eq!(hint("vrf definition MGMT"), Some("vrf:MGMT".into()));
@@ -421,8 +407,6 @@ mod tests {
     fn key_hint_vrf_bare() {
         assert_eq!(hint("vrf MGMT"), Some("vrf:MGMT".into()));
     }
-
-    // -- router --
 
     #[test]
     fn key_hint_router_bgp() {
@@ -457,8 +441,6 @@ mod tests {
         assert_eq!(hint("router isis"), Some("router:isis".into()));
     }
 
-    // -- route-map --
-
     #[test]
     fn key_hint_route_map_full() {
         assert_eq!(
@@ -474,8 +456,6 @@ mod tests {
             Some("route-map:EXPORT:deny".into()),
         );
     }
-
-    // -- ip access-list --
 
     #[test]
     fn key_hint_ip_access_list_bare() {
@@ -501,8 +481,6 @@ mod tests {
         );
     }
 
-    // -- ip prefix-list --
-
     #[test]
     fn key_hint_ip_prefix_list() {
         assert_eq!(
@@ -510,8 +488,6 @@ mod tests {
             Some("prefix-list:DEFAULT-ONLY".into()),
         );
     }
-
-    // -- ip route --
 
     #[test]
     fn key_hint_ip_route() {
@@ -529,8 +505,6 @@ mod tests {
         );
     }
 
-    // -- IOS XE-specific: crypto pki --
-
     #[test]
     fn key_hint_crypto_pki_trustpoint() {
         assert_eq!(
@@ -546,8 +520,6 @@ mod tests {
             Some("crypto:pki:certificate-chain:MY-CA".into()),
         );
     }
-
-    // -- crypto (common arms still work) --
 
     #[test]
     fn key_hint_crypto_ikev2() {
@@ -581,14 +553,10 @@ mod tests {
         );
     }
 
-    // -- IOS XE-specific: redundancy --
-
     #[test]
     fn key_hint_redundancy() {
         assert_eq!(hint("redundancy"), Some("redundancy".into()));
     }
-
-    // -- IOS XE-specific: parameter-map --
 
     #[test]
     fn key_hint_parameter_map() {
@@ -611,8 +579,6 @@ mod tests {
         assert_eq!(hint("parameter-map name MYMAP"), None);
     }
 
-    // -- IOS XE-specific: track --
-
     #[test]
     fn key_hint_track() {
         assert_eq!(hint("track 1 ip sla 1"), Some("track:1".into()));
@@ -621,8 +587,6 @@ mod tests {
             Some("track:10".into()),
         );
     }
-
-    // -- IOS XE-specific: zone security --
 
     #[test]
     fn key_hint_zone_security() {
@@ -637,8 +601,6 @@ mod tests {
         assert_eq!(hint("zone something-else"), None);
     }
 
-    // -- IOS XE-specific: zone-pair security --
-
     #[test]
     fn key_hint_zone_pair_security() {
         assert_eq!(
@@ -652,8 +614,6 @@ mod tests {
         assert_eq!(hint("zone-pair other"), None);
     }
 
-    // -- monitor session --
-
     #[test]
     fn key_hint_monitor_session() {
         assert_eq!(hint("monitor session 1"), Some("monitor-session:1".into()));
@@ -663,8 +623,6 @@ mod tests {
     fn key_hint_monitor_no_session() {
         assert_eq!(hint("monitor capture CAP1"), None);
     }
-
-    // -- ntp --
 
     #[test]
     fn key_hint_ntp_server() {
@@ -684,8 +642,6 @@ mod tests {
         assert_eq!(hint("ntp source GigabitEthernet0/0/0"), None);
     }
 
-    // -- class-map / policy-map --
-
     #[test]
     fn key_hint_class_map() {
         assert_eq!(
@@ -702,8 +658,6 @@ mod tests {
         );
     }
 
-    // -- spanning-tree --
-
     #[test]
     fn key_hint_spanning_tree_vlan() {
         assert_eq!(
@@ -712,15 +666,11 @@ mod tests {
         );
     }
 
-    // -- line --
-
     #[test]
     fn key_hint_line() {
         assert_eq!(hint("line vty 0 4"), Some("line:vty:0:4".into()));
         assert_eq!(hint("line con 0"), Some("line:con:0".into()));
     }
-
-    // -- negative cases --
 
     #[test]
     fn key_hint_none_for_unknown() {
@@ -731,8 +681,6 @@ mod tests {
     fn key_hint_none_on_empty() {
         assert_eq!(iosxe_key_hint(None), None);
     }
-
-    // -- round-trip parsing --
 
     #[test]
     fn parse_iosxe_round_trip() {
@@ -799,8 +747,6 @@ line vty 0 4
         let doc = parse_iosxe(cfg);
         assert_eq!(doc.render(), cfg);
     }
-
-    // -- key hints appear on parsed document nodes --
 
     #[test]
     fn parsed_document_carries_iosxe_interface_hints() {

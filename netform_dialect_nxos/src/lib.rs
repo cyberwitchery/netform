@@ -119,8 +119,6 @@ mod tests {
     use super::*;
     use netform_ir::{DialectHint, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts};
 
-    // -- trivia classification (inherited from IOS-like) --
-
     #[test]
     fn nxos_comment_classification_supports_bang_and_hash() {
         assert_eq!(classify_ios_like_trivia("!"), TriviaKind::Comment);
@@ -131,8 +129,6 @@ mod tests {
         );
     }
 
-    // -- tokenization (inherited from IOS-like) --
-
     #[test]
     fn nxos_tokenization_keeps_quoted_values_together() {
         let parsed =
@@ -141,22 +137,16 @@ mod tests {
         assert_eq!(parsed.args, vec!["\"Uplink to spine\""]);
     }
 
-    // -- dialect hint --
-
     #[test]
     fn parse_nxos_sets_named_dialect_hint() {
         let doc = parse_nxos("hostname n9k-leaf-01\n");
         assert_eq!(doc.metadata.dialect_hint, DialectHint::Named("nxos".into()));
     }
 
-    // -- key hint helper --
-
     fn hint(line: &str) -> Option<String> {
         let parsed = parse_ios_like_parts(line);
         nxos_key_hint(parsed.as_ref())
     }
-
-    // -- NX-OS interface type normalization --
 
     #[test]
     fn key_hint_interface_ethernet_slot_port() {
@@ -295,8 +285,6 @@ mod tests {
         assert_eq!(hint("interface"), None);
     }
 
-    // -- vlan (including ranges) --
-
     #[test]
     fn key_hint_vlan_single() {
         assert_eq!(hint("vlan 100"), Some("vlan:100".into()));
@@ -310,8 +298,6 @@ mod tests {
         );
     }
 
-    // -- vrf --
-
     #[test]
     fn key_hint_vrf_context() {
         assert_eq!(hint("vrf context MGMT"), Some("vrf:MGMT".into()));
@@ -321,8 +307,6 @@ mod tests {
     fn key_hint_vrf_bare() {
         assert_eq!(hint("vrf MGMT"), Some("vrf:MGMT".into()));
     }
-
-    // -- router --
 
     #[test]
     fn key_hint_router_bgp() {
@@ -338,8 +322,6 @@ mod tests {
     fn key_hint_router_ospf_without_process_id() {
         assert_eq!(hint("router ospf"), Some("router:ospf".into()));
     }
-
-    // -- route-map --
 
     #[test]
     fn key_hint_route_map_full() {
@@ -357,8 +339,6 @@ mod tests {
         );
     }
 
-    // -- ip access-list --
-
     #[test]
     fn key_hint_ip_access_list() {
         assert_eq!(
@@ -375,8 +355,6 @@ mod tests {
         );
     }
 
-    // -- ip prefix-list --
-
     #[test]
     fn key_hint_ip_prefix_list() {
         assert_eq!(
@@ -384,8 +362,6 @@ mod tests {
             Some("prefix-list:DEFAULT-ONLY".into()),
         );
     }
-
-    // -- ip route --
 
     #[test]
     fn key_hint_ip_route() {
@@ -403,8 +379,6 @@ mod tests {
         );
     }
 
-    // -- feature (NX-OS specific) --
-
     #[test]
     fn key_hint_feature() {
         assert_eq!(hint("feature ospf"), Some("feature:ospf".into()));
@@ -416,8 +390,6 @@ mod tests {
         );
     }
 
-    // -- vpc domain (NX-OS specific) --
-
     #[test]
     fn key_hint_vpc_domain() {
         assert_eq!(hint("vpc domain 10"), Some("vpc-domain:10".into()));
@@ -428,8 +400,6 @@ mod tests {
     fn key_hint_vpc_no_domain() {
         assert_eq!(hint("vpc orphan-ports suspend"), None);
     }
-
-    // -- role name (NX-OS specific) --
 
     #[test]
     fn key_hint_role_name() {
@@ -444,8 +414,6 @@ mod tests {
         assert_eq!(hint("role feature-group name"), None);
     }
 
-    // -- monitor session (NX-OS specific) --
-
     #[test]
     fn key_hint_monitor_session() {
         assert_eq!(hint("monitor session 1"), Some("monitor-session:1".into()));
@@ -455,8 +423,6 @@ mod tests {
     fn key_hint_monitor_no_session() {
         assert_eq!(hint("monitor copp-system-p-policy"), None);
     }
-
-    // -- ntp (NX-OS specific) --
 
     #[test]
     fn key_hint_ntp_server() {
@@ -476,8 +442,6 @@ mod tests {
         assert_eq!(hint("ntp source-interface mgmt0"), None);
     }
 
-    // -- system (NX-OS specific) --
-
     #[test]
     fn key_hint_system() {
         assert_eq!(hint("system jumbomtu 9216"), Some("system:jumbomtu".into()));
@@ -486,8 +450,6 @@ mod tests {
             Some("system:default".into()),
         );
     }
-
-    // -- class-map / policy-map --
 
     #[test]
     fn key_hint_class_map() {
@@ -505,8 +467,6 @@ mod tests {
         );
     }
 
-    // -- spanning-tree --
-
     #[test]
     fn key_hint_spanning_tree_vlan() {
         assert_eq!(
@@ -514,8 +474,6 @@ mod tests {
             Some("spanning-tree:vlan:1-100".into()),
         );
     }
-
-    // -- crypto --
 
     #[test]
     fn key_hint_crypto_ikev2() {
@@ -525,15 +483,11 @@ mod tests {
         );
     }
 
-    // -- line --
-
     #[test]
     fn key_hint_line() {
         assert_eq!(hint("line vty 0 4"), Some("line:vty:0:4".into()));
         assert_eq!(hint("line con 0"), Some("line:con:0".into()));
     }
-
-    // -- negative cases --
 
     #[test]
     fn key_hint_none_for_unknown() {
@@ -544,8 +498,6 @@ mod tests {
     fn key_hint_none_on_empty() {
         assert_eq!(nxos_key_hint(None), None);
     }
-
-    // -- round-trip parsing --
 
     #[test]
     fn parse_nxos_round_trip() {
@@ -585,8 +537,6 @@ router bgp 65001
         let doc = parse_nxos(cfg);
         assert_eq!(doc.render(), cfg);
     }
-
-    // -- key hints appear on parsed document nodes --
 
     #[test]
     fn parsed_document_carries_nxos_interface_hints() {

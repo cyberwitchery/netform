@@ -585,8 +585,6 @@ mod tests {
         NormalizeOptions::default()
     }
 
-    // ── compute_ops ──
-
     #[test]
     fn compute_ops_identical_sequences() {
         let ops = compute_ops(&[1, 2, 3], &[1, 2, 3]).unwrap();
@@ -658,8 +656,6 @@ mod tests {
         assert_eq!(ai, a.len());
         assert_eq!(bi, b.len());
     }
-
-    // ── build_stats ──
 
     #[test]
     fn build_stats_empty_edits() {
@@ -799,8 +795,6 @@ mod tests {
         assert_eq!(stats.deleted_lines, 1);
     }
 
-    // ── build_segments ──
-
     #[test]
     fn build_segments_empty_view() {
         let v = view(vec![]);
@@ -855,8 +849,6 @@ mod tests {
         assert!(!segs[0].is_block);
         assert!(!segs[1].is_block);
     }
-
-    // ── diff_views ──
 
     #[test]
     fn diff_views_identical_flat_lines() {
@@ -952,8 +944,6 @@ mod tests {
         assert!(!result.edits.is_empty());
         assert!(!result.fallback_contexts.is_empty());
     }
-
-    // ── flush_segment_fallback (exercised through diff_views) ──
 
     #[test]
     fn fallback_delete_only_emits_deletes() {
@@ -1114,8 +1104,6 @@ mod tests {
         );
     }
 
-    // ── line_diff (ordered) ──
-
     #[test]
     fn line_diff_ordered_no_changes() {
         let lines = vec![
@@ -1173,8 +1161,6 @@ mod tests {
         assert!(!edits.is_empty());
     }
 
-    // ── line_diff (unordered) ──
-
     #[test]
     fn line_diff_unordered_ignores_reorder() {
         let a = vec![
@@ -1212,8 +1198,6 @@ mod tests {
         assert_eq!(edits.len(), 1);
         assert!(matches!(edits[0], Edit::Delete { .. }));
     }
-
-    // ── line_diff (keyed_stable) ──
 
     #[test]
     fn line_diff_keyed_stable_ignores_reorder() {
@@ -1264,8 +1248,6 @@ mod tests {
         }
     }
 
-    // ── order policy behavioral contrasts ──
-    //
     // each test runs the same input through all three policies and asserts the
     // different outcomes side by side.  These complement the per-policy tests
     // above by showing *when* the policies diverge on identical data.
@@ -1390,8 +1372,6 @@ mod tests {
         assert!(keyed.is_empty(), "KeyedStable ignores order");
     }
 
-    // ── finalize_chunked_edits ──
-
     #[test]
     fn finalize_chunked_edits_both_empty() {
         let result = finalize_chunked_edits(vec![], vec![]);
@@ -1446,8 +1426,6 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0], Edit::Replace { .. }));
     }
-
-    // ── to_diff_line / to_anchor ──
 
     #[test]
     fn to_diff_line_preserves_fields() {

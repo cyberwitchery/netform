@@ -332,8 +332,6 @@ mod tests {
         }
     }
 
-    // --- format_markdown_report ---
-
     #[test]
     fn markdown_empty_diff_shows_no_changes() {
         let diff = empty_diff();
@@ -488,8 +486,6 @@ mod tests {
         assert!(report.contains("at key <unknown>"));
     }
 
-    // --- format_unified_diff ---
-
     #[test]
     fn unified_empty_diff_returns_empty_string() {
         let diff = empty_diff();
@@ -623,8 +619,6 @@ mod tests {
         assert!(result.contains("... and 1 more"));
     }
 
-    // --- describe_edit (tested through format_markdown_report) ---
-
     #[test]
     fn markdown_replace_truncation_both_sides() {
         let old: Vec<&str> = (0..4).map(|_| "old").collect();
@@ -638,8 +632,6 @@ mod tests {
         assert!(report.contains("- ... and 2 more"));
         assert!(report.contains("+ ... and 4 more"));
     }
-
-    // --- line number display ---
 
     #[test]
     fn markdown_diff_lines_show_source_line_numbers() {
@@ -695,8 +687,6 @@ mod tests {
         assert!(report.contains("- info [no_span]: no location"));
         assert!(!report.contains("(line"));
     }
-
-    // --- DEFAULT_CONTEXT_LINES ---
 
     #[test]
     fn default_context_lines_is_ten() {

@@ -921,8 +921,6 @@ fn emits_finding_for_ambiguous_extracted_stanza_keys() {
     }));
 }
 
-// ── order policy behavioral contrasts (diff_documents level) ──
-//
 // these tests run the same parsed documents through all three policies and
 // assert the different outcomes, documenting when and how the policies diverge.
 

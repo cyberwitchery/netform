@@ -618,8 +618,6 @@ mod tests {
         assert_ne!(view.lines[1].content_key, view.lines[2].content_key);
     }
 
-    // ── edge case tests ──
-
     #[test]
     fn empty_document_default_produces_empty_view() {
         let doc = Document::default();

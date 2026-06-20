@@ -39,10 +39,6 @@
 
 use crate::DialectHint;
 
-// ---------------------------------------------------------------------------
-// scoring constants
-// ---------------------------------------------------------------------------
-
 /// score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
 /// `config <section>`, NX-OS `feature <name>`, Junos top-level stanza names).
 const STRONG_SIGNAL: i32 = 3;
@@ -54,10 +50,6 @@ const MODERATE_SIGNAL: i32 = 2;
 /// score for a pattern that weakly suggests a dialect (e.g. Junos trailing
 /// semicolons, FortiOS plain `set <field>`, IOS XE wildcard masks in ACLs).
 const WEAK_SIGNAL: i32 = 1;
-
-// ---------------------------------------------------------------------------
-// decision thresholds
-// ---------------------------------------------------------------------------
 
 /// minimum total score a dialect must reach to be considered detected.  Below
 /// this threshold, the input is too short or too ambiguous to identify.
@@ -89,7 +81,6 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             continue;
         }
 
-        // --- FortiOS signals ---
         // `config <section>` / `end` block structure is unique to FortiOS.
         if line.starts_with("config ")
             && !line.contains('{')
@@ -117,7 +108,6 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             }
         }
 
-        // --- Junos signals ---
         // brace-and-semicolon syntax is highly distinctive.
         if line.ends_with('{') {
             junos += MODERATE_SIGNAL;
@@ -133,7 +123,6 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             junos += STRONG_SIGNAL;
         }
 
-        // --- NX-OS signals ---
         // `feature <name>` is unique to NX-OS among supported dialects.
         if line.starts_with("feature ") {
             nxos += STRONG_SIGNAL;
@@ -157,7 +146,6 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             nxos += MODERATE_SIGNAL;
         }
 
-        // --- IOS XE signals ---
         // `ip access-list extended` is a strong IOS XE marker.
         if line.starts_with("ip access-list extended ") {
             iosxe += STRONG_SIGNAL;
@@ -180,7 +168,6 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             iosxe += WEAK_SIGNAL;
         }
 
-        // --- EOS signals ---
         if line.starts_with("ip access-list ") && !line.contains("extended") {
             eos += MODERATE_SIGNAL;
         }
@@ -405,8 +392,6 @@ ip access-list ACL-IN
 ";
         assert_eq!(detect_dialect(input), DialectHint::Generic);
     }
-
-    // -- Edge case tests near score margins --
 
     #[test]
     fn detect_at_minimum_score_single_strong_signal() {

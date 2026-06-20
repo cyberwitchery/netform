@@ -195,8 +195,6 @@ proptest! {
         prop_assert_eq!(doc.render(), input);
     }
 
-    // -- self-diff invariant --
-
     #[test]
     fn self_diff_has_no_changes_generic(input in text_strategy()) {
         let doc = parse_generic(&input);
@@ -264,8 +262,6 @@ proptest! {
         prop_assert!(!diff.has_changes, "Junos self-diff should report no changes");
     }
 
-    // -- normalization idempotency --
-
     #[test]
     fn normalization_idempotent_ignore_comments(input in text_strategy()) {
         let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
@@ -298,8 +294,6 @@ proptest! {
         let diff2 = diff_documents(&doc, &doc, opts).unwrap();
         prop_assert_eq!(diff1, diff2, "all-step normalization should be idempotent");
     }
-
-    // -- dialect round-trips --
 
     #[test]
     fn eos_roundtrip(input in ios_like_strategy()) {
@@ -342,8 +336,6 @@ proptest! {
         let doc = netform_dialect_junos::parse_junos(&input);
         prop_assert_eq!(doc.render(), input, "Junos round-trip should be lossless");
     }
-
-    // -- key-hint generation for dialect-specific constructs --
 
     #[test]
     fn nxos_key_hints_produced(input in nxos_strategy()) {
@@ -419,8 +411,6 @@ proptest! {
         });
     }
 }
-
-// -- deterministic key-hint coverage (not property-based) --
 
 /// verify that NX-OS block-header constructs produce expected key hints.
 ///

@@ -106,8 +106,6 @@ fn fortios_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 mod tests {
     use super::*;
 
-    // -- trivia classification --
-
     #[test]
     fn fortios_hash_comment() {
         assert_eq!(classify_fortios_trivia("# comment"), TriviaKind::Comment);
@@ -145,8 +143,6 @@ mod tests {
         assert_eq!(classify_fortios_trivia("! note"), TriviaKind::Content);
     }
 
-    // -- tokenization --
-
     #[test]
     fn fortios_tokenize_config_line() {
         let parsed = parse_ios_like_parts("config system global").expect("should parse");
@@ -183,8 +179,6 @@ mod tests {
         assert_eq!(parsed.head, "set");
         assert_eq!(parsed.args, vec!["subnet", "10.0.0.0", "255.255.255.0"]);
     }
-
-    // -- key hints --
 
     fn hint(line: &str) -> Option<String> {
         let parsed = parse_ios_like_parts(line);
@@ -310,8 +304,6 @@ mod tests {
     fn key_hint_none_on_empty() {
         assert_eq!(fortios_key_hint(None), None);
     }
-
-    // -- round-trip parsing --
 
     #[test]
     fn parse_fortios_round_trip() {

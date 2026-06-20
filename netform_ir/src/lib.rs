@@ -313,8 +313,9 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     );
     let mut parent_stack: Vec<(usize, NodeId)> = Vec::new();
 
-    // pre-compute the indent of the next content line for each position in O(n).
-    // this replaces a per-line forward scan that was O(n²) on large configs.
+    // pre-compute the indent of the next content line for each position in a
+    // single reverse pass (O(n)), avoiding a per-line forward scan that would be
+    // O(n²) on large configs.
     let mut next_content_indent: Vec<Option<usize>> = vec![None; lines.len()];
     {
         let mut last_content_indent: Option<usize> = None;
@@ -847,8 +848,6 @@ mod tests {
         ios_like_key_hint(parsed.as_ref())
     }
 
-    // -- existing constructs (regression) --
-
     #[test]
     fn key_hint_interface() {
         assert_eq!(
@@ -900,10 +899,6 @@ mod tests {
             Some("prefix-list:DEFAULT-ONLY".into()),
         );
     }
-
-    // -- IPv6 constructs --
-
-    // -- ip route constructs --
 
     #[test]
     fn key_hint_ip_route() {
@@ -994,8 +989,6 @@ mod tests {
         assert_eq!(hint("line vty 0 4"), Some("line:vty:0:4".into()));
         assert_eq!(hint("line con 0"), Some("line:con:0".into()));
     }
-
-    // -- new constructs --
 
     #[test]
     fn key_hint_class_map_match_all() {
@@ -1116,8 +1109,6 @@ mod tests {
         assert_eq!(hint("spanning-tree mode rapid-pvst"), None);
     }
 
-    // -- shared constructs via common_key_hint fallback --
-
     #[test]
     fn key_hint_monitor_session() {
         assert_eq!(hint("monitor session 1"), Some("monitor-session:1".into()),);
@@ -1154,8 +1145,8 @@ mod tests {
         assert_eq!(hint("ntp source-interface mgmt0"), None);
     }
 
-    // NX-OS-specific constructs (feature, vpc, role, system) are no longer
-    // handled by ios_like_key_hint — they live only in nxos_key_hint.
+    // NX-OS-specific constructs (feature, vpc, role, system) are not handled by
+    // ios_like_key_hint — they live only in nxos_key_hint.
 
     #[test]
     fn key_hint_nxos_constructs_not_in_ios_like() {
@@ -1174,8 +1165,6 @@ mod tests {
     fn key_hint_none_on_empty() {
         assert_eq!(ios_like_key_hint(None), None);
     }
-
-    // -- common_key_hint direct tests --
 
     fn common_hint(line: &str) -> Option<String> {
         let parsed = parse_ios_like_parts(line);
