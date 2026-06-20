@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Myers diff trace now stores only the live diagonals per edit step (d+1 values at step d) instead of cloning the full v-vector (length 2*(a+b)+3), reducing trace memory from O(D*(a+b)) to O(D^2) and cutting allocation pressure on large config diffs
 - `config-diff` now prints a warning to stderr when auto-dialect detection disagrees between the two input files, naming both detected dialects and suggesting `--dialect` to override — previously fell back to generic silently
 - markdown report now shows source line numbers on diff lines (`- L42: permit any` instead of `- permit any`) and on findings with a known span (`warning [code] (line 42): message`)
 - **breaking:** removed `netform_ir::detect::auto_parse` — it detected the dialect but always used the generic parser, discarding dialect-specific trivia classification, tokenization, and key hints; callers should use `detect_dialect()` and dispatch to the appropriate dialect parser directly (the CLI crate's `parse_config` with `CliDialect::Auto` demonstrates the correct pattern)

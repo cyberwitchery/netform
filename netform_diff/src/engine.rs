@@ -445,6 +445,33 @@ fn to_anchor(line: &DiffLine) -> EditAnchor {
     }
 }
 
+/// Compact snapshot of the v-vector at a single Myers edit step.
+///
+/// At step d, only diagonals -d, -d+2, ..., d are live (d+1 values).
+/// Storing just those instead of cloning the full v-vector (length
+/// 2*(a+b)+3) reduces trace memory from O(D*(a+b)) to O(D^2).
+struct TraceSnapshot {
+    d: isize,
+    values: Vec<isize>,
+}
+
+impl TraceSnapshot {
+    fn capture(d: isize, v: &[isize], offset: isize) -> Self {
+        let count = (d + 1) as usize;
+        let mut values = Vec::with_capacity(count);
+        let mut k = -d;
+        while k <= d {
+            values.push(v[(k + offset) as usize]);
+            k += 2;
+        }
+        TraceSnapshot { d, values }
+    }
+
+    fn get(&self, k: isize) -> isize {
+        self.values[((k + self.d) / 2) as usize]
+    }
+}
+
 fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
     if a.is_empty() {
         return Ok(vec![Op::Insert; b.len()]);
@@ -462,14 +489,14 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
     // Myers SES trace over diagonals. This avoids the quadratic LCS matrix and
     // remains deterministic for a fixed input/order.
     let mut v = vec![0isize; v_len];
-    let mut trace: Vec<Vec<isize>> = Vec::with_capacity((max + 1) as usize);
+    let mut trace: Vec<TraceSnapshot> = Vec::with_capacity((max + 1) as usize);
 
     for d in 0..=max {
         // diagonals are visited in steps of 2, so writes to v[idx] (diagonal k)
         // never collide with reads from v[idx-1] (k-1) or v[idx+1] (k+1) —
         // those diagonals have opposite parity and still hold their d-1 values.
-        // this lets us mutate v in-place and snapshot once, instead of cloning
-        // v into a working copy and then cloning that copy into the trace.
+        // this lets us mutate v in-place and snapshot the live diagonals only,
+        // instead of cloning the entire v-vector into the trace.
         let mut k = -d;
         while k <= d {
             let idx = (k + offset) as usize;
@@ -488,12 +515,12 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
             v[idx] = x;
 
             if x >= n && y >= m {
-                trace.push(v.clone());
-                return Ok(backtrack_ops(a, b, &trace, offset));
+                trace.push(TraceSnapshot::capture(d, &v, offset));
+                return Ok(backtrack_ops(a, b, &trace));
             }
             k += 2;
         }
-        trace.push(v.clone());
+        trace.push(TraceSnapshot::capture(d, &v, offset));
     }
 
     Err(DiffError::SesNotConverged {
@@ -502,7 +529,7 @@ fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
     })
 }
 
-fn backtrack_ops(a: &[u64], b: &[u64], trace: &[Vec<isize>], offset: isize) -> Vec<Op> {
+fn backtrack_ops(a: &[u64], b: &[u64], trace: &[TraceSnapshot]) -> Vec<Op> {
     let mut x = a.len() as isize;
     let mut y = b.len() as isize;
     let mut rev_ops = Vec::new();
@@ -511,10 +538,9 @@ fn backtrack_ops(a: &[u64], b: &[u64], trace: &[Vec<isize>], offset: isize) -> V
         let d = d as isize;
         let k = x - y;
         let prev = &trace[(d - 1) as usize];
-        let idx = (k + offset) as usize;
-        let go_down = k == -d || (k != d && prev[idx - 1] < prev[idx + 1]);
+        let go_down = k == -d || (k != d && prev.get(k - 1) < prev.get(k + 1));
         let prev_k = if go_down { k + 1 } else { k - 1 };
-        let prev_x = prev[(prev_k + offset) as usize];
+        let prev_x = prev.get(prev_k);
         let prev_y = prev_x - prev_k;
 
         while x > prev_x && y > prev_y {
