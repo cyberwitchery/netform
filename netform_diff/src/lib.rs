@@ -23,6 +23,7 @@
 mod engine;
 mod findings;
 mod flatten;
+mod inline;
 mod model;
 mod normalize;
 mod plan;

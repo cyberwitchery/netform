@@ -6,7 +6,7 @@ use crate::model::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Op {
+pub(crate) enum Op {
     Equal,
     Delete,
     Insert,
@@ -472,7 +472,7 @@ impl TraceSnapshot {
     }
 }
 
-fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
+pub(crate) fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
     if a.is_empty() {
         return Ok(vec![Op::Insert; b.len()]);
     }
