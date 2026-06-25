@@ -206,10 +206,14 @@ fn append_replace_colored(
     let old_show = old_lines.len().min(max_lines_shown);
     let new_show = new_lines.len().min(max_lines_shown);
 
+    let diff_count = pair_count.min(old_show.max(new_show));
+    let diffs: Vec<_> = (0..diff_count)
+        .map(|i| crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text))
+        .collect();
+
     for i in 0..old_show {
         if i < pair_count {
-            let (old_spans, _) = crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text);
-            append_inline_spans(out, "- ", &old_spans, true);
+            append_inline_spans(out, "- ", &diffs[i].0, true);
         } else {
             writeln!(out, "{}", format_args!("- {}", old_lines[i].text).red()).unwrap();
         }
@@ -226,8 +230,7 @@ fn append_replace_colored(
 
     for i in 0..new_show {
         if i < pair_count {
-            let (_, new_spans) = crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text);
-            append_inline_spans(out, "+ ", &new_spans, false);
+            append_inline_spans(out, "+ ", &diffs[i].1, false);
         } else {
             writeln!(out, "{}", format_args!("+ {}", new_lines[i].text).green()).unwrap();
         }
@@ -321,11 +324,15 @@ fn append_replace_diff_lines(
     let old_show = old_lines.len().min(max_lines_shown);
     let new_show = new_lines.len().min(max_lines_shown);
 
+    let diff_count = pair_count.min(old_show.max(new_show));
+    let diffs: Vec<_> = (0..diff_count)
+        .map(|i| crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text))
+        .collect();
+
     for i in 0..old_show {
         if i < pair_count {
-            let (old_spans, _) = crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text);
             write!(out, "\n   - L{}: ", old_lines[i].span.line).unwrap();
-            append_markdown_spans(out, &old_spans);
+            append_markdown_spans(out, &diffs[i].0);
         } else {
             write!(
                 out,
@@ -342,9 +349,8 @@ fn append_replace_diff_lines(
 
     for i in 0..new_show {
         if i < pair_count {
-            let (_, new_spans) = crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text);
             write!(out, "\n   + L{}: ", new_lines[i].span.line).unwrap();
-            append_markdown_spans(out, &new_spans);
+            append_markdown_spans(out, &diffs[i].1);
         } else {
             write!(
                 out,
