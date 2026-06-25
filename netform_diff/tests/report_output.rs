@@ -4,6 +4,23 @@ use netform_diff::{
 };
 use netform_ir::parse_generic;
 
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_escape = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' {
+                in_escape = false;
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 #[test]
 fn markdown_report_mentions_keyed_replace() {
     let a = parse_generic("interface Ethernet1\n  description old\n");
@@ -16,14 +33,14 @@ fn markdown_report_mentions_keyed_replace() {
     assert!(report.contains("# Config Diff Report"));
     assert!(report.contains("Replaces: 1 (1 -> 1 lines)"));
     assert!(report.contains("Replace 1 line(s) at key 0x"));
-    // line content is now shown under each edit, prefixed with source line number
+    // inline diff wraps changed tokens in **bold** markers
     assert!(
-        report.contains("description old"),
-        "report should show removed line text"
+        report.contains("description **old**"),
+        "report should show removed line text with inline highlighting"
     );
     assert!(
-        report.contains("description new"),
-        "report should show added line text"
+        report.contains("description **new**"),
+        "report should show added line text with inline highlighting"
     );
     // verify line numbers are present in diff lines
     assert!(
@@ -170,22 +187,18 @@ fn unified_diff_shows_headers_and_hunks() {
     let a = parse_generic("hostname old\n");
     let b = parse_generic("hostname new\n");
     let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    owo_colors::set_override(false);
     let output = format_unified_diff(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
-    owo_colors::set_override(true);
+    let plain = strip_ansi(&output);
 
-    assert!(output.contains("--- left.cfg"), "should contain --- header");
+    assert!(plain.contains("--- left.cfg"), "should contain --- header");
+    assert!(plain.contains("+++ right.cfg"), "should contain +++ header");
+    assert!(plain.contains("@@"), "should contain @@ hunk header");
     assert!(
-        output.contains("+++ right.cfg"),
-        "should contain +++ header"
-    );
-    assert!(output.contains("@@"), "should contain @@ hunk header");
-    assert!(
-        output.contains("- hostname old"),
+        plain.contains("- hostname old"),
         "should contain deleted line"
     );
     assert!(
-        output.contains("+ hostname new"),
+        plain.contains("+ hostname new"),
         "should contain inserted line"
     );
 }

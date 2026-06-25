@@ -2,6 +2,7 @@ use std::fmt::Write;
 
 use owo_colors::OwoColorize;
 
+use crate::inline::TokenSpan;
 use crate::model::{Diff, DiffLine, Edit};
 
 /// default maximum number of lines shown per side of an edit before truncating.
@@ -149,8 +150,7 @@ pub fn format_unified_diff(
                     .cyan()
                 )
                 .unwrap();
-                append_colored_lines(&mut out, "-", old_lines, max_lines_shown);
-                append_colored_lines(&mut out, "+", new_lines, max_lines_shown);
+                append_replace_colored(&mut out, old_lines, new_lines, max_lines_shown);
             }
         }
     }
@@ -196,6 +196,79 @@ fn append_colored_lines(
     }
 }
 
+fn append_replace_colored(
+    out: &mut String,
+    old_lines: &[DiffLine],
+    new_lines: &[DiffLine],
+    max_lines_shown: usize,
+) {
+    let pair_count = old_lines.len().min(new_lines.len());
+    let old_show = old_lines.len().min(max_lines_shown);
+    let new_show = new_lines.len().min(max_lines_shown);
+
+    let diff_count = pair_count.min(old_show.max(new_show));
+    let diffs: Vec<_> = (0..diff_count)
+        .map(|i| crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text))
+        .collect();
+
+    for i in 0..old_show {
+        if i < pair_count {
+            append_inline_spans(out, "- ", &diffs[i].0, true);
+        } else {
+            writeln!(out, "{}", format_args!("- {}", old_lines[i].text).red()).unwrap();
+        }
+    }
+    let old_remaining = old_lines.len().saturating_sub(max_lines_shown);
+    if old_remaining > 0 {
+        writeln!(
+            out,
+            "{}",
+            format_args!("- ... and {old_remaining} more").dimmed()
+        )
+        .unwrap();
+    }
+
+    for i in 0..new_show {
+        if i < pair_count {
+            append_inline_spans(out, "+ ", &diffs[i].1, false);
+        } else {
+            writeln!(out, "{}", format_args!("+ {}", new_lines[i].text).green()).unwrap();
+        }
+    }
+    let new_remaining = new_lines.len().saturating_sub(max_lines_shown);
+    if new_remaining > 0 {
+        writeln!(
+            out,
+            "{}",
+            format_args!("+ ... and {new_remaining} more").dimmed()
+        )
+        .unwrap();
+    }
+}
+
+fn append_inline_spans(out: &mut String, prefix: &str, spans: &[TokenSpan], is_delete: bool) {
+    if is_delete {
+        write!(out, "{}", prefix.red()).unwrap();
+        for span in spans {
+            if span.changed {
+                write!(out, "{}", span.text.red().bold().underline()).unwrap();
+            } else {
+                write!(out, "{}", span.text.red()).unwrap();
+            }
+        }
+    } else {
+        write!(out, "{}", prefix.green()).unwrap();
+        for span in spans {
+            if span.changed {
+                write!(out, "{}", span.text.green().bold().underline()).unwrap();
+            } else {
+                write!(out, "{}", span.text.green()).unwrap();
+            }
+        }
+    }
+    writeln!(out).unwrap();
+}
+
 fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
     let mut out = String::new();
     match edit {
@@ -235,11 +308,72 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 crate::util::key_label(*new_at_key),
             )
             .unwrap();
-            append_diff_lines(&mut out, "-", old_lines, max_lines_shown);
-            append_diff_lines(&mut out, "+", new_lines, max_lines_shown);
+            append_replace_diff_lines(&mut out, old_lines, new_lines, max_lines_shown);
         }
     }
     out
+}
+
+fn append_replace_diff_lines(
+    out: &mut String,
+    old_lines: &[DiffLine],
+    new_lines: &[DiffLine],
+    max_lines_shown: usize,
+) {
+    let pair_count = old_lines.len().min(new_lines.len());
+    let old_show = old_lines.len().min(max_lines_shown);
+    let new_show = new_lines.len().min(max_lines_shown);
+
+    let diff_count = pair_count.min(old_show.max(new_show));
+    let diffs: Vec<_> = (0..diff_count)
+        .map(|i| crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text))
+        .collect();
+
+    for i in 0..old_show {
+        if i < pair_count {
+            write!(out, "\n   - L{}: ", old_lines[i].span.line).unwrap();
+            append_markdown_spans(out, &diffs[i].0);
+        } else {
+            write!(
+                out,
+                "\n   - L{}: {}",
+                old_lines[i].span.line, old_lines[i].text
+            )
+            .unwrap();
+        }
+    }
+    let old_remaining = old_lines.len().saturating_sub(max_lines_shown);
+    if old_remaining > 0 {
+        write!(out, "\n   - ... and {old_remaining} more").unwrap();
+    }
+
+    for i in 0..new_show {
+        if i < pair_count {
+            write!(out, "\n   + L{}: ", new_lines[i].span.line).unwrap();
+            append_markdown_spans(out, &diffs[i].1);
+        } else {
+            write!(
+                out,
+                "\n   + L{}: {}",
+                new_lines[i].span.line, new_lines[i].text
+            )
+            .unwrap();
+        }
+    }
+    let new_remaining = new_lines.len().saturating_sub(max_lines_shown);
+    if new_remaining > 0 {
+        write!(out, "\n   + ... and {new_remaining} more").unwrap();
+    }
+}
+
+fn append_markdown_spans(out: &mut String, spans: &[TokenSpan]) {
+    for span in spans {
+        if span.changed {
+            write!(out, "**{}**", span.text).unwrap();
+        } else {
+            write!(out, "{}", span.text).unwrap();
+        }
+    }
 }
 
 fn append_diff_lines(out: &mut String, prefix: &str, lines: &[DiffLine], max_lines_shown: usize) {
@@ -258,6 +392,23 @@ mod tests {
     use super::*;
     use crate::model::{DiffStats, Finding, FindingLevel};
     use netform_ir::{Path, Span};
+
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::new();
+        let mut in_escape = false;
+        for c in s.chars() {
+            if c == '\x1b' {
+                in_escape = true;
+            } else if in_escape {
+                if c == 'm' {
+                    in_escape = false;
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
 
     fn make_diff_line_at(text: &str, line: usize) -> DiffLine {
         DiffLine {
@@ -402,8 +553,8 @@ mod tests {
         assert!(report.contains(
             "Replace 1 line(s) at key 0x000000000000000a with 1 line(s) at key 0x0000000000000014"
         ));
-        assert!(report.contains("- L1: old line"));
-        assert!(report.contains("+ L1: new line"));
+        assert!(report.contains("- L1: **old** line"));
+        assert!(report.contains("+ L1: **new** line"));
     }
 
     #[test]
@@ -530,9 +681,10 @@ mod tests {
         };
         let result = format_unified_diff(&diff, "a", "b", 10);
 
-        assert!(result.contains("@@ replace 1 line(s) at key"));
-        assert!(result.contains("- old"));
-        assert!(result.contains("+ new"));
+        let plain = strip_ansi(&result);
+        assert!(plain.contains("@@ replace 1 line(s) at key"));
+        assert!(plain.contains("- old"));
+        assert!(plain.contains("+ new"));
     }
 
     #[test]

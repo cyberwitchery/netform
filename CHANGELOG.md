@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- replace blocks in unified and markdown reports now highlight which specific tokens changed within each matched line pair — unchanged tokens render in the base color while changed tokens are bold+underlined (unified) or wrapped in `**bold**` markers (markdown); lines that can't be paired 1:1 (when old/new counts differ) render as before
 - Myers diff trace now stores only the live diagonals per edit step (d+1 values at step d) instead of cloning the full v-vector (length 2*(a+b)+3), reducing trace memory from O(D*(a+b)) to O(D^2) and cutting allocation pressure on large config diffs
 - `config-diff` now prints a warning to stderr when auto-dialect detection disagrees between the two input files, naming both detected dialects and suggesting `--dialect` to override — previously fell back to generic silently
 - markdown report now shows source line numbers on diff lines (`- L42: permit any` instead of `- permit any`) and on findings with a known span (`warning [code] (line 42): message`)

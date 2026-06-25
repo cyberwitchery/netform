@@ -3,6 +3,23 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_escape = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' {
+                in_escape = false;
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn temp_file_path(prefix: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -26,7 +43,7 @@ fn config_diff_cli_prints_unified_diff() {
         .expect("run config-diff");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
     assert!(stdout.contains("---"), "should contain --- header");
     assert!(stdout.contains("+++"), "should contain +++ header");
     assert!(stdout.contains("@@"), "should contain @@ hunk header");
@@ -546,7 +563,7 @@ fn config_diff_reads_file_a_from_stdin() {
 
     let output = child.wait_with_output().expect("wait for config-diff");
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("<stdin>"),
         "header should show <stdin> for the piped input"
@@ -587,7 +604,7 @@ fn config_diff_reads_file_b_from_stdin() {
 
     let output = child.wait_with_output().expect("wait for config-diff");
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("<stdin>"),
         "header should show <stdin> for the piped input"
