@@ -1,6 +1,6 @@
 [package]
 name = "netform_dialect_eos"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 description = "Arista EOS dialect profile for netform lossless config parsing"
@@ -9,4 +9,4 @@ homepage = "https://github.com/cyberwitchery/netform"
 documentation = "https://docs.rs/netform_dialect_eos"
 
 [dependencies]
-netform_ir = { version = "0.6.0", path = "../netform_ir" }
+netform_ir = { version = "0.7.0", path = "../netform_ir" }

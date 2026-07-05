@@ -1,6 +1,6 @@
 [package]
 name = "netform_diff"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 description = "Deterministic diff engine and reporting primitives for lossless network config IR"
@@ -10,16 +10,16 @@ documentation = "https://docs.rs/netform_diff"
 
 [dependencies]
 owo-colors = { version = "4", features = ["supports-colors"] }
-netform_ir = { version = "0.6.0", path = "../netform_ir" }
+netform_ir = { version = "0.7.0", path = "../netform_ir" }
 serde = { version = "1.0", features = ["derive"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [dev-dependencies]
-netform_dialect_eos = { version = "0.6.0", path = "../netform_dialect_eos" }
-netform_dialect_fortios = { version = "0.6.0", path = "../netform_dialect_fortios" }
-netform_dialect_iosxe = { version = "0.6.0", path = "../netform_dialect_iosxe" }
-netform_dialect_junos = { version = "0.6.0", path = "../netform_dialect_junos" }
-netform_dialect_nxos = { version = "0.6.0", path = "../netform_dialect_nxos" }
+netform_dialect_eos = { version = "0.7.0", path = "../netform_dialect_eos" }
+netform_dialect_fortios = { version = "0.7.0", path = "../netform_dialect_fortios" }
+netform_dialect_iosxe = { version = "0.7.0", path = "../netform_dialect_iosxe" }
+netform_dialect_junos = { version = "0.7.0", path = "../netform_dialect_junos" }
+netform_dialect_nxos = { version = "0.7.0", path = "../netform_dialect_nxos" }
 owo-colors = { version = "4", features = ["supports-colors"] }
 proptest = "1.11"
 serde_json = "1.0"
