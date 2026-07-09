@@ -16,7 +16,7 @@
 - `BlockNode`:
   - `header`: a `LineNode`
   - `children`: `NodeId` list
-  - `footer`: optional `LineNode` (reserved for future dialects)
+  - `footer`: optional closing `LineNode` for delimiter-terminated dialects (FortiOS `end`/`next`, Junos `}`/`};`)
   - `kind_label`: optional label (reserved for future semantic tagging)
 
 ## parser behavior (v1)
@@ -24,6 +24,7 @@
 - indentation is the only structural signal
 - if a content line is followed by a more-indented content line, it opens a block
 - non-blank dedent closes blocks
+- a dialect may mark a line as a block terminator (via `Dialect::block_terminator`); a terminator that closes a block is attached to that block as its `footer` instead of being kept as a sibling
 - unknown patterns are preserved as regular `Line` nodes
 - no line is dropped
 

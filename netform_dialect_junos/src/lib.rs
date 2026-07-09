@@ -52,6 +52,10 @@ impl Dialect for JunosDialect {
         }
         junos_key_hint(parsed)
     }
+
+    fn block_terminator(&self, raw: &str) -> bool {
+        matches!(raw.trim(), "}" | "};")
+    }
 }
 
 fn classify_junos_trivia(raw: &str) -> TriviaKind {
@@ -496,5 +500,66 @@ mod tests {
     #[test]
     fn key_hint_set_unknown_section() {
         assert_eq!(hint("set event-options policy DUMP-ON-SNMPD"), None);
+    }
+
+    #[test]
+    fn parse_junos_brace_round_trip() {
+        let cfg = "\
+interfaces {
+    ge-0/0/0 {
+        description \"uplink\";
+    }
+}
+";
+        let doc = parse_junos(cfg);
+        assert_eq!(doc.render(), cfg);
+    }
+
+    #[test]
+    fn closing_braces_attach_as_block_footers() {
+        use netform_ir::Node;
+
+        let cfg = "\
+interfaces {
+    ge-0/0/0 {
+        disable;
+    }
+}
+";
+        let doc = parse_junos(cfg);
+        assert_eq!(doc.render(), cfg, "round trip must stay byte-for-byte");
+
+        // the outer `}` closes `interfaces` and lands in its footer.
+        assert_eq!(doc.roots.len(), 1, "the terminator is no longer a sibling");
+        let Some(Node::Block(interfaces)) = doc.node(doc.roots[0]) else {
+            panic!("expected an interfaces block at the root");
+        };
+        assert_eq!(interfaces.header.raw, "interfaces {");
+        assert_eq!(
+            interfaces.footer.as_ref().map(|f| f.raw.as_str()),
+            Some("}"),
+        );
+
+        // the inner `}` closes the nested `ge-0/0/0` block.
+        assert_eq!(interfaces.children.len(), 1);
+        let Some(Node::Block(intf)) = doc.node(interfaces.children[0]) else {
+            panic!("expected a ge-0/0/0 block nested in interfaces");
+        };
+        assert_eq!(intf.header.raw, "    ge-0/0/0 {");
+        assert_eq!(intf.footer.as_ref().map(|f| f.raw.as_str()), Some("    }"));
+    }
+
+    #[test]
+    fn semicolon_brace_terminator_attaches_as_footer() {
+        use netform_ir::Node;
+
+        // some Junos stanzas close with `};`; it is treated as a terminator too.
+        let cfg = "policy-options {\n    community NO-EXPORT members no-export;\n};\n";
+        let doc = parse_junos(cfg);
+        assert_eq!(doc.render(), cfg);
+        let Some(Node::Block(block)) = doc.node(doc.roots[0]) else {
+            panic!("expected a policy-options block");
+        };
+        assert_eq!(block.footer.as_ref().map(|f| f.raw.as_str()), Some("};"));
     }
 }

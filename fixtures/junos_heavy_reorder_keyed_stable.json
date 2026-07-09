@@ -11,6 +11,6 @@
   "expected": {
     "has_changes": false,
     "edit_types": [],
-    "finding_codes": ["ambiguous_key_match", "ambiguous_key_match"]
+    "finding_codes": []
   }
 }

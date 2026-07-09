@@ -52,6 +52,10 @@ impl Dialect for FortiosDialect {
         }
         fortios_key_hint(parsed)
     }
+
+    fn block_terminator(&self, raw: &str) -> bool {
+        matches!(raw.trim(), "end" | "next")
+    }
 }
 
 /// classify trivia for FortiOS configs.
@@ -343,5 +347,53 @@ end
         let cfg = "# FortiOS configuration\nconfig system global\n    set hostname \"FGT\"\nend\n";
         let doc = parse_fortios(cfg);
         assert_eq!(doc.render(), cfg);
+    }
+
+    #[test]
+    fn end_and_next_attach_as_block_footers() {
+        use netform_ir::Node;
+
+        let cfg = "\
+config firewall address
+    edit \"all\"
+        set type ipmask
+    next
+end
+";
+        let doc = parse_fortios(cfg);
+        assert_eq!(doc.render(), cfg, "round trip must stay byte-for-byte");
+
+        // `end` closes the top-level `config` block and lands in its footer.
+        assert_eq!(doc.roots.len(), 1, "the terminator is no longer a sibling");
+        let Some(Node::Block(config)) = doc.node(doc.roots[0]) else {
+            panic!("expected a config block at the root");
+        };
+        assert_eq!(config.header.raw, "config firewall address");
+        assert_eq!(config.footer.as_ref().map(|f| f.raw.as_str()), Some("end"));
+
+        // `next` closes the nested `edit` block and lands in *its* footer.
+        assert_eq!(config.children.len(), 1);
+        let Some(Node::Block(edit)) = doc.node(config.children[0]) else {
+            panic!("expected an edit block nested in the config block");
+        };
+        assert_eq!(edit.header.raw, "    edit \"all\"");
+        assert_eq!(
+            edit.footer.as_ref().map(|f| f.raw.as_str()),
+            Some("    next"),
+        );
+    }
+
+    #[test]
+    fn unclosed_config_block_has_no_footer() {
+        use netform_ir::Node;
+
+        // a config left open at EOF still parses; there is simply no footer.
+        let cfg = "config system global\n    set hostname \"FGT\"\n";
+        let doc = parse_fortios(cfg);
+        assert_eq!(doc.render(), cfg);
+        let Some(Node::Block(config)) = doc.node(doc.roots[0]) else {
+            panic!("expected a config block");
+        };
+        assert!(config.footer.is_none());
     }
 }

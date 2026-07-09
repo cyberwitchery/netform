@@ -1076,3 +1076,39 @@ fn fortios_reorder_plus_value_change_three_way_contrast() {
     );
     assert!(matches!(keyed.edits[0], Edit::Replace { .. }));
 }
+
+#[test]
+fn fortios_block_footer_participates_in_comparison_and_diff() {
+    // the producer now captures FortiOS `end` as the config block's footer, so
+    // it flows through the flattener as a KeyKind::BlockFooter line (keyed under
+    // the block header, at path [block, children_len]) and takes part in diffs.
+    let closed = parse_fortios("config system global\n    set hostname \"x\"\nend\n");
+
+    let view = build_comparison_view(&closed, &NormalizeOptions::default());
+    let footer = view.lines.last().expect("comparison view is non-empty");
+    assert_eq!(footer.normalized, "end");
+    // footer path is [config-block-index, children_len] == [0, 1].
+    assert_eq!(footer.path, Path(vec![0, 1]));
+
+    // dropping the `end` (leaving the block open) is a real, detected change.
+    let open = parse_fortios("config system global\n    set hostname \"x\"\n");
+    let diff = diff_documents(&closed, &open, NormalizeOptions::default()).unwrap();
+    assert!(
+        diff.has_changes,
+        "the footer terminator should participate in the diff",
+    );
+    let mentions_end = diff.edits.iter().any(|e| match e {
+        Edit::Delete { lines, .. } | Edit::Insert { lines, .. } => {
+            lines.iter().any(|l| l.text == "end")
+        }
+        Edit::Replace {
+            old_lines,
+            new_lines,
+            ..
+        } => old_lines.iter().chain(new_lines).any(|l| l.text == "end"),
+    });
+    assert!(
+        mentions_end,
+        "the `end` footer should appear in the diff edits",
+    );
+}
