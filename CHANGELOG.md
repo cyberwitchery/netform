@@ -1,5 +1,10 @@
 # changelog
 
+## Unreleased
+
+- fixed a silent-miss bug where changing the body of a numbered `access-list N ...` rule (e.g. `access-list 100 permit ip 10.0.0.0 ...` → `... 10.1.0.0 ...`) produced no diff under the default ordered policy — such rules were matched by ACL number alone, so a changed rule body was invisible; numbered ACL rules now compare on their full text, so body changes surface as edits and added/removed rules produce a clean single insert/delete
+- fixed NX-OS `vlan configuration <id>` blocks all collapsing to the same identity — different `vlan configuration` blocks were treated as one and mis-paired in diffs; each now keys on its VLAN id
+
 ## [0.7.0] - 2026-07-05
 
 - replace blocks in unified and markdown reports now highlight which specific tokens changed within each matched line pair — unchanged tokens render in the base color while changed tokens are bold+underlined (unified) or wrapped in `**bold**` markers (markdown); lines that can't be paired 1:1 (when old/new counts differ) render as before
