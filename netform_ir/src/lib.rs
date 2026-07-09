@@ -652,16 +652,28 @@ pub fn ios_family_key_hint(
 /// dialects (EOS, IOS XE, NX-OS).
 ///
 /// this covers the match arms that are identical in every IOS-family dialect:
-/// `vlan`, `route-map`, `class-map`, `policy-map`, `ipv6`, `access-list`,
-/// `crypto`, `spanning-tree`, `line`, `monitor`, and `ntp`.  Dialect-specific
+/// `vlan`, `route-map`, `class-map`, `policy-map`, `ipv6`, `crypto`,
+/// `spanning-tree`, `line`, `monitor`, and `ntp`.  Dialect-specific
 /// functions should match their own constructs first, then fall back here.
+///
+/// numbered `access-list N ...` rules are intentionally *not* keyed here:
+/// they are ordered sequence entries whose identity is their full text, so
+/// they must key on the line text (via no hint) rather than the shared ACL
+/// number — otherwise a rule-body change is invisible to the diff.
 pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let parsed = parsed?;
     let head = parsed.head.as_str();
     let args = parsed.args.as_slice();
 
     match head {
-        "vlan" => args.first().map(|id| format!("vlan:{id}")),
+        "vlan" => match args {
+            // NX-OS `vlan configuration <id>` is a distinct per-VLAN block;
+            // key it on the id so different ids don't collapse to the literal
+            // "configuration" (and collide with each other).
+            [sub, id, ..] if sub == "configuration" => Some(format!("vlan-configuration:{id}")),
+            [id, ..] => Some(format!("vlan:{id}")),
+            _ => None,
+        },
         "route-map" => match args {
             [name, action, seq, ..] => Some(format!("route-map:{name}:{action}:{seq}")),
             [name, action] => Some(format!("route-map:{name}:{action}")),
@@ -682,7 +694,6 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             [next, prefix, ..] if next == "route" => Some(format!("ipv6-route:{prefix}")),
             _ => None,
         },
-        "access-list" => args.first().map(|num| format!("access-list:{num}")),
         "crypto" => match args {
             [kind, sub, name, ..] if kind == "ikev2" => Some(format!("crypto:ikev2:{sub}:{name}")),
             [kind, sub, name, ..] if kind == "ipsec" => Some(format!("crypto:ipsec:{sub}:{name}")),
@@ -862,6 +873,22 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_vlan_configuration() {
+        // NX-OS `vlan configuration <id>` keys on the id, not the literal
+        // "configuration" (which would collide across all such blocks).
+        assert_eq!(
+            hint("vlan configuration 10"),
+            Some("vlan-configuration:10".into()),
+        );
+        assert_eq!(
+            hint("vlan configuration 200 300"),
+            Some("vlan-configuration:200".into()),
+        );
+        // plain `vlan <id>` is unchanged.
+        assert_eq!(hint("vlan 100"), Some("vlan:100".into()));
+    }
+
+    #[test]
     fn key_hint_vrf() {
         assert_eq!(hint("vrf MGMT"), Some("vrf:MGMT".into()));
     }
@@ -1032,15 +1059,12 @@ mod tests {
     }
 
     #[test]
-    fn key_hint_numbered_access_list() {
-        assert_eq!(
-            hint("access-list 100 permit ip any any"),
-            Some("access-list:100".into()),
-        );
-        assert_eq!(
-            hint("access-list 10 deny 10.0.0.0 0.255.255.255"),
-            Some("access-list:10".into()),
-        );
+    fn key_hint_numbered_access_list_has_no_hint() {
+        // numbered ACL rules are ordered sequence entries; they must NOT be
+        // keyed by the shared ACL number (that made rule-body changes invisible
+        // to the diff).  No hint means they key on their full normalized text.
+        assert_eq!(hint("access-list 100 permit ip any any"), None);
+        assert_eq!(hint("access-list 10 deny 10.0.0.0 0.255.255.255"), None);
     }
 
     #[test]
@@ -1177,6 +1201,15 @@ mod tests {
     }
 
     #[test]
+    fn common_key_hint_vlan_configuration() {
+        assert_eq!(
+            common_hint("vlan configuration 10"),
+            Some("vlan-configuration:10".into()),
+        );
+        assert_eq!(common_hint("vlan 100"), Some("vlan:100".into()));
+    }
+
+    #[test]
     fn common_key_hint_route_map() {
         assert_eq!(
             common_hint("route-map REDISTRIBUTE permit 10"),
@@ -1201,11 +1234,10 @@ mod tests {
     }
 
     #[test]
-    fn common_key_hint_access_list() {
-        assert_eq!(
-            common_hint("access-list 100 permit ip any any"),
-            Some("access-list:100".into()),
-        );
+    fn common_key_hint_access_list_has_no_hint() {
+        // see key_hint_numbered_access_list_has_no_hint: numbered ACL entries
+        // key on full text so a body change is a detectable edit.
+        assert_eq!(common_hint("access-list 100 permit ip any any"), None);
     }
 
     #[test]
