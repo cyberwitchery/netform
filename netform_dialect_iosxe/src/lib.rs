@@ -86,7 +86,7 @@ const IOSXE_INTERFACE_TYPES: &[&str] = &[
 const IOSXE_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
     interface_types: IOSXE_INTERFACE_TYPES,
     vrf_keyword: "definition",
-    extra_router_protos: &["eigrp"],
+    extra_router_protos: &["eigrp", "isis"],
 };
 
 /// derive a stable identity key for IOS XE configuration lines.
@@ -439,6 +439,14 @@ mod tests {
     #[test]
     fn key_hint_router_isis() {
         assert_eq!(hint("router isis"), Some("router:isis".into()));
+    }
+
+    #[test]
+    fn key_hint_router_isis_with_tag() {
+        assert_eq!(
+            hint("router isis AREA-A"),
+            Some("router:isis:AREA-A".into()),
+        );
     }
 
     #[test]
