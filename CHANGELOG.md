@@ -4,6 +4,7 @@
 
 - fixed a silent-miss bug where changing the body of a numbered `access-list N ...` rule (e.g. `access-list 100 permit ip 10.0.0.0 ...` → `... 10.1.0.0 ...`) produced no diff under the default ordered policy — such rules were matched by ACL number alone, so a changed rule body was invisible; numbered ACL rules now compare on their full text, so body changes surface as edits and added/removed rules produce a clean single insert/delete
 - fixed NX-OS `vlan configuration <id>` blocks all collapsing to the same identity — different `vlan configuration` blocks were treated as one and mis-paired in diffs; each now keys on its VLAN id
+- FortiOS `end`/`next` and Junos closing `}`/`};` are now captured as the footer of the block they close, instead of appearing as detached sibling lines — delimiter-terminated configs get faithful block structure, which sharpens keyed-stable matching (fewer spurious ambiguous-key findings) and gives plan/report paths for FortiOS `edit`…`next` entries the correct enclosing block; the exact round-trip output is unchanged
 
 ## [0.7.0] - 2026-07-05
 

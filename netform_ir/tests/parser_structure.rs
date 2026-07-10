@@ -1,4 +1,26 @@
-use netform_ir::{Node, TriviaKind, parse_generic};
+use netform_ir::{Dialect, Node, ParsedLineParts, TriviaKind, parse_generic, parse_with_dialect};
+
+/// minimal dialect whose only customization is a `}` block terminator, used to
+/// exercise footer attachment independently of any vendor dialect crate.
+struct BraceDialect;
+
+impl Dialect for BraceDialect {
+    fn classify_trivia(&self, raw: &str) -> TriviaKind {
+        if raw.trim().is_empty() {
+            TriviaKind::Blank
+        } else {
+            TriviaKind::Content
+        }
+    }
+
+    fn parse_parts(&self, _raw: &str) -> Option<ParsedLineParts> {
+        None
+    }
+
+    fn block_terminator(&self, raw: &str) -> bool {
+        raw.trim() == "}"
+    }
+}
 
 #[test]
 fn builds_blocks_from_indentation() {
@@ -71,6 +93,71 @@ fn records_finding_for_orphan_indentation() {
             .any(|f| f.code == "orphan-indentation")
     );
     assert_eq!(doc.render(), input);
+}
+
+#[test]
+fn block_terminator_is_attached_as_footer() {
+    let input = "root {\n    child a\n    child b\n}\n";
+    let doc = parse_with_dialect(input, &BraceDialect);
+
+    assert_eq!(doc.render(), input, "footer attachment must round-trip");
+    assert_eq!(doc.roots.len(), 1, "terminator is not a separate root");
+
+    match doc.node(doc.roots[0]).expect("root 0") {
+        Node::Block(block) => {
+            assert_eq!(block.header.raw, "root {");
+            assert_eq!(block.children.len(), 2);
+            assert_eq!(
+                block.footer.as_ref().map(|f| f.raw.as_str()),
+                Some("}"),
+                "closing brace should be the block footer",
+            );
+        }
+        _ => panic!("expected the root to be a block"),
+    }
+}
+
+#[test]
+fn nested_terminators_close_their_own_block() {
+    let input = "outer {\n    inner {\n        leaf\n    }\n}\n";
+    let doc = parse_with_dialect(input, &BraceDialect);
+
+    assert_eq!(doc.render(), input);
+    let Node::Block(outer) = doc.node(doc.roots[0]).expect("outer") else {
+        panic!("expected outer block");
+    };
+    assert_eq!(outer.footer.as_ref().map(|f| f.raw.as_str()), Some("}"));
+    assert_eq!(outer.children.len(), 1);
+
+    let Node::Block(inner) = doc.node(outer.children[0]).expect("inner") else {
+        panic!("expected inner block");
+    };
+    assert_eq!(
+        inner.footer.as_ref().map(|f| f.raw.as_str()),
+        Some("    }"),
+        "the indented brace closes the inner block, not the outer one",
+    );
+}
+
+#[test]
+fn generic_dialect_does_not_attach_footers() {
+    // the generic dialect has no block terminators, so a `}` line dedents to a
+    // plain sibling and the block keeps `footer: None` — this is what keeps the
+    // indentation-only dialects (IOS XE, EOS, NX-OS) completely unchanged.
+    let input = "root {\n    child a\n}\n";
+    let doc = parse_generic(input);
+
+    match doc.node(doc.roots[0]).expect("root 0") {
+        Node::Block(block) => assert!(
+            block.footer.is_none(),
+            "generic dialect must not produce footers",
+        ),
+        _ => panic!("expected the root to be a block"),
+    }
+    assert!(
+        doc.roots.len() >= 2,
+        "the closing brace should remain a detached sibling line",
+    );
 }
 
 #[test]

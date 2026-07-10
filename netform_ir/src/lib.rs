@@ -221,6 +221,16 @@ pub trait Dialect {
     ) -> Option<String> {
         None
     }
+    /// report whether a raw line is a block-closing terminator for this dialect.
+    ///
+    /// delimiter-terminated dialects (FortiOS `end`/`next`, Junos `}`/`};`)
+    /// return `true` so the parser attaches the terminator to the block it
+    /// closes as that [`BlockNode`]'s footer instead of leaving it a detached
+    /// sibling.  Indentation-only dialects (IOS XE, EOS, NX-OS) keep the default
+    /// `false` and are unaffected.
+    fn block_terminator(&self, _raw: &str) -> bool {
+        false
+    }
 }
 
 /// parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
@@ -335,6 +345,18 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
         })
         .collect();
 
+    // pre-compute which content lines are dialect block terminators (e.g.
+    // FortiOS `end`/`next`, Junos `}`/`};`).  A line that itself opens a block
+    // is never treated as a terminator, so the mechanism stays inert for
+    // indentation-only dialects whose `block_terminator` is the default `false`.
+    let is_terminator: Vec<bool> = (0..lines.len())
+        .map(|idx| {
+            lines[idx].trivia == TriviaKind::Content
+                && !opens_block[idx]
+                && dialect.block_terminator(&lines[idx].raw)
+        })
+        .collect();
+
     for (idx, line) in lines.into_iter().enumerate() {
         if line.trivia == TriviaKind::Content && line.indent > 0 && parent_stack.is_empty() {
             doc.metadata.parse_findings.push(ParseFinding {
@@ -346,14 +368,29 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
         }
 
         // non-blank lines can close open blocks when indentation decreases.
+        let mut closed_block: Option<NodeId> = None;
         if line.trivia != TriviaKind::Blank {
-            while let Some((parent_indent, _)) = parent_stack.last().copied() {
+            while let Some((parent_indent, parent_id)) = parent_stack.last().copied() {
                 if line.indent <= parent_indent {
+                    closed_block = Some(parent_id);
                     parent_stack.pop();
                 } else {
                     break;
                 }
             }
+        }
+
+        // a terminator attaches to the block it just closed (the outermost block
+        // it dedented past) as that block's footer, rather than being emitted as
+        // a detached sibling.  The renderer places the footer after the block's
+        // children, so the byte-for-byte round trip is preserved.
+        if is_terminator[idx]
+            && let Some(block_id) = closed_block
+            && let Some(Node::Block(block)) = doc.arena.get_mut(block_id.0)
+            && block.footer.is_none()
+        {
+            block.footer = Some(line.into_line_node());
+            continue;
         }
 
         let indent = line.indent;
