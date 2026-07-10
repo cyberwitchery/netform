@@ -78,7 +78,7 @@ const NXOS_INTERFACE_TYPES: &[&str] = &[
 const NXOS_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
     interface_types: NXOS_INTERFACE_TYPES,
     vrf_keyword: "context",
-    extra_router_protos: &[],
+    extra_router_protos: &["eigrp", "isis"],
 };
 
 /// derive a stable identity key for NX-OS configuration lines.
@@ -321,6 +321,32 @@ mod tests {
     #[test]
     fn key_hint_router_ospf_without_process_id() {
         assert_eq!(hint("router ospf"), Some("router:ospf".into()));
+    }
+
+    #[test]
+    fn key_hint_router_eigrp_with_as() {
+        assert_eq!(hint("router eigrp 100"), Some("router:eigrp:100".into()));
+    }
+
+    #[test]
+    fn key_hint_router_eigrp_named() {
+        assert_eq!(
+            hint("router eigrp ENTERPRISE"),
+            Some("router:eigrp:ENTERPRISE".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_router_isis_bare() {
+        assert_eq!(hint("router isis"), Some("router:isis".into()));
+    }
+
+    #[test]
+    fn key_hint_router_isis_with_tag() {
+        assert_eq!(
+            hint("router isis AREA-A"),
+            Some("router:isis:AREA-A".into()),
+        );
     }
 
     #[test]
