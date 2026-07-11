@@ -114,7 +114,13 @@ pub fn format_unified_diff(
                     .cyan()
                 )
                 .unwrap();
-                append_colored_lines(&mut out, "+", lines, max_lines_shown);
+                walk_single(
+                    &mut out,
+                    &ColoredRenderer,
+                    Side::New,
+                    lines,
+                    max_lines_shown,
+                );
             }
             Edit::Delete { at_key, lines, .. } => {
                 writeln!(
@@ -128,7 +134,13 @@ pub fn format_unified_diff(
                     .cyan()
                 )
                 .unwrap();
-                append_colored_lines(&mut out, "-", lines, max_lines_shown);
+                walk_single(
+                    &mut out,
+                    &ColoredRenderer,
+                    Side::Old,
+                    lines,
+                    max_lines_shown,
+                );
             }
             Edit::Replace {
                 old_at_key,
@@ -150,7 +162,13 @@ pub fn format_unified_diff(
                     .cyan()
                 )
                 .unwrap();
-                append_replace_colored(&mut out, old_lines, new_lines, max_lines_shown);
+                walk_replace(
+                    &mut out,
+                    &ColoredRenderer,
+                    old_lines,
+                    new_lines,
+                    max_lines_shown,
+                );
             }
         }
     }
@@ -170,34 +188,141 @@ pub fn format_unified_diff(
     out
 }
 
-fn append_colored_lines(
-    out: &mut String,
-    prefix: &str,
-    lines: &[DiffLine],
-    max_lines_shown: usize,
-) {
-    let show = lines.len().min(max_lines_shown);
-    for line in &lines[..show] {
-        let formatted = format!("{prefix} {}", line.text);
-        if prefix == "+" {
-            writeln!(out, "{}", formatted.green()).unwrap();
-        } else {
-            writeln!(out, "{}", formatted.red()).unwrap();
+/// which side of an edit a rendered line belongs to: old lines carry the `-`
+/// marker (red when colored), new lines carry `+` (green when colored).
+#[derive(Clone, Copy)]
+enum Side {
+    Old,
+    New,
+}
+
+/// per-format strategy for emitting a single diff line.
+///
+/// the walkers ([`walk_single`], [`walk_replace`]) own the shared control
+/// skeleton — truncation counting and the paired/unpaired split — while an
+/// implementation decides only how one line is formatted.
+trait LineRenderer {
+    /// emit a paired line with token-level inline highlighting.
+    fn inline_line(&self, out: &mut String, side: Side, line: &DiffLine, spans: &[TokenSpan]);
+    /// emit a line verbatim (a single-sided insert/delete, or the extra lines
+    /// on the longer side of a replace).
+    fn plain_line(&self, out: &mut String, side: Side, line: &DiffLine);
+    /// emit the "... and N more" truncation marker for one side.
+    fn truncation(&self, out: &mut String, side: Side, remaining: usize);
+}
+
+/// renders lines for the colored unified-diff report.
+struct ColoredRenderer;
+
+impl LineRenderer for ColoredRenderer {
+    fn inline_line(&self, out: &mut String, side: Side, _line: &DiffLine, spans: &[TokenSpan]) {
+        match side {
+            Side::Old => {
+                write!(out, "{}", "- ".red()).unwrap();
+                for span in spans {
+                    if span.changed {
+                        write!(out, "{}", span.text.red().bold().underline()).unwrap();
+                    } else {
+                        write!(out, "{}", span.text.red()).unwrap();
+                    }
+                }
+            }
+            Side::New => {
+                write!(out, "{}", "+ ".green()).unwrap();
+                for span in spans {
+                    if span.changed {
+                        write!(out, "{}", span.text.green().bold().underline()).unwrap();
+                    } else {
+                        write!(out, "{}", span.text.green()).unwrap();
+                    }
+                }
+            }
+        }
+        writeln!(out).unwrap();
+    }
+
+    fn plain_line(&self, out: &mut String, side: Side, line: &DiffLine) {
+        match side {
+            Side::Old => writeln!(out, "{}", format_args!("- {}", line.text).red()).unwrap(),
+            Side::New => writeln!(out, "{}", format_args!("+ {}", line.text).green()).unwrap(),
         }
     }
-    let remaining = lines.len().saturating_sub(max_lines_shown);
-    if remaining > 0 {
+
+    fn truncation(&self, out: &mut String, side: Side, remaining: usize) {
+        let marker = match side {
+            Side::Old => "-",
+            Side::New => "+",
+        };
         writeln!(
             out,
             "{}",
-            format_args!("{prefix} ... and {remaining} more").dimmed()
+            format_args!("{marker} ... and {remaining} more").dimmed()
         )
         .unwrap();
     }
 }
 
-fn append_replace_colored(
+/// renders lines for the markdown report.
+struct MarkdownRenderer;
+
+impl LineRenderer for MarkdownRenderer {
+    fn inline_line(&self, out: &mut String, side: Side, line: &DiffLine, spans: &[TokenSpan]) {
+        let marker = match side {
+            Side::Old => "-",
+            Side::New => "+",
+        };
+        write!(out, "\n   {marker} L{}: ", line.span.line).unwrap();
+        for span in spans {
+            if span.changed {
+                write!(out, "**{}**", span.text).unwrap();
+            } else {
+                write!(out, "{}", span.text).unwrap();
+            }
+        }
+    }
+
+    fn plain_line(&self, out: &mut String, side: Side, line: &DiffLine) {
+        let marker = match side {
+            Side::Old => "-",
+            Side::New => "+",
+        };
+        write!(out, "\n   {marker} L{}: {}", line.span.line, line.text).unwrap();
+    }
+
+    fn truncation(&self, out: &mut String, side: Side, remaining: usize) {
+        let marker = match side {
+            Side::Old => "-",
+            Side::New => "+",
+        };
+        write!(out, "\n   {marker} ... and {remaining} more").unwrap();
+    }
+}
+
+/// walk a single-sided (insert or delete) edit, emitting each shown line then
+/// a truncation marker once `max_lines_shown` is exceeded.
+fn walk_single<R: LineRenderer>(
     out: &mut String,
+    renderer: &R,
+    side: Side,
+    lines: &[DiffLine],
+    max_lines_shown: usize,
+) {
+    let show = lines.len().min(max_lines_shown);
+    for line in &lines[..show] {
+        renderer.plain_line(out, side, line);
+    }
+    let remaining = lines.len().saturating_sub(max_lines_shown);
+    if remaining > 0 {
+        renderer.truncation(out, side, remaining);
+    }
+}
+
+/// walk a replace edit: pair old/new lines for inline highlighting up to the
+/// shorter length, render the extra lines on the longer side verbatim, and
+/// emit a per-side truncation marker once `max_lines_shown` is exceeded.
+fn walk_replace<R: LineRenderer>(
+    out: &mut String,
+    renderer: &R,
     old_lines: &[DiffLine],
     new_lines: &[DiffLine],
     max_lines_shown: usize,
@@ -213,60 +338,27 @@ fn append_replace_colored(
 
     for i in 0..old_show {
         if i < pair_count {
-            append_inline_spans(out, "- ", &diffs[i].0, true);
+            renderer.inline_line(out, Side::Old, &old_lines[i], &diffs[i].0);
         } else {
-            writeln!(out, "{}", format_args!("- {}", old_lines[i].text).red()).unwrap();
+            renderer.plain_line(out, Side::Old, &old_lines[i]);
         }
     }
     let old_remaining = old_lines.len().saturating_sub(max_lines_shown);
     if old_remaining > 0 {
-        writeln!(
-            out,
-            "{}",
-            format_args!("- ... and {old_remaining} more").dimmed()
-        )
-        .unwrap();
+        renderer.truncation(out, Side::Old, old_remaining);
     }
 
     for i in 0..new_show {
         if i < pair_count {
-            append_inline_spans(out, "+ ", &diffs[i].1, false);
+            renderer.inline_line(out, Side::New, &new_lines[i], &diffs[i].1);
         } else {
-            writeln!(out, "{}", format_args!("+ {}", new_lines[i].text).green()).unwrap();
+            renderer.plain_line(out, Side::New, &new_lines[i]);
         }
     }
     let new_remaining = new_lines.len().saturating_sub(max_lines_shown);
     if new_remaining > 0 {
-        writeln!(
-            out,
-            "{}",
-            format_args!("+ ... and {new_remaining} more").dimmed()
-        )
-        .unwrap();
+        renderer.truncation(out, Side::New, new_remaining);
     }
-}
-
-fn append_inline_spans(out: &mut String, prefix: &str, spans: &[TokenSpan], is_delete: bool) {
-    if is_delete {
-        write!(out, "{}", prefix.red()).unwrap();
-        for span in spans {
-            if span.changed {
-                write!(out, "{}", span.text.red().bold().underline()).unwrap();
-            } else {
-                write!(out, "{}", span.text.red()).unwrap();
-            }
-        }
-    } else {
-        write!(out, "{}", prefix.green()).unwrap();
-        for span in spans {
-            if span.changed {
-                write!(out, "{}", span.text.green().bold().underline()).unwrap();
-            } else {
-                write!(out, "{}", span.text.green()).unwrap();
-            }
-        }
-    }
-    writeln!(out).unwrap();
 }
 
 fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
@@ -280,7 +372,13 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 crate::util::key_label(*at_key),
             )
             .unwrap();
-            append_diff_lines(&mut out, "+", lines, max_lines_shown);
+            walk_single(
+                &mut out,
+                &MarkdownRenderer,
+                Side::New,
+                lines,
+                max_lines_shown,
+            );
         }
         Edit::Delete { at_key, lines, .. } => {
             write!(
@@ -290,7 +388,13 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 crate::util::key_label(*at_key),
             )
             .unwrap();
-            append_diff_lines(&mut out, "-", lines, max_lines_shown);
+            walk_single(
+                &mut out,
+                &MarkdownRenderer,
+                Side::Old,
+                lines,
+                max_lines_shown,
+            );
         }
         Edit::Replace {
             old_at_key,
@@ -308,83 +412,16 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 crate::util::key_label(*new_at_key),
             )
             .unwrap();
-            append_replace_diff_lines(&mut out, old_lines, new_lines, max_lines_shown);
+            walk_replace(
+                &mut out,
+                &MarkdownRenderer,
+                old_lines,
+                new_lines,
+                max_lines_shown,
+            );
         }
     }
     out
-}
-
-fn append_replace_diff_lines(
-    out: &mut String,
-    old_lines: &[DiffLine],
-    new_lines: &[DiffLine],
-    max_lines_shown: usize,
-) {
-    let pair_count = old_lines.len().min(new_lines.len());
-    let old_show = old_lines.len().min(max_lines_shown);
-    let new_show = new_lines.len().min(max_lines_shown);
-
-    let diff_count = pair_count.min(old_show.max(new_show));
-    let diffs: Vec<_> = (0..diff_count)
-        .map(|i| crate::inline::inline_diff(&old_lines[i].text, &new_lines[i].text))
-        .collect();
-
-    for i in 0..old_show {
-        if i < pair_count {
-            write!(out, "\n   - L{}: ", old_lines[i].span.line).unwrap();
-            append_markdown_spans(out, &diffs[i].0);
-        } else {
-            write!(
-                out,
-                "\n   - L{}: {}",
-                old_lines[i].span.line, old_lines[i].text
-            )
-            .unwrap();
-        }
-    }
-    let old_remaining = old_lines.len().saturating_sub(max_lines_shown);
-    if old_remaining > 0 {
-        write!(out, "\n   - ... and {old_remaining} more").unwrap();
-    }
-
-    for i in 0..new_show {
-        if i < pair_count {
-            write!(out, "\n   + L{}: ", new_lines[i].span.line).unwrap();
-            append_markdown_spans(out, &diffs[i].1);
-        } else {
-            write!(
-                out,
-                "\n   + L{}: {}",
-                new_lines[i].span.line, new_lines[i].text
-            )
-            .unwrap();
-        }
-    }
-    let new_remaining = new_lines.len().saturating_sub(max_lines_shown);
-    if new_remaining > 0 {
-        write!(out, "\n   + ... and {new_remaining} more").unwrap();
-    }
-}
-
-fn append_markdown_spans(out: &mut String, spans: &[TokenSpan]) {
-    for span in spans {
-        if span.changed {
-            write!(out, "**{}**", span.text).unwrap();
-        } else {
-            write!(out, "{}", span.text).unwrap();
-        }
-    }
-}
-
-fn append_diff_lines(out: &mut String, prefix: &str, lines: &[DiffLine], max_lines_shown: usize) {
-    let show = lines.len().min(max_lines_shown);
-    for line in &lines[..show] {
-        write!(out, "\n   {prefix} L{}: {}", line.span.line, line.text).unwrap();
-    }
-    let remaining = lines.len().saturating_sub(max_lines_shown);
-    if remaining > 0 {
-        write!(out, "\n   {prefix} ... and {remaining} more").unwrap();
-    }
 }
 
 #[cfg(test)]
@@ -769,6 +806,51 @@ mod tests {
         // max_lines_shown == lines.len() - 1: should truncate with "and 1 more"
         let result = format_unified_diff(&diff, "a", "b", 2);
         assert!(result.contains("... and 1 more"));
+    }
+
+    #[test]
+    fn unified_delete_truncation() {
+        owo_colors::set_override(false);
+        let lines: Vec<&str> = (0..5).map(|_| "gone").collect();
+        let diff = Diff {
+            edits: vec![delete_edit(&lines)],
+            ..Default::default()
+        };
+        let result = strip_ansi(&format_unified_diff(&diff, "a", "b", 2));
+        assert!(result.contains("- gone"));
+        assert!(result.contains("- ... and 3 more"));
+    }
+
+    #[test]
+    fn unified_replace_old_longer_shows_unpaired_and_truncates() {
+        owo_colors::set_override(false);
+        // paired line shares the "set mtu" prefix (unchanged inline spans); the
+        // surplus old lines render as plain lines, then the old side truncates.
+        let old = ["set mtu 1500", "extra one", "extra two", "extra three"];
+        let new = ["set mtu 9000"];
+        let diff = Diff {
+            edits: vec![replace_edit(&old, &new)],
+            ..Default::default()
+        };
+        let result = strip_ansi(&format_unified_diff(&diff, "a", "b", 2));
+        assert!(result.contains("- set mtu 1500"));
+        assert!(result.contains("+ set mtu 9000"));
+        assert!(result.contains("- extra one"));
+        assert!(result.contains("- ... and 2 more"));
+    }
+
+    #[test]
+    fn unified_replace_new_longer_shows_unpaired_additions() {
+        owo_colors::set_override(false);
+        let old = ["base"];
+        let new = ["base", "added one", "added two"];
+        let diff = Diff {
+            edits: vec![replace_edit(&old, &new)],
+            ..Default::default()
+        };
+        let result = strip_ansi(&format_unified_diff(&diff, "a", "b", 10));
+        assert!(result.contains("+ added one"));
+        assert!(result.contains("+ added two"));
     }
 
     #[test]
