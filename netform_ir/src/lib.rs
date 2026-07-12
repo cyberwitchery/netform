@@ -235,24 +235,35 @@ pub trait Dialect {
 
 /// parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
 ///
-/// all IOS-like dialects share the same trivia classification, tokenization,
-/// and key-hint derivation — the only thing that varies is the hint name stored
-/// in [`DocumentMetadata`].  Construct with [`IosLikeDialect::new`]:
+/// all IOS-like dialects share the same trivia classification and line
+/// tokenization; they differ only in the hint name stored in
+/// [`DocumentMetadata`] and the key-hint derivation function.  Construct with
+/// [`IosLikeDialect::new`], passing the dialect name and its key-hint function:
 ///
 /// ```rust
-/// use netform_ir::{IosLikeDialect, parse_with_dialect};
+/// use netform_ir::{IosLikeDialect, common_key_hint, parse_with_dialect};
 ///
-/// let doc = parse_with_dialect("hostname edge-1\n", &IosLikeDialect::new("iosxe"));
+/// let dialect = IosLikeDialect::new("iosxe", common_key_hint);
+/// let doc = parse_with_dialect("hostname edge-1\n", &dialect);
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct IosLikeDialect {
     name: &'static str,
+    key_hint: fn(Option<&ParsedLineParts>) -> Option<String>,
 }
 
 impl IosLikeDialect {
-    /// create a dialect instance tagged with the given hint name.
-    pub const fn new(name: &'static str) -> Self {
-        Self { name }
+    /// create a dialect instance tagged with the given hint name and key-hint
+    /// derivation function.
+    ///
+    /// `key_hint` maps a parsed content line to its stable identity hint (or
+    /// `None`); each IOS-family dialect crate passes its own so interface-type
+    /// normalization and dialect-specific constructs stay local to that crate.
+    pub const fn new(
+        name: &'static str,
+        key_hint: fn(Option<&ParsedLineParts>) -> Option<String>,
+    ) -> Self {
+        Self { name, key_hint }
     }
 }
 
@@ -278,7 +289,7 @@ impl Dialect for IosLikeDialect {
         if trivia != TriviaKind::Content {
             return None;
         }
-        ios_like_key_hint(parsed)
+        (self.key_hint)(parsed)
     }
 }
 
@@ -761,42 +772,6 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     }
 }
 
-/// derive a stable identity key for IOS-like configuration lines.
-///
-/// used by [`IosLikeDialect`] (and thus IOS XE).  Handles constructs
-/// specific to the generic IOS-like grammar (`interface`, `vrf`, `router`,
-/// `ip`) and delegates shared constructs to [`common_key_hint`].
-pub fn ios_like_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
-    let parsed_ref = parsed?;
-    let head = parsed_ref.head.as_str();
-    let args = parsed_ref.args.as_slice();
-
-    match head {
-        "interface" => args.first().map(|name| format!("interface:{name}")),
-        "vrf" => args.first().map(|name| format!("vrf:{name}")),
-        "router" => match args {
-            [proto, asn, ..] if proto == "bgp" => Some(format!("router:bgp:{asn}")),
-            [proto, ..] => Some(format!("router:{proto}")),
-            _ => None,
-        },
-        "ip" => match args {
-            [next, kind, name, ..] if next == "access-list" => {
-                Some(format!("ip-access-list:{kind}:{name}"))
-            }
-            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
-            [next, kind, name, ..] if next == "community-list" => {
-                Some(format!("ip-community-list:{kind}:{name}"))
-            }
-            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
-                Some(format!("ip-route:{vrf_name}:{prefix}"))
-            }
-            [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
-            _ => None,
-        },
-        _ => common_key_hint(parsed),
-    }
-}
-
 /// parse an interface name into `(canonical_type, id)` using the given type
 /// prefix table.
 ///
@@ -889,343 +864,6 @@ impl fmt::Display for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// helper: parse an IOS-like line and return the key hint.
-    fn hint(line: &str) -> Option<String> {
-        let parsed = parse_ios_like_parts(line);
-        ios_like_key_hint(parsed.as_ref())
-    }
-
-    #[test]
-    fn key_hint_interface() {
-        assert_eq!(
-            hint("interface Ethernet1"),
-            Some("interface:Ethernet1".into())
-        );
-    }
-
-    #[test]
-    fn key_hint_vlan() {
-        assert_eq!(hint("vlan 100"), Some("vlan:100".into()));
-    }
-
-    #[test]
-    fn key_hint_vlan_configuration() {
-        // NX-OS `vlan configuration <id>` keys on the id, not the literal
-        // "configuration" (which would collide across all such blocks).
-        assert_eq!(
-            hint("vlan configuration 10"),
-            Some("vlan-configuration:10".into()),
-        );
-        assert_eq!(
-            hint("vlan configuration 200 300"),
-            Some("vlan-configuration:200".into()),
-        );
-        // plain `vlan <id>` is unchanged.
-        assert_eq!(hint("vlan 100"), Some("vlan:100".into()));
-    }
-
-    #[test]
-    fn key_hint_vrf() {
-        assert_eq!(hint("vrf MGMT"), Some("vrf:MGMT".into()));
-    }
-
-    #[test]
-    fn key_hint_router_bgp() {
-        assert_eq!(hint("router bgp 65001"), Some("router:bgp:65001".into()));
-    }
-
-    #[test]
-    fn key_hint_router_ospf() {
-        assert_eq!(hint("router ospf"), Some("router:ospf".into()));
-    }
-
-    #[test]
-    fn key_hint_route_map() {
-        assert_eq!(
-            hint("route-map REDISTRIBUTE permit 10"),
-            Some("route-map:REDISTRIBUTE:permit:10".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_access_list() {
-        assert_eq!(
-            hint("ip access-list extended BLOCK-RFC1918"),
-            Some("ip-access-list:extended:BLOCK-RFC1918".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_prefix_list() {
-        assert_eq!(
-            hint("ip prefix-list DEFAULT-ONLY"),
-            Some("prefix-list:DEFAULT-ONLY".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_route() {
-        assert_eq!(
-            hint("ip route 10.0.0.0 255.255.255.0 192.168.1.1"),
-            Some("ip-route:10.0.0.0".into()),
-        );
-        assert_eq!(
-            hint("ip route 0.0.0.0 0.0.0.0 10.0.0.1"),
-            Some("ip-route:0.0.0.0".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_route_vrf() {
-        assert_eq!(
-            hint("ip route vrf MGMT 0.0.0.0 0.0.0.0 10.0.0.1"),
-            Some("ip-route:MGMT:0.0.0.0".into()),
-        );
-        assert_eq!(
-            hint("ip route vrf PROD 10.1.0.0 255.255.0.0 192.168.1.1"),
-            Some("ip-route:PROD:10.1.0.0".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_route_minimal() {
-        // ip route with just prefix and mask (no next-hop)
-        assert_eq!(
-            hint("ip route 172.16.0.0 255.240.0.0"),
-            Some("ip-route:172.16.0.0".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ipv6_access_list() {
-        assert_eq!(
-            hint("ipv6 access-list BLOCK-BOGONS"),
-            Some("ipv6-access-list:BLOCK-BOGONS".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ipv6_prefix_list() {
-        assert_eq!(
-            hint("ipv6 prefix-list DEFAULT-V6-ONLY"),
-            Some("ipv6-prefix-list:DEFAULT-V6-ONLY".into()),
-        );
-        assert_eq!(
-            hint("ipv6 prefix-list CONNECTED-V6 seq 10 permit 2001:db8::/32 le 48"),
-            Some("ipv6-prefix-list:CONNECTED-V6".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ipv6_route() {
-        assert_eq!(
-            hint("ipv6 route 2001:db8::/32 Null0"),
-            Some("ipv6-route:2001:db8::/32".into()),
-        );
-        assert_eq!(
-            hint("ipv6 route ::/0 GigabitEthernet0/0 fe80::1"),
-            Some("ipv6-route:::/0".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ipv6_route_vrf() {
-        assert_eq!(
-            hint("ipv6 route vrf MGMT ::/0 GigabitEthernet0/0 fe80::1"),
-            Some("ipv6-route:MGMT:::/0".into()),
-        );
-        assert_eq!(
-            hint("ipv6 route vrf PROD 2001:db8:1::/48 2001:db8::1"),
-            Some("ipv6-route:PROD:2001:db8:1::/48".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ipv6_no_match() {
-        // other ipv6 subcommands should not produce a hint.
-        assert_eq!(hint("ipv6 unicast-routing"), None);
-        assert_eq!(hint("ipv6 nd ra suppress all"), None);
-    }
-
-    #[test]
-    fn key_hint_line() {
-        assert_eq!(hint("line vty 0 4"), Some("line:vty:0:4".into()));
-        assert_eq!(hint("line con 0"), Some("line:con:0".into()));
-    }
-
-    #[test]
-    fn key_hint_class_map_match_all() {
-        assert_eq!(
-            hint("class-map match-all VOICE"),
-            Some("class-map:VOICE".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_class_map_match_any() {
-        assert_eq!(
-            hint("class-map match-any WEB-TRAFFIC"),
-            Some("class-map:WEB-TRAFFIC".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_class_map_bare() {
-        assert_eq!(hint("class-map SIMPLE"), Some("class-map:SIMPLE".into()));
-    }
-
-    #[test]
-    fn key_hint_policy_map() {
-        assert_eq!(
-            hint("policy-map QOS-POLICY"),
-            Some("policy-map:QOS-POLICY".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_community_list() {
-        assert_eq!(
-            hint("ip community-list standard COMM-LOCAL"),
-            Some("ip-community-list:standard:COMM-LOCAL".into()),
-        );
-        assert_eq!(
-            hint("ip community-list expanded COMM-TRANSIT"),
-            Some("ip-community-list:expanded:COMM-TRANSIT".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_numbered_access_list_has_no_hint() {
-        // numbered ACL rules are ordered sequence entries; they must NOT be
-        // keyed by the shared ACL number (that made rule-body changes invisible
-        // to the diff).  No hint means they key on their full normalized text.
-        assert_eq!(hint("access-list 100 permit ip any any"), None);
-        assert_eq!(hint("access-list 10 deny 10.0.0.0 0.255.255.255"), None);
-    }
-
-    #[test]
-    fn key_hint_crypto_map() {
-        assert_eq!(
-            hint("crypto map VPN-MAP 10 ipsec-isakmp"),
-            Some("crypto:map:VPN-MAP".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_crypto_isakmp() {
-        assert_eq!(
-            hint("crypto isakmp policy 10"),
-            Some("crypto:isakmp:policy".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_crypto_ikev2_proposal() {
-        assert_eq!(
-            hint("crypto ikev2 proposal PROP-1"),
-            Some("crypto:ikev2:proposal:PROP-1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_crypto_ikev2_policy() {
-        assert_eq!(
-            hint("crypto ikev2 policy POL-1"),
-            Some("crypto:ikev2:policy:POL-1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_crypto_ikev2_profile() {
-        assert_eq!(
-            hint("crypto ikev2 profile REMOTE-SITE"),
-            Some("crypto:ikev2:profile:REMOTE-SITE".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_crypto_ipsec_transform_set() {
-        assert_eq!(
-            hint("crypto ipsec transform-set AES-SHA esp-aes esp-sha-hmac"),
-            Some("crypto:ipsec:transform-set:AES-SHA".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_spanning_tree_vlan() {
-        assert_eq!(
-            hint("spanning-tree vlan 1-100 priority 4096"),
-            Some("spanning-tree:vlan:1-100".into()),
-        );
-        assert_eq!(
-            hint("spanning-tree vlan 200"),
-            Some("spanning-tree:vlan:200".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_spanning_tree_no_match() {
-        // non-vlan spanning-tree commands should not produce a hint.
-        assert_eq!(hint("spanning-tree mode rapid-pvst"), None);
-    }
-
-    #[test]
-    fn key_hint_monitor_session() {
-        assert_eq!(hint("monitor session 1"), Some("monitor-session:1".into()),);
-        assert_eq!(
-            hint("monitor session 5 type erspan-source"),
-            Some("monitor-session:5".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_monitor_no_session() {
-        assert_eq!(hint("monitor copp-system-p-policy"), None);
-    }
-
-    #[test]
-    fn key_hint_ntp_server() {
-        assert_eq!(
-            hint("ntp server 10.0.0.1"),
-            Some("ntp:server:10.0.0.1".into()),
-        );
-        assert_eq!(
-            hint("ntp server 2001:db8::1 prefer"),
-            Some("ntp:server:2001:db8::1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ntp_peer() {
-        assert_eq!(hint("ntp peer 10.0.0.2"), Some("ntp:peer:10.0.0.2".into()),);
-    }
-
-    #[test]
-    fn key_hint_ntp_no_match() {
-        assert_eq!(hint("ntp source-interface mgmt0"), None);
-    }
-
-    // NX-OS-specific constructs (feature, vpc, role, system) are not handled by
-    // ios_like_key_hint — they live only in nxos_key_hint.
-
-    #[test]
-    fn key_hint_nxos_constructs_not_in_ios_like() {
-        assert_eq!(hint("feature ospf"), None);
-        assert_eq!(hint("vpc domain 10"), None);
-        assert_eq!(hint("role name custom-admin"), None);
-        assert_eq!(hint("system jumbomtu 9216"), None);
-    }
-
-    #[test]
-    fn key_hint_none_for_unknown() {
-        assert_eq!(hint("hostname ROUTER-1"), None);
-    }
-
-    #[test]
-    fn key_hint_none_on_empty() {
-        assert_eq!(ios_like_key_hint(None), None);
-    }
 
     fn common_hint(line: &str) -> Option<String> {
         let parsed = parse_ios_like_parts(line);
@@ -1334,5 +972,97 @@ mod tests {
     #[test]
     fn common_key_hint_none_on_empty() {
         assert_eq!(common_key_hint(None), None);
+    }
+
+    #[test]
+    fn common_key_hint_class_map_match_any() {
+        assert_eq!(
+            common_hint("class-map match-any WEB-TRAFFIC"),
+            Some("class-map:WEB-TRAFFIC".into()),
+        );
+    }
+
+    #[test]
+    fn common_key_hint_class_map_bare() {
+        assert_eq!(
+            common_hint("class-map SIMPLE"),
+            Some("class-map:SIMPLE".into())
+        );
+    }
+
+    #[test]
+    fn common_key_hint_crypto_map() {
+        assert_eq!(
+            common_hint("crypto map VPN-MAP 10 ipsec-isakmp"),
+            Some("crypto:map:VPN-MAP".into()),
+        );
+    }
+
+    #[test]
+    fn common_key_hint_crypto_isakmp() {
+        assert_eq!(
+            common_hint("crypto isakmp policy 10"),
+            Some("crypto:isakmp:policy".into()),
+        );
+    }
+
+    #[test]
+    fn common_key_hint_crypto_ipsec() {
+        assert_eq!(
+            common_hint("crypto ipsec transform-set AES-SHA esp-aes esp-sha-hmac"),
+            Some("crypto:ipsec:transform-set:AES-SHA".into()),
+        );
+    }
+
+    #[test]
+    fn common_key_hint_ipv6_prefix_list() {
+        assert_eq!(
+            common_hint("ipv6 prefix-list DEFAULT-V6-ONLY"),
+            Some("ipv6-prefix-list:DEFAULT-V6-ONLY".into()),
+        );
+    }
+
+    #[test]
+    fn common_key_hint_ipv6_route() {
+        assert_eq!(
+            common_hint("ipv6 route 2001:db8::/32 Null0"),
+            Some("ipv6-route:2001:db8::/32".into()),
+        );
+    }
+
+    #[test]
+    fn common_key_hint_ipv6_route_vrf() {
+        assert_eq!(
+            common_hint("ipv6 route vrf MGMT ::/0 GigabitEthernet0/0 fe80::1"),
+            Some("ipv6-route:MGMT:::/0".into()),
+        );
+    }
+
+    #[test]
+    fn common_key_hint_ipv6_no_match() {
+        assert_eq!(common_hint("ipv6 unicast-routing"), None);
+    }
+
+    #[test]
+    fn common_key_hint_spanning_tree_no_match() {
+        assert_eq!(common_hint("spanning-tree mode rapid-pvst"), None);
+    }
+
+    #[test]
+    fn common_key_hint_monitor_no_session() {
+        assert_eq!(common_hint("monitor copp-system-p-policy"), None);
+    }
+
+    #[test]
+    fn common_key_hint_ntp_peer() {
+        assert_eq!(
+            common_hint("ntp peer 10.0.0.2"),
+            Some("ntp:peer:10.0.0.2".into())
+        );
+    }
+
+    #[test]
+    fn common_key_hint_ntp_no_match() {
+        assert_eq!(common_hint("ntp source-interface mgmt0"), None);
     }
 }
