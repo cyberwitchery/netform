@@ -150,11 +150,14 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         if line.starts_with("ip access-list extended ") {
             iosxe += STRONG_SIGNAL;
         }
-        // dotted subnet masks with `ip address` (IOS XE uses masks, not CIDR).
+        // `ip address` masks: dotted → IOS XE, CIDR → EOS. tokenize once, test both.
         if line.starts_with("ip address ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 4 && looks_like_dotted_mask(parts[3]) {
                 iosxe += MODERATE_SIGNAL;
+            }
+            if parts.len() >= 3 && parts[2].contains('/') {
+                eos += MODERATE_SIGNAL;
             }
         }
         // `network ... mask ...` in BGP address-family.
@@ -177,13 +180,6 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             && (line.contains(" permit ") || line.contains(" deny "))
         {
             eos += WEAK_SIGNAL;
-        }
-        // EOS uses CIDR notation for ip addresses (no dotted mask).
-        if line.starts_with("ip address ") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 && parts[2].contains('/') {
-                eos += MODERATE_SIGNAL;
-            }
         }
     }
 
