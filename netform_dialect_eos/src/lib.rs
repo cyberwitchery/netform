@@ -1,8 +1,8 @@
 //! Arista EOS-oriented dialect profile for `netform_ir`.
 //!
-//! this crate provides a dedicated [`EosDialect`] that customizes key-hint
-//! derivation for EOS-specific constructs while reusing the shared IOS-like
-//! trivia classification and line tokenization.
+//! this crate provides [`parse_eos`] and the reusable [`EOS_DIALECT`] profile,
+//! which customize key-hint derivation for EOS-specific constructs while reusing
+//! the shared IOS-like trivia classification and line tokenization.
 //!
 //! # Example
 //!
@@ -15,47 +15,16 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, IosKeyHintConfig, ParsedLineParts, TriviaKind,
-    classify_ios_like_trivia, common_key_hint, ios_family_key_hint, parse_ios_like_parts,
-    parse_with_dialect,
+    Document, IosKeyHintConfig, IosLikeDialect, ParsedLineParts, common_key_hint,
+    ios_family_key_hint, parse_with_dialect,
 };
 
-/// dialect implementation for Arista EOS configuration text.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct EosDialect;
+/// pre-built EOS dialect profile: IOS-like parsing with EOS-specific key hints.
+pub const EOS_DIALECT: IosLikeDialect = IosLikeDialect::new("eos", eos_key_hint);
 
-/// pre-built EOS dialect instance.
-pub const EOS_DIALECT: EosDialect = EosDialect;
-
-/// parse text using [`EosDialect`].
+/// parse text using the EOS dialect ([`EOS_DIALECT`]).
 pub fn parse_eos(input: &str) -> Document {
-    parse_with_dialect(input, &EosDialect)
-}
-
-impl Dialect for EosDialect {
-    fn dialect_hint(&self) -> DialectHint {
-        DialectHint::Named("eos".to_string())
-    }
-
-    fn classify_trivia(&self, raw: &str) -> TriviaKind {
-        classify_ios_like_trivia(raw)
-    }
-
-    fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_ios_like_parts(raw)
-    }
-
-    fn key_hint(
-        &self,
-        _raw: &str,
-        parsed: Option<&ParsedLineParts>,
-        trivia: TriviaKind,
-    ) -> Option<String> {
-        if trivia != TriviaKind::Content {
-            return None;
-        }
-        eos_key_hint(parsed)
-    }
+    parse_with_dialect(input, &EOS_DIALECT)
 }
 
 /// EOS interface type prefixes in canonical lowercase form.

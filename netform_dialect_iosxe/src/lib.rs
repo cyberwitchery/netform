@@ -1,8 +1,8 @@
 //! Cisco IOS XE-oriented dialect profile for `netform_ir`.
 //!
-//! this crate provides a dedicated [`IosxeDialect`] that customizes key-hint
-//! derivation for IOS XE-specific constructs while reusing the shared IOS-like
-//! trivia classification and line tokenization.
+//! this crate provides [`parse_iosxe`] and the reusable [`IOSXE_DIALECT`]
+//! profile, which customize key-hint derivation for IOS XE-specific constructs
+//! while reusing the shared IOS-like trivia classification and line tokenization.
 //!
 //! # Example
 //!
@@ -15,47 +15,16 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, IosKeyHintConfig, ParsedLineParts, TriviaKind,
-    classify_ios_like_trivia, common_key_hint, ios_family_key_hint, parse_ios_like_parts,
-    parse_with_dialect,
+    Document, IosKeyHintConfig, IosLikeDialect, ParsedLineParts, common_key_hint,
+    ios_family_key_hint, parse_with_dialect,
 };
 
-/// dialect implementation for Cisco IOS XE configuration text.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct IosxeDialect;
+/// pre-built IOS XE dialect profile: IOS-like parsing with IOS XE-specific key hints.
+pub const IOSXE_DIALECT: IosLikeDialect = IosLikeDialect::new("iosxe", iosxe_key_hint);
 
-/// pre-built IOS XE dialect instance.
-pub const IOSXE_DIALECT: IosxeDialect = IosxeDialect;
-
-/// parse text using [`IosxeDialect`].
+/// parse text using the IOS XE dialect ([`IOSXE_DIALECT`]).
 pub fn parse_iosxe(input: &str) -> Document {
-    parse_with_dialect(input, &IosxeDialect)
-}
-
-impl Dialect for IosxeDialect {
-    fn dialect_hint(&self) -> DialectHint {
-        DialectHint::Named("iosxe".to_string())
-    }
-
-    fn classify_trivia(&self, raw: &str) -> TriviaKind {
-        classify_ios_like_trivia(raw)
-    }
-
-    fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_ios_like_parts(raw)
-    }
-
-    fn key_hint(
-        &self,
-        _raw: &str,
-        parsed: Option<&ParsedLineParts>,
-        trivia: TriviaKind,
-    ) -> Option<String> {
-        if trivia != TriviaKind::Content {
-            return None;
-        }
-        iosxe_key_hint(parsed)
-    }
+    parse_with_dialect(input, &IOSXE_DIALECT)
 }
 
 /// IOS XE interface type prefixes in canonical lowercase form.

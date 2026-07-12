@@ -1,8 +1,8 @@
 //! Cisco NX-OS-oriented dialect profile for `netform_ir`.
 //!
-//! this crate provides a dedicated [`NxosDialect`] that customizes key-hint
-//! derivation for NX-OS-specific constructs while reusing the shared IOS-like
-//! trivia classification and line tokenization.
+//! this crate provides [`parse_nxos`] and the reusable [`NXOS_DIALECT`] profile,
+//! which customize key-hint derivation for NX-OS-specific constructs while
+//! reusing the shared IOS-like trivia classification and line tokenization.
 //!
 //! # Example
 //!
@@ -15,47 +15,16 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, IosKeyHintConfig, ParsedLineParts, TriviaKind,
-    classify_ios_like_trivia, common_key_hint, ios_family_key_hint, parse_ios_like_parts,
-    parse_with_dialect,
+    Document, IosKeyHintConfig, IosLikeDialect, ParsedLineParts, common_key_hint,
+    ios_family_key_hint, parse_with_dialect,
 };
 
-/// dialect implementation for Cisco NX-OS configuration text.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NxosDialect;
+/// pre-built NX-OS dialect profile: IOS-like parsing with NX-OS-specific key hints.
+pub const NXOS_DIALECT: IosLikeDialect = IosLikeDialect::new("nxos", nxos_key_hint);
 
-/// pre-built NX-OS dialect instance.
-pub const NXOS_DIALECT: NxosDialect = NxosDialect;
-
-/// parse text using [`NxosDialect`].
+/// parse text using the NX-OS dialect ([`NXOS_DIALECT`]).
 pub fn parse_nxos(input: &str) -> Document {
-    parse_with_dialect(input, &NxosDialect)
-}
-
-impl Dialect for NxosDialect {
-    fn dialect_hint(&self) -> DialectHint {
-        DialectHint::Named("nxos".to_string())
-    }
-
-    fn classify_trivia(&self, raw: &str) -> TriviaKind {
-        classify_ios_like_trivia(raw)
-    }
-
-    fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_ios_like_parts(raw)
-    }
-
-    fn key_hint(
-        &self,
-        _raw: &str,
-        parsed: Option<&ParsedLineParts>,
-        trivia: TriviaKind,
-    ) -> Option<String> {
-        if trivia != TriviaKind::Content {
-            return None;
-        }
-        nxos_key_hint(parsed)
-    }
+    parse_with_dialect(input, &NXOS_DIALECT)
 }
 
 /// NX-OS interface type prefixes in canonical lowercase form.

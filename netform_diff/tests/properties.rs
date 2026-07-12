@@ -106,8 +106,8 @@ fn nxos_strategy() -> impl Strategy<Value = String> {
 
 /// generate EOS config snippets that exercise dialect-specific key hints.
 ///
-/// EOS has its own dedicated `EosDialect` with EOS-specific constructs like
-/// `mlag configuration`, `management api`, `daemon`, `event-handler`,
+/// EOS has its own dedicated `EOS_DIALECT` profile with EOS-specific constructs
+/// like `mlag configuration`, `management api`, `daemon`, `event-handler`,
 /// `peer-filter`, and interface type normalization.
 ///
 /// always includes at least one block-producing construct.
