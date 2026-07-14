@@ -110,13 +110,9 @@ pub(crate) fn diff_views(
                     b_count: b_segment_count,
                 })?;
                 if left.is_block && right.is_block {
-                    // The block pair matched on a segment key derived from the
-                    // header's lossy key hint, so two headers that collapse to
-                    // the same key but differ in text (e.g. `class-map match-any
-                    // VOICE` vs `class-map match-all VOICE`) would otherwise have
-                    // their header change silently dropped.  Compare `normalized`
-                    // — consistent with line_diff_multiset — and emit a header
-                    // Replace before the child edits to preserve file order.
+                    // headers share a lossy key but may differ in text (e.g.
+                    // `class-map match-any/match-all VOICE`), so compare them and
+                    // emit a Replace before the child edits to preserve order.
                     let left_header = &left.lines[0];
                     let right_header = &right.lines[0];
                     if left_header.normalized != right_header.normalized {
@@ -980,10 +976,8 @@ mod tests {
 
     #[test]
     fn diff_views_block_header_change_emitted_when_keys_collide() {
-        // Two block headers that collide on the same content_key (as a lossy
-        // key_hint like `stanza:class-map:VOICE` produces) but differ in text.
-        // The header change must be reported as a Replace emitted *before* the
-        // child edits, not silently dropped.
+        // colliding headers (same key, different text): the change surfaces as
+        // a Replace before the child edits.
         let a = view(vec![
             cline("class-map match-any VOICE", 100, vec![0]),
             cline("  match dscp ef", 101, vec![0, 0]),
@@ -1033,9 +1027,8 @@ mod tests {
 
     #[test]
     fn diff_views_block_header_unchanged_emits_no_header_replace() {
-        // Identical headers (same key, same text) with a changed child must
-        // produce only the child edit — the header fix fires only on a text
-        // difference, so no spurious header Replace appears.
+        // identical headers with a changed child: only the child edit, no
+        // spurious header Replace.
         let a = view(vec![
             cline("class-map match-any VOICE", 100, vec![0]),
             cline("  match dscp ef", 101, vec![0, 0]),

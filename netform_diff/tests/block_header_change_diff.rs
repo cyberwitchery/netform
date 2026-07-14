@@ -1,17 +1,15 @@
 //! Integration coverage for the block-header silent-miss root-cause fix.
 //!
 //! A block header's key hint doubles as its match key, and the diff engine's
-//! `Equal` branch used to re-diff only a matched block's *children* — never the
-//! two headers themselves.  So two textually different headers that collided on
-//! the same (lossy) key hint had their header change silently dropped, yielding
-//! an empty diff for a config that genuinely changed.
+//! `Equal` branch only re-diffs a matched block's *children* — never the two
+//! headers themselves.  So two textually different headers that collided on the
+//! same key hint had their header change silently dropped, yielding an empty
+//! diff for a config that genuinely changed.
 //!
-//! These cases exercise collisions the per-construct key_hint patches (#91, #92)
-//! do not cover, proving the engine-level fix catches the whole family:
-//!   * `class-map match-any VOICE` vs `class-map match-all VOICE` collapse to
-//!     `class-map:VOICE`, discarding the OR->AND matching semantics.
-//!   * `router ospfv3 1` vs `router ospfv3 2` collapse to `router:ospfv3`,
-//!     discarding the process id (ospfv3 is not a keyed router protocol).
+//! These cases go beyond the per-construct patches (#91, #92): `class-map
+//! match-any VOICE` vs `match-all VOICE` both key to `class-map:VOICE`, and
+//! `router ospfv3 1` vs `2` both key to `router:ospfv3`.  Each fails on the
+//! pre-fix code.
 
 use netform_diff::{Diff, Edit, NormalizeOptions, diff_documents};
 
@@ -37,9 +35,6 @@ fn edit_texts(diff: &Diff) -> Vec<String> {
 
 #[test]
 fn iosxe_class_map_match_type_change_is_detected() {
-    // match-any (OR) -> match-all (AND) is a security-relevant matching change,
-    // but both headers key to `class-map:VOICE`.  The child is unchanged, so the
-    // header edit is the only signal that anything changed.
     let before = "class-map match-any VOICE\n  match dscp ef\n";
     let after = "class-map match-all VOICE\n  match dscp ef\n";
 
@@ -70,8 +65,6 @@ fn iosxe_class_map_match_type_change_is_detected() {
 
 #[test]
 fn iosxe_ospfv3_process_id_change_is_detected() {
-    // ospfv3 is not one of the keyed router protocols, so `router ospfv3 1` and
-    // `router ospfv3 2` both collapse to `router:ospfv3`, dropping the id.
     let before = "router ospfv3 1\n  router-id 10.0.0.1\n";
     let after = "router ospfv3 2\n  router-id 10.0.0.1\n";
 
