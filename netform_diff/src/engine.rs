@@ -110,6 +110,24 @@ pub(crate) fn diff_views(
                     b_count: b_segment_count,
                 })?;
                 if left.is_block && right.is_block {
+                    // headers share a lossy key but may differ in text (e.g.
+                    // `class-map match-any/match-all VOICE`), so compare them and
+                    // emit a Replace before the child edits to preserve order.
+                    let left_header = &left.lines[0];
+                    let right_header = &right.lines[0];
+                    if left_header.normalized != right_header.normalized {
+                        let old_line = to_diff_line(left_header);
+                        let new_line = to_diff_line(right_header);
+                        edits.push(Edit::Replace {
+                            old_at_key: Some(old_line.occurrence_key),
+                            new_at_key: Some(new_line.occurrence_key),
+                            left_anchor: Some(to_anchor(&old_line)),
+                            right_anchor: Some(to_anchor(&new_line)),
+                            old_lines: vec![old_line],
+                            new_lines: vec![new_line],
+                        });
+                    }
+
                     let left_children = if left.lines.len() > 1 {
                         &left.lines[1..]
                     } else {
@@ -954,6 +972,90 @@ mod tests {
             }
             _ => panic!("expected Replace"),
         }
+    }
+
+    #[test]
+    fn diff_views_block_header_change_emitted_when_keys_collide() {
+        // colliding headers (same key, different text): the change surfaces as
+        // a Replace before the child edits.
+        let a = view(vec![
+            cline("class-map match-any VOICE", 100, vec![0]),
+            cline("  match dscp ef", 101, vec![0, 0]),
+        ]);
+        let b = view(vec![
+            cline("class-map match-all VOICE", 100, vec![0]),
+            cline("  match dscp af31", 201, vec![0, 0]),
+        ]);
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        assert!(result.edits.len() >= 2, "expected header + child edits");
+
+        match &result.edits[0] {
+            Edit::Replace {
+                old_lines,
+                new_lines,
+                ..
+            } => {
+                assert_eq!(old_lines.len(), 1);
+                assert_eq!(new_lines.len(), 1);
+                assert_eq!(old_lines[0].text, "class-map match-any VOICE");
+                assert_eq!(new_lines[0].text, "class-map match-all VOICE");
+            }
+            other => panic!("expected header Replace first, got {other:?}"),
+        }
+
+        // the child change follows the header edit.
+        let child_texts: Vec<&str> = result.edits[1..]
+            .iter()
+            .flat_map(|e| match e {
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => old_lines
+                    .iter()
+                    .chain(new_lines.iter())
+                    .map(|l| l.text.as_str())
+                    .collect::<Vec<_>>(),
+                Edit::Insert { lines, .. } | Edit::Delete { lines, .. } => {
+                    lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>()
+                }
+            })
+            .collect();
+        assert!(child_texts.contains(&"  match dscp ef"));
+        assert!(child_texts.contains(&"  match dscp af31"));
+    }
+
+    #[test]
+    fn diff_views_block_header_unchanged_emits_no_header_replace() {
+        // identical headers with a changed child: only the child edit, no
+        // spurious header Replace.
+        let a = view(vec![
+            cline("class-map match-any VOICE", 100, vec![0]),
+            cline("  match dscp ef", 101, vec![0, 0]),
+        ]);
+        let b = view(vec![
+            cline("class-map match-any VOICE", 100, vec![0]),
+            cline("  match dscp af31", 201, vec![0, 0]),
+        ]);
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        let header_edits = result
+            .edits
+            .iter()
+            .filter(|e| match e {
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => old_lines
+                    .iter()
+                    .chain(new_lines.iter())
+                    .any(|l| l.text == "class-map match-any VOICE"),
+                Edit::Insert { lines, .. } | Edit::Delete { lines, .. } => {
+                    lines.iter().any(|l| l.text == "class-map match-any VOICE")
+                }
+            })
+            .count();
+        assert_eq!(header_edits, 0, "unchanged header must not be reported");
     }
 
     #[test]
