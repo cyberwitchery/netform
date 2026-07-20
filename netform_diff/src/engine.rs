@@ -267,40 +267,13 @@ fn line_diff_ordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Result<Vec<E
     let mut pending_deletes: Vec<DiffLine> = Vec::new();
     let mut pending_inserts: Vec<DiffLine> = Vec::new();
 
+    // pending lines arrive in diff order and must stay that way, so this path
+    // hands them to finalize_edit unsorted.
     let flush =
         |edits: &mut Vec<Edit>, deletes: &mut Vec<DiffLine>, inserts: &mut Vec<DiffLine>| {
-            if deletes.is_empty() && inserts.is_empty() {
-                return;
+            if let Some(edit) = finalize_edit(std::mem::take(deletes), std::mem::take(inserts)) {
+                edits.push(edit);
             }
-
-            if !deletes.is_empty() && !inserts.is_empty() {
-                edits.push(Edit::Replace {
-                    old_at_key: deletes.first().map(|line| line.occurrence_key),
-                    new_at_key: inserts.first().map(|line| line.occurrence_key),
-                    left_anchor: deletes.first().map(to_anchor),
-                    right_anchor: inserts.first().map(to_anchor),
-                    old_lines: std::mem::take(deletes),
-                    new_lines: std::mem::take(inserts),
-                });
-                return;
-            }
-
-            if !deletes.is_empty() {
-                edits.push(Edit::Delete {
-                    at_key: deletes.first().map(|line| line.occurrence_key),
-                    left_anchor: deletes.first().map(to_anchor),
-                    right_anchor: None,
-                    lines: std::mem::take(deletes),
-                });
-                return;
-            }
-
-            edits.push(Edit::Insert {
-                at_key: inserts.first().map(|line| line.occurrence_key),
-                left_anchor: None,
-                right_anchor: inserts.first().map(to_anchor),
-                lines: std::mem::take(inserts),
-            });
         };
 
     for op in ops {
@@ -400,11 +373,11 @@ where
     edits
 }
 
+/// Turns a chunk collected by the multiset paths into a single edit.
+///
+/// The multiset paths gather lines bucket by bucket, so the chunk has no
+/// meaningful order until it is sorted here.
 fn finalize_chunked_edits(mut deletes: Vec<DiffLine>, mut inserts: Vec<DiffLine>) -> Vec<Edit> {
-    if deletes.is_empty() && inserts.is_empty() {
-        return Vec::new();
-    }
-
     deletes.sort_by(|a, b| {
         a.content_key
             .cmp(&b.content_key)
@@ -418,32 +391,45 @@ fn finalize_chunked_edits(mut deletes: Vec<DiffLine>, mut inserts: Vec<DiffLine>
             .then_with(|| a.path.0.cmp(&b.path.0))
     });
 
+    finalize_edit(deletes, inserts).into_iter().collect()
+}
+
+/// Builds the edit describing a chunk of deleted and inserted lines, or `None`
+/// when both sides are empty.
+///
+/// Anchors and keys are taken from the first line of each side, so callers must
+/// pass the lines in the order the edit should report them.
+fn finalize_edit(deletes: Vec<DiffLine>, inserts: Vec<DiffLine>) -> Option<Edit> {
     if !deletes.is_empty() && !inserts.is_empty() {
-        return vec![Edit::Replace {
+        return Some(Edit::Replace {
             old_at_key: deletes.first().map(|line| line.occurrence_key),
             new_at_key: inserts.first().map(|line| line.occurrence_key),
             left_anchor: deletes.first().map(to_anchor),
             right_anchor: inserts.first().map(to_anchor),
             old_lines: deletes,
             new_lines: inserts,
-        }];
+        });
     }
 
     if !deletes.is_empty() {
-        return vec![Edit::Delete {
+        return Some(Edit::Delete {
             at_key: deletes.first().map(|line| line.occurrence_key),
             left_anchor: deletes.first().map(to_anchor),
             right_anchor: None,
             lines: deletes,
-        }];
+        });
     }
 
-    vec![Edit::Insert {
-        at_key: inserts.first().map(|line| line.occurrence_key),
-        left_anchor: None,
-        right_anchor: inserts.first().map(to_anchor),
-        lines: inserts,
-    }]
+    if !inserts.is_empty() {
+        return Some(Edit::Insert {
+            at_key: inserts.first().map(|line| line.occurrence_key),
+            left_anchor: None,
+            right_anchor: inserts.first().map(to_anchor),
+            lines: inserts,
+        });
+    }
+
+    None
 }
 
 fn to_diff_line(line: &ComparisonLine) -> DiffLine {
@@ -618,6 +604,16 @@ mod tests {
             path: Path(path.clone()),
             span: span(path.last().copied().unwrap_or(0)),
             trivia: TriviaKind::Content,
+        }
+    }
+
+    fn dline(text: &str, content_key: u64, line: usize) -> DiffLine {
+        DiffLine {
+            content_key,
+            occurrence_key: crate::model::derive_occurrence_key(content_key, 1),
+            text: text.to_string(),
+            path: Path(vec![line]),
+            span: span(line),
         }
     }
 
@@ -1553,6 +1549,53 @@ mod tests {
         let result = finalize_chunked_edits(deletes, inserts);
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0], Edit::Replace { .. }));
+    }
+
+    #[test]
+    fn finalize_edit_both_empty_is_none() {
+        assert!(finalize_edit(vec![], vec![]).is_none());
+    }
+
+    #[test]
+    fn finalize_edit_preserves_input_order() {
+        // the ordered path passes lines already in diff order, so the shared
+        // helper must report them as given rather than sorting.
+        let deletes = vec![dline("second", 20, 1), dline("first", 10, 0)];
+        let inserts = vec![dline("fourth", 40, 3), dline("third", 30, 2)];
+
+        let Some(Edit::Replace {
+            old_lines,
+            new_lines,
+            left_anchor,
+            right_anchor,
+            ..
+        }) = finalize_edit(deletes, inserts)
+        else {
+            panic!("both sides non-empty yields Replace");
+        };
+
+        assert_eq!(old_lines[0].text, "second");
+        assert_eq!(new_lines[0].text, "fourth");
+        assert_eq!(left_anchor.unwrap().span, span(1));
+        assert_eq!(right_anchor.unwrap().span, span(3));
+    }
+
+    #[test]
+    fn finalize_chunked_edits_sorts_its_own_input() {
+        let deletes = vec![dline("second", 20, 1), dline("first", 10, 0)];
+        let result = finalize_chunked_edits(deletes, vec![]);
+
+        let [
+            Edit::Delete {
+                lines, left_anchor, ..
+            },
+        ] = &result[..]
+        else {
+            panic!("deletes only yields Delete");
+        };
+
+        assert_eq!(lines[0].text, "first");
+        assert_eq!(left_anchor.clone().unwrap().span, span(0));
     }
 
     #[test]
