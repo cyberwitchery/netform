@@ -9,6 +9,10 @@ use crate::model::{ComparisonView, Finding, FindingLevel, finding_code};
 pub(crate) struct DiffContext {
     ambiguous_content_keys: HashMap<u64, (usize, usize)>,
     ambiguous_extracted_keys: HashMap<String, (usize, usize)>,
+    content_key_first_index: HashMap<u64, usize>,
+    extracted_key_first_index: HashMap<String, usize>,
+    a_span_line_first_index: HashMap<usize, usize>,
+    b_span_line_first_index: HashMap<usize, usize>,
 }
 
 impl DiffContext {
@@ -38,9 +42,31 @@ impl DiffContext {
             }
         }
 
+        let mut content_key_first_index: HashMap<u64, usize> = HashMap::new();
+        let mut extracted_key_first_index: HashMap<String, usize> = HashMap::new();
+        let mut a_span_line_first_index: HashMap<usize, usize> = HashMap::new();
+        for (idx, line) in a.lines.iter().enumerate() {
+            content_key_first_index
+                .entry(line.content_key)
+                .or_insert(idx);
+            if let Some(hint) = &line.key_hint {
+                extracted_key_first_index.entry(hint.clone()).or_insert(idx);
+            }
+            a_span_line_first_index.entry(line.span.line).or_insert(idx);
+        }
+
+        let mut b_span_line_first_index: HashMap<usize, usize> = HashMap::new();
+        for (idx, line) in b.lines.iter().enumerate() {
+            b_span_line_first_index.entry(line.span.line).or_insert(idx);
+        }
+
         Self {
             ambiguous_content_keys,
             ambiguous_extracted_keys,
+            content_key_first_index,
+            extracted_key_first_index,
+            a_span_line_first_index,
+            b_span_line_first_index,
         }
     }
 }
@@ -54,12 +80,24 @@ pub(crate) fn collect_findings(
     fallback_contexts: &[Path],
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
-    collect_parse_findings(a_doc, a_view, "left", &mut findings);
-    collect_parse_findings(b_doc, b_view, "right", &mut findings);
+    collect_parse_findings(
+        a_doc,
+        a_view,
+        "left",
+        &ctx.a_span_line_first_index,
+        &mut findings,
+    );
+    collect_parse_findings(
+        b_doc,
+        b_view,
+        "right",
+        &ctx.b_span_line_first_index,
+        &mut findings,
+    );
     collect_unknown_block_findings(a_doc, "left", &mut findings);
     collect_unknown_block_findings(b_doc, "right", &mut findings);
-    collect_ambiguity_findings(a_view, b_view, ctx, &mut findings);
-    collect_extracted_key_ambiguity_findings(a_view, b_view, ctx, &mut findings);
+    collect_ambiguity_findings(a_view, ctx, &mut findings);
+    collect_extracted_key_ambiguity_findings(a_view, ctx, &mut findings);
     collect_fallback_alignment_findings(fallback_contexts, &mut findings);
     findings.sort_by(|a, b| {
         let ap = a.path.as_ref().map(|p| p.0.as_slice()).unwrap_or(&[]);
@@ -70,18 +108,10 @@ pub(crate) fn collect_findings(
 }
 
 fn push_ambiguity_finding(
-    a_view: &ComparisonView,
-    b_view: &ComparisonView,
-    anchor_predicate: impl Fn(&crate::model::ComparisonLine) -> bool,
+    anchor: Option<&crate::model::ComparisonLine>,
     message: String,
     out: &mut Vec<Finding>,
 ) {
-    let anchor = a_view
-        .lines
-        .iter()
-        .find(|line| anchor_predicate(line))
-        .or_else(|| b_view.lines.iter().find(|line| anchor_predicate(line)));
-
     out.push(Finding {
         code: finding_code::AMBIGUOUS_KEY_MATCH.to_string(),
         level: FindingLevel::Warning,
@@ -93,17 +123,18 @@ fn push_ambiguity_finding(
 
 fn collect_extracted_key_ambiguity_findings(
     a_view: &ComparisonView,
-    b_view: &ComparisonView,
     ctx: &DiffContext,
     out: &mut Vec<Finding>,
 ) {
     let mut entries: Vec<_> = ctx.ambiguous_extracted_keys.iter().collect();
     entries.sort_by_key(|&(k, _)| k);
     for (key, &(left_count, right_count)) in entries {
+        let anchor = ctx
+            .extracted_key_first_index
+            .get(key)
+            .and_then(|&idx| a_view.lines.get(idx));
         push_ambiguity_finding(
-            a_view,
-            b_view,
-            |line| line.key_hint.as_deref() == Some(key.as_str()),
+            anchor,
             format!(
                 "ambiguous extracted key `{}` appears {}x on left and {}x on right",
                 key, left_count, right_count
@@ -117,13 +148,13 @@ fn collect_parse_findings(
     doc: &Document,
     view: &ComparisonView,
     side: &str,
+    span_line_first_index: &HashMap<usize, usize>,
     out: &mut Vec<Finding>,
 ) {
     for pf in &doc.metadata.parse_findings {
-        let matched_path = view
-            .lines
-            .iter()
-            .find(|line| line.span.line == pf.span.line)
+        let matched_path = span_line_first_index
+            .get(&pf.span.line)
+            .and_then(|&idx| view.lines.get(idx))
             .map(|line| line.path.clone());
         out.push(Finding {
             code: finding_code::UNKNOWN_UNPARSED_CONSTRUCT.to_string(),
@@ -174,19 +205,16 @@ fn walk_findings(
     }
 }
 
-fn collect_ambiguity_findings(
-    a_view: &ComparisonView,
-    b_view: &ComparisonView,
-    ctx: &DiffContext,
-    out: &mut Vec<Finding>,
-) {
+fn collect_ambiguity_findings(a_view: &ComparisonView, ctx: &DiffContext, out: &mut Vec<Finding>) {
     let mut entries: Vec<_> = ctx.ambiguous_content_keys.iter().collect();
     entries.sort_unstable_by_key(|&(&k, _)| k);
     for (&key, &(left_count, right_count)) in entries {
+        let anchor = ctx
+            .content_key_first_index
+            .get(&key)
+            .and_then(|&idx| a_view.lines.get(idx));
         push_ambiguity_finding(
-            a_view,
-            b_view,
-            |line| line.content_key == key,
+            anchor,
             format!(
                 "ambiguous content key {} appears {}x on left and {}x on right",
                 crate::util::key_label(Some(key)),
@@ -226,6 +254,23 @@ mod tests {
             path: Path(vec![0]),
             span: Span {
                 line: 1,
+                start_byte: 0,
+                end_byte: 1,
+            },
+            trivia: TriviaKind::Content,
+        }
+    }
+
+    fn line_at(content_key: u64, span_line: usize, path: Vec<usize>) -> ComparisonLine {
+        ComparisonLine {
+            content_key,
+            occurrence_key: content_key,
+            key_hint: None,
+            normalized: format!("line-{content_key}"),
+            original: format!("line-{content_key}"),
+            path: Path(path),
+            span: Span {
+                line: span_line,
                 start_byte: 0,
                 end_byte: 1,
             },
@@ -329,7 +374,7 @@ mod tests {
         let ctx = DiffContext::from_views(&a, &b);
         let mut out = Vec::new();
 
-        collect_ambiguity_findings(&a, &b, &ctx, &mut out);
+        collect_ambiguity_findings(&a, &ctx, &mut out);
 
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].code, finding_code::AMBIGUOUS_KEY_MATCH);
@@ -351,7 +396,7 @@ mod tests {
         let ctx = DiffContext::from_views(&a, &b);
         let mut out = Vec::new();
 
-        collect_extracted_key_ambiguity_findings(&a, &b, &ctx, &mut out);
+        collect_extracted_key_ambiguity_findings(&a, &ctx, &mut out);
 
         assert_eq!(out.len(), 1);
         assert!(out[0].message.contains("bgp:65000"));
@@ -371,13 +416,44 @@ mod tests {
             },
         });
         let v = make_view(vec![]);
+        let ctx = DiffContext::from_views(&v, &make_view(vec![]));
         let mut out = Vec::new();
 
-        collect_parse_findings(&doc, &v, "left", &mut out);
+        collect_parse_findings(&doc, &v, "left", &ctx.a_span_line_first_index, &mut out);
 
         assert_eq!(out.len(), 1);
         assert!(out[0].message.starts_with("left"));
         assert!(out[0].message.contains("orphan-indentation"));
+    }
+
+    #[test]
+    fn parse_findings_anchor_to_first_view_line_on_span() {
+        let mut doc = Document::default();
+        for line in [2usize, 2, 3] {
+            doc.metadata.parse_findings.push(ParseFinding {
+                code: "orphan-indentation".to_string(),
+                message: "indented content".to_string(),
+                span: Span {
+                    line,
+                    start_byte: 0,
+                    end_byte: 1,
+                },
+            });
+        }
+        let view = make_view(vec![
+            line_at(1, 2, vec![0]),
+            line_at(2, 2, vec![1]),
+            line_at(3, 3, vec![2]),
+        ]);
+        let ctx = DiffContext::from_views(&view, &make_view(vec![]));
+        let mut out = Vec::new();
+
+        collect_parse_findings(&doc, &view, "left", &ctx.a_span_line_first_index, &mut out);
+
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].path.as_ref().unwrap().0, vec![0]);
+        assert_eq!(out[1].path.as_ref().unwrap().0, vec![0]);
+        assert_eq!(out[2].path.as_ref().unwrap().0, vec![2]);
     }
 
     #[test]
