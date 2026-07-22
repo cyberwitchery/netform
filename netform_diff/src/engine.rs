@@ -30,8 +30,37 @@ pub(crate) fn diff_views(
     b: &ComparisonView,
     options: &NormalizeOptions,
 ) -> Result<DiffComputation, DiffError> {
-    let a_segments = build_segments(a);
-    let b_segments = build_segments(b);
+    let mut edits = Vec::new();
+    let mut fallback_contexts = Vec::new();
+    diff_segment_level(
+        &a.lines,
+        &b.lines,
+        0,
+        options,
+        &mut edits,
+        &mut fallback_contexts,
+    )?;
+    Ok(DiffComputation {
+        edits,
+        fallback_contexts,
+    })
+}
+
+/// Structure-aware sibling matching at one nesting `depth`.
+///
+/// Segments the lines by their path component at `depth`, aligns segments with
+/// Myers, and recurses into each matched block under that block's own order
+/// policy. Only the top level (`depth == 0`) records fallback contexts.
+fn diff_segment_level(
+    a_lines: &[ComparisonLine],
+    b_lines: &[ComparisonLine],
+    depth: usize,
+    options: &NormalizeOptions,
+    edits: &mut Vec<Edit>,
+    fallback_contexts: &mut Vec<netform_ir::Path>,
+) -> Result<(), DiffError> {
+    let a_segments = segment_at(a_lines, depth);
+    let b_segments = segment_at(b_lines, depth);
 
     let a_keys = a_segments
         .iter()
@@ -44,142 +73,160 @@ pub(crate) fn diff_views(
 
     let ops = compute_ops(&a_keys, &b_keys)?;
 
-    let a_segment_count = a_segments.len();
-    let b_segment_count = b_segments.len();
-
-    let mut edits = Vec::new();
-    let mut fallback_contexts = Vec::new();
+    let a_count = a_segments.len();
+    let b_count = b_segments.len();
+    let record_fallbacks = depth == 0;
     let mut a_iter = a_segments.into_iter();
     let mut b_iter = b_segments.into_iter();
-    let mut pending_deleted_segments: Vec<Segment> = Vec::new();
-    let mut pending_inserted_segments: Vec<Segment> = Vec::new();
-
-    let mut flush_segment_fallback = |edits: &mut Vec<Edit>,
-                                      deleted: &mut Vec<Segment>,
-                                      inserted: &mut Vec<Segment>|
-     -> Result<(), DiffError> {
-        if deleted.is_empty() && inserted.is_empty() {
-            return Ok(());
-        }
-
-        let deleted_lines = deleted
-            .drain(..)
-            .flat_map(|segment| segment.lines)
-            .collect::<Vec<_>>();
-        let inserted_lines = inserted
-            .drain(..)
-            .flat_map(|segment| segment.lines)
-            .collect::<Vec<_>>();
-
-        let first_path = deleted_lines
-            .first()
-            .or(inserted_lines.first())
-            .map(|line| &line.path);
-        let empty_path = netform_ir::Path(Vec::new());
-        let mut fallback = line_diff(
-            &deleted_lines,
-            &inserted_lines,
-            options.policy_for_path(first_path.unwrap_or(&empty_path)),
-        )?;
-        if let Some(path) = first_path {
-            fallback_contexts.push(path.clone());
-        }
-        edits.append(&mut fallback);
-        Ok(())
-    };
+    let mut pending_deleted: Vec<Segment> = Vec::new();
+    let mut pending_inserted: Vec<Segment> = Vec::new();
 
     for op in ops {
         match op {
             Op::Equal => {
-                flush_segment_fallback(
-                    &mut edits,
-                    &mut pending_deleted_segments,
-                    &mut pending_inserted_segments,
+                flush_replaced_segments(
+                    &mut pending_deleted,
+                    &mut pending_inserted,
+                    options,
+                    edits,
+                    fallback_contexts,
+                    record_fallbacks,
                 )?;
 
                 let left = a_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Equal",
                     side: "left",
-                    a_count: a_segment_count,
-                    b_count: b_segment_count,
+                    a_count,
+                    b_count,
                 })?;
                 let right = b_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Equal",
                     side: "right",
-                    a_count: a_segment_count,
-                    b_count: b_segment_count,
+                    a_count,
+                    b_count,
                 })?;
-                if left.is_block && right.is_block {
-                    // headers share a lossy key but may differ in text (e.g.
-                    // `class-map match-any/match-all VOICE`), so compare them and
-                    // emit a Replace before the child edits to preserve order.
-                    let left_header = &left.lines[0];
-                    let right_header = &right.lines[0];
-                    if left_header.normalized != right_header.normalized {
-                        let old_line = to_diff_line(left_header);
-                        let new_line = to_diff_line(right_header);
-                        edits.push(Edit::Replace {
-                            old_at_key: Some(old_line.occurrence_key),
-                            new_at_key: Some(new_line.occurrence_key),
-                            left_anchor: Some(to_anchor(&old_line)),
-                            right_anchor: Some(to_anchor(&new_line)),
-                            old_lines: vec![old_line],
-                            new_lines: vec![new_line],
-                        });
-                    }
-
-                    let left_children = if left.lines.len() > 1 {
-                        &left.lines[1..]
-                    } else {
-                        &[]
-                    };
-                    let right_children = if right.lines.len() > 1 {
-                        &right.lines[1..]
-                    } else {
-                        &[]
-                    };
-
-                    let mut child_edits = line_diff(
-                        left_children,
-                        right_children,
-                        options.policy_for_path(&left.lines[0].path),
-                    )?;
-                    edits.append(&mut child_edits);
-                }
+                diff_matched_segment(&left, &right, options, edits, fallback_contexts)?;
             }
             Op::Delete => {
-                pending_deleted_segments.push(a_iter.next().ok_or(
-                    DiffError::EditScriptInconsistency {
-                        op: "Delete",
-                        side: "left",
-                        a_count: a_segment_count,
-                        b_count: b_segment_count,
-                    },
-                )?);
+                pending_deleted.push(a_iter.next().ok_or(DiffError::EditScriptInconsistency {
+                    op: "Delete",
+                    side: "left",
+                    a_count,
+                    b_count,
+                })?);
             }
             Op::Insert => {
-                pending_inserted_segments.push(b_iter.next().ok_or(
-                    DiffError::EditScriptInconsistency {
-                        op: "Insert",
-                        side: "right",
-                        a_count: a_segment_count,
-                        b_count: b_segment_count,
-                    },
-                )?);
+                pending_inserted.push(b_iter.next().ok_or(DiffError::EditScriptInconsistency {
+                    op: "Insert",
+                    side: "right",
+                    a_count,
+                    b_count,
+                })?);
             }
         }
     }
 
-    flush_segment_fallback(
-        &mut edits,
-        &mut pending_deleted_segments,
-        &mut pending_inserted_segments,
-    )?;
-
-    Ok(DiffComputation {
+    flush_replaced_segments(
+        &mut pending_deleted,
+        &mut pending_inserted,
+        options,
         edits,
         fallback_contexts,
-    })
+        record_fallbacks,
+    )
+}
+
+/// Emit edits for two segments Myers aligned as equal.
+///
+/// Only two matched blocks carry sub-edits: their headers are compared directly
+/// and their children diffed under the policy for this block's path.
+fn diff_matched_segment(
+    left: &Segment,
+    right: &Segment,
+    options: &NormalizeOptions,
+    edits: &mut Vec<Edit>,
+    fallback_contexts: &mut Vec<netform_ir::Path>,
+) -> Result<(), DiffError> {
+    if !(left.is_block && right.is_block) {
+        return Ok(());
+    }
+
+    let left_header = &left.lines[0];
+    let right_header = &right.lines[0];
+    // headers can share a lossy key but differ in text; surface that as a Replace.
+    if left_header.normalized != right_header.normalized {
+        let old_line = to_diff_line(left_header);
+        let new_line = to_diff_line(right_header);
+        edits.push(Edit::Replace {
+            old_at_key: Some(old_line.occurrence_key),
+            new_at_key: Some(new_line.occurrence_key),
+            left_anchor: Some(to_anchor(&old_line)),
+            right_anchor: Some(to_anchor(&new_line)),
+            old_lines: vec![old_line],
+            new_lines: vec![new_line],
+        });
+    }
+
+    let left_children = &left.lines[1..];
+    let right_children = &right.lines[1..];
+
+    match options.policy_for_path(&left_header.path) {
+        OrderPolicy::Ordered => diff_segment_level(
+            left_children,
+            right_children,
+            left_header.path.0.len(),
+            options,
+            edits,
+            fallback_contexts,
+        )?,
+        OrderPolicy::Unordered => {
+            edits.append(&mut line_diff_unordered(left_children, right_children));
+        }
+        OrderPolicy::KeyedStable => {
+            edits.append(&mut line_diff_keyed_stable(left_children, right_children));
+        }
+    }
+
+    Ok(())
+}
+
+/// Diff accumulated non-matching segments as a coarse line-level fallback.
+fn flush_replaced_segments(
+    deleted: &mut Vec<Segment>,
+    inserted: &mut Vec<Segment>,
+    options: &NormalizeOptions,
+    edits: &mut Vec<Edit>,
+    fallback_contexts: &mut Vec<netform_ir::Path>,
+    record_fallbacks: bool,
+) -> Result<(), DiffError> {
+    if deleted.is_empty() && inserted.is_empty() {
+        return Ok(());
+    }
+
+    let deleted_lines = deleted
+        .drain(..)
+        .flat_map(|segment| segment.lines)
+        .collect::<Vec<_>>();
+    let inserted_lines = inserted
+        .drain(..)
+        .flat_map(|segment| segment.lines)
+        .collect::<Vec<_>>();
+
+    let first_path = deleted_lines
+        .first()
+        .or(inserted_lines.first())
+        .map(|line| &line.path);
+    let empty_path = netform_ir::Path(Vec::new());
+    let mut fallback = line_diff(
+        &deleted_lines,
+        &inserted_lines,
+        options.policy_for_path(first_path.unwrap_or(&empty_path)),
+    )?;
+    if record_fallbacks && let Some(path) = first_path {
+        fallback_contexts.push(path.clone());
+    }
+    edits.append(&mut fallback);
+    Ok(())
 }
 
 pub(crate) fn build_stats(edits: &[Edit]) -> DiffStats {
@@ -210,32 +257,36 @@ pub(crate) fn build_stats(edits: &[Edit]) -> DiffStats {
     stats
 }
 
-fn build_segments(view: &ComparisonView) -> Vec<Segment> {
+/// Group consecutive lines into segments by their path component at `depth`.
+///
+/// Callers pass lines sharing the first `depth` components, so the component at
+/// `depth` identifies each sibling: its header is at path length `depth + 1`.
+fn segment_at(lines: &[ComparisonLine], depth: usize) -> Vec<Segment> {
     let mut segments = Vec::new();
-    let mut current_root: Option<usize> = None;
+    let mut current_component: Option<usize> = None;
     let mut current = Vec::new();
 
-    for line in &view.lines {
-        let root = line.path.0.first().copied().unwrap_or(usize::MAX);
-        if current_root != Some(root) {
+    for line in lines {
+        let component = line.path.0.get(depth).copied().unwrap_or(usize::MAX);
+        if current_component != Some(component) {
             if !current.is_empty() {
-                segments.push(lines_to_segment(std::mem::take(&mut current)));
+                segments.push(lines_to_segment(std::mem::take(&mut current), depth));
             }
-            current_root = Some(root);
+            current_component = Some(component);
         }
 
         current.push(line.clone());
     }
 
     if !current.is_empty() {
-        segments.push(lines_to_segment(current));
+        segments.push(lines_to_segment(current, depth));
     }
 
     segments
 }
 
-fn lines_to_segment(lines: Vec<ComparisonLine>) -> Segment {
-    let is_block = lines.iter().any(|line| line.path.0.len() > 1);
+fn lines_to_segment(lines: Vec<ComparisonLine>, depth: usize) -> Segment {
+    let is_block = lines.iter().any(|line| line.path.0.len() > depth + 1);
     let segment_key = lines.first().map(|line| line.content_key).unwrap_or(0);
     Segment {
         lines,
@@ -583,6 +634,7 @@ fn backtrack_ops(a: &[u64], b: &[u64], trace: &[TraceSnapshot]) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{OrderPolicyConfig, OrderPolicyOverride};
     use netform_ir::{Path, Span, TriviaKind};
 
     fn span(line: usize) -> Span {
@@ -623,6 +675,27 @@ mod tests {
 
     fn default_options() -> NormalizeOptions {
         NormalizeOptions::default()
+    }
+
+    fn assert_only_class_map_header_replace(edits: &[Edit]) {
+        assert_eq!(
+            edits.len(),
+            1,
+            "only the header change should surface: {edits:?}"
+        );
+        match &edits[0] {
+            Edit::Replace {
+                old_lines,
+                new_lines,
+                ..
+            } => {
+                assert_eq!(old_lines.len(), 1);
+                assert_eq!(new_lines.len(), 1);
+                assert_eq!(old_lines[0].text, "class-map match-any VOICE");
+                assert_eq!(new_lines[0].text, "class-map match-all VOICE");
+            }
+            other => panic!("expected a header Replace, got {other:?}"),
+        }
     }
 
     #[test]
@@ -838,14 +911,14 @@ mod tests {
     #[test]
     fn build_segments_empty_view() {
         let v = view(vec![]);
-        let segs = build_segments(&v);
+        let segs = segment_at(&v.lines, 0);
         assert!(segs.is_empty());
     }
 
     #[test]
     fn build_segments_single_line() {
         let v = view(vec![cline("hostname router1", 100, vec![0])]);
-        let segs = build_segments(&v);
+        let segs = segment_at(&v.lines, 0);
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].lines.len(), 1);
         assert!(!segs[0].is_block);
@@ -858,7 +931,7 @@ mod tests {
             cline("  description foo", 101, vec![0, 0]),
             cline("  mtu 9000", 102, vec![0, 1]),
         ]);
-        let segs = build_segments(&v);
+        let segs = segment_at(&v.lines, 0);
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].lines.len(), 3);
         assert!(segs[0].is_block);
@@ -872,7 +945,7 @@ mod tests {
             cline("interface Eth2", 200, vec![1]),
             cline("  description bar", 201, vec![1, 0]),
         ]);
-        let segs = build_segments(&v);
+        let segs = segment_at(&v.lines, 0);
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0].segment_key, 100);
         assert_eq!(segs[1].segment_key, 200);
@@ -884,7 +957,7 @@ mod tests {
             cline("hostname a", 100, vec![0]),
             cline("hostname b", 200, vec![1]),
         ]);
-        let segs = build_segments(&v);
+        let segs = segment_at(&v.lines, 0);
         assert_eq!(segs.len(), 2);
         assert!(!segs[0].is_block);
         assert!(!segs[1].is_block);
@@ -1052,6 +1125,104 @@ mod tests {
             })
             .count();
         assert_eq!(header_edits, 0, "unchanged header must not be reported");
+    }
+
+    #[test]
+    fn colliding_block_header_change_surfaces_whether_top_level_or_nested() {
+        // control: a top-level colliding-key header change already surfaces (#97).
+        let a_top = view(vec![
+            cline("class-map match-any VOICE", 200, vec![0]),
+            cline("  match dscp ef", 300, vec![0, 0]),
+        ]);
+        let b_top = view(vec![
+            cline("class-map match-all VOICE", 200, vec![0]),
+            cline("  match dscp ef", 300, vec![0, 0]),
+        ]);
+        let top = diff_views(&a_top, &b_top, &default_options()).unwrap();
+        assert_only_class_map_header_replace(&top.edits);
+
+        // fix: the same collision nested inside a matched block now surfaces too.
+        let a_nested = view(vec![
+            cline("policy-map PM", 100, vec![0]),
+            cline("class-map match-any VOICE", 200, vec![0, 0]),
+            cline("  match dscp ef", 300, vec![0, 0, 0]),
+        ]);
+        let b_nested = view(vec![
+            cline("policy-map PM", 100, vec![0]),
+            cline("class-map match-all VOICE", 200, vec![0, 0]),
+            cline("  match dscp ef", 300, vec![0, 0, 0]),
+        ]);
+        let nested = diff_views(&a_nested, &b_nested, &default_options()).unwrap();
+        assert_only_class_map_header_replace(&nested.edits);
+    }
+
+    #[test]
+    fn deep_order_policy_override_now_honored_like_a_shallow_one() {
+        // a pure reorder of two children of the block at [0].
+        let shallow_a = view(vec![
+            cline("block A", 100, vec![0]),
+            cline("  child one", 301, vec![0, 0]),
+            cline("  child two", 302, vec![0, 1]),
+        ]);
+        let shallow_b = view(vec![
+            cline("block A", 100, vec![0]),
+            cline("  child two", 302, vec![0, 0]),
+            cline("  child one", 301, vec![0, 1]),
+        ]);
+
+        // the same reorder, one level deeper — under the nested block at [0, 0].
+        let deep_a = view(vec![
+            cline("block A", 100, vec![0]),
+            cline("  block B", 200, vec![0, 0]),
+            cline("    child one", 301, vec![0, 0, 0]),
+            cline("    child two", 302, vec![0, 0, 1]),
+        ]);
+        let deep_b = view(vec![
+            cline("block A", 100, vec![0]),
+            cline("  block B", 200, vec![0, 0]),
+            cline("    child two", 302, vec![0, 0, 0]),
+            cline("    child one", 301, vec![0, 0, 1]),
+        ]);
+
+        let unordered_at = |prefix: Vec<usize>| {
+            NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+                default: OrderPolicy::Ordered,
+                overrides: vec![OrderPolicyOverride {
+                    context_prefix: prefix,
+                    policy: OrderPolicy::Unordered,
+                }],
+            })
+        };
+
+        // both reorders are real changes under the default ordered policy.
+        assert!(
+            !diff_views(&shallow_a, &shallow_b, &default_options())
+                .unwrap()
+                .edits
+                .is_empty()
+        );
+        assert!(
+            !diff_views(&deep_a, &deep_b, &default_options())
+                .unwrap()
+                .edits
+                .is_empty()
+        );
+
+        // control: a shallow [0] override already suppressed the shallow reorder.
+        let shallow = diff_views(&shallow_a, &shallow_b, &unordered_at(vec![0])).unwrap();
+        assert!(
+            shallow.edits.is_empty(),
+            "shallow override should suppress the reorder: {:?}",
+            shallow.edits
+        );
+
+        // fix: a deep [0, 0] override now suppresses the deep reorder.
+        let deep = diff_views(&deep_a, &deep_b, &unordered_at(vec![0, 0])).unwrap();
+        assert!(
+            deep.edits.is_empty(),
+            "deep override should suppress the reorder: {:?}",
+            deep.edits
+        );
     }
 
     #[test]
