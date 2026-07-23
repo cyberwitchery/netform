@@ -46,11 +46,11 @@ pub(crate) fn diff_views(
     })
 }
 
-/// Structure-aware sibling matching at one nesting `depth`.
+/// structure-aware sibling matching at one nesting `depth`.
 ///
-/// Segments the lines by their path component at `depth`, aligns segments with
+/// segments the lines by their path component at `depth`, aligns segments with
 /// Myers, and recurses into each matched block under that block's own order
-/// policy. Only the top level (`depth == 0`) records fallback contexts.
+/// policy. only the top level (`depth == 0`) records fallback contexts.
 fn diff_segment_level(
     a_lines: &[ComparisonLine],
     b_lines: &[ComparisonLine],
@@ -136,9 +136,9 @@ fn diff_segment_level(
     )
 }
 
-/// Emits edits for two segments Myers aligned as equal.
+/// emits edits for two segments Myers aligned as equal.
 ///
-/// Only two matched blocks carry sub-edits: their headers are compared directly
+/// only two matched blocks carry sub-edits: their headers are compared directly
 /// and their children diffed under the policy for this block's path.
 fn diff_matched_segment(
     left: &Segment,
@@ -190,7 +190,7 @@ fn diff_matched_segment(
     Ok(())
 }
 
-/// Diffs accumulated non-matching segments as a coarse line-level fallback.
+/// diffs accumulated non-matching segments as a coarse line-level fallback.
 fn flush_replaced_segments(
     deleted: &mut Vec<Segment>,
     inserted: &mut Vec<Segment>,
@@ -257,9 +257,9 @@ pub(crate) fn build_stats(edits: &[Edit]) -> DiffStats {
     stats
 }
 
-/// Groups consecutive lines into segments by their path component at `depth`.
+/// groups consecutive lines into segments by their path component at `depth`.
 ///
-/// Callers pass lines sharing the first `depth` components, so the component at
+/// callers pass lines sharing the first `depth` components, so the component at
 /// `depth` identifies each sibling: its header is at path length `depth + 1`.
 fn segment_at(lines: &[ComparisonLine], depth: usize) -> Vec<Segment> {
     let mut segments = Vec::new();
