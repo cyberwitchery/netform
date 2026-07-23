@@ -136,7 +136,7 @@ fn diff_segment_level(
     )
 }
 
-/// Emit edits for two segments Myers aligned as equal.
+/// Emits edits for two segments Myers aligned as equal.
 ///
 /// Only two matched blocks carry sub-edits: their headers are compared directly
 /// and their children diffed under the policy for this block's path.
@@ -190,7 +190,7 @@ fn diff_matched_segment(
     Ok(())
 }
 
-/// Diff accumulated non-matching segments as a coarse line-level fallback.
+/// Diffs accumulated non-matching segments as a coarse line-level fallback.
 fn flush_replaced_segments(
     deleted: &mut Vec<Segment>,
     inserted: &mut Vec<Segment>,
@@ -257,7 +257,7 @@ pub(crate) fn build_stats(edits: &[Edit]) -> DiffStats {
     stats
 }
 
-/// Group consecutive lines into segments by their path component at `depth`.
+/// Groups consecutive lines into segments by their path component at `depth`.
 ///
 /// Callers pass lines sharing the first `depth` components, so the component at
 /// `depth` identifies each sibling: its header is at path length `depth + 1`.
@@ -1129,7 +1129,7 @@ mod tests {
 
     #[test]
     fn colliding_block_header_change_surfaces_whether_top_level_or_nested() {
-        // control: a top-level colliding-key header change already surfaces (#97).
+        // a top-level colliding-key header change already surfaces (#97).
         let a_top = view(vec![
             cline("class-map match-any VOICE", 200, vec![0]),
             cline("  match dscp ef", 300, vec![0, 0]),
@@ -1141,7 +1141,7 @@ mod tests {
         let top = diff_views(&a_top, &b_top, &default_options()).unwrap();
         assert_only_class_map_header_replace(&top.edits);
 
-        // fix: the same collision nested inside a matched block now surfaces too.
+        // the same collision nested inside a matched block now surfaces too.
         let a_nested = view(vec![
             cline("policy-map PM", 100, vec![0]),
             cline("class-map match-any VOICE", 200, vec![0, 0]),
@@ -1208,7 +1208,7 @@ mod tests {
                 .is_empty()
         );
 
-        // control: a shallow [0] override already suppressed the shallow reorder.
+        // a shallow [0] override already suppressed the shallow reorder.
         let shallow = diff_views(&shallow_a, &shallow_b, &unordered_at(vec![0])).unwrap();
         assert!(
             shallow.edits.is_empty(),
@@ -1216,7 +1216,7 @@ mod tests {
             shallow.edits
         );
 
-        // fix: a deep [0, 0] override now suppresses the deep reorder.
+        // a deep [0, 0] override now suppresses the deep reorder.
         let deep = diff_views(&deep_a, &deep_b, &unordered_at(vec![0, 0])).unwrap();
         assert!(
             deep.edits.is_empty(),
