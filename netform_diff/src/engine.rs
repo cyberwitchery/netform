@@ -208,6 +208,7 @@ fn diff_matched_lines(left: &[ComparisonLine], right: &[ComparisonLine]) -> Opti
         }
     }
 
+    // a tail needs directly-constructed IR; the parser gives every block a child.
     for line in &left[common..] {
         deletes.push(to_diff_line(line));
     }
