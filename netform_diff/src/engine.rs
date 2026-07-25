@@ -35,7 +35,7 @@ pub(crate) fn diff_views(
     diff_segment_level(
         &a.lines,
         &b.lines,
-        0,
+        &netform_ir::Path(Vec::new()),
         options,
         &mut edits,
         &mut fallback_contexts,
@@ -46,19 +46,22 @@ pub(crate) fn diff_views(
     })
 }
 
-/// structure-aware sibling matching at one nesting `depth`.
+/// structure-aware sibling matching among the children of `level_path`.
 ///
-/// segments the lines by their path component at `depth`, aligns segments with
-/// Myers, and recurses into each matched block under that block's own order
-/// policy. only the top level (`depth == 0`) records fallback contexts.
+/// segments the lines by their path component at `level_path`'s length, aligns
+/// segments with Myers, and recurses into each matched block under that block's
+/// own order policy. one policy, resolved from `level_path`, governs the whole
+/// level; only the top level (an empty `level_path`) records fallback contexts.
 fn diff_segment_level(
     a_lines: &[ComparisonLine],
     b_lines: &[ComparisonLine],
-    depth: usize,
+    level_path: &netform_ir::Path,
     options: &NormalizeOptions,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<(), DiffError> {
+    let depth = level_path.0.len();
+    let level_policy = options.policy_for_path(level_path);
     let a_segments = segment_at(a_lines, depth);
     let b_segments = segment_at(b_lines, depth);
 
@@ -84,14 +87,17 @@ fn diff_segment_level(
     for op in ops {
         match op {
             Op::Equal => {
-                flush_replaced_segments(
-                    &mut pending_deleted,
-                    &mut pending_inserted,
-                    options,
-                    edits,
-                    fallback_contexts,
-                    record_fallbacks,
-                )?;
+                // deferred so the multiset diff sees the deleted and inserted lines together.
+                if level_policy == OrderPolicy::Ordered {
+                    flush_replaced_segments(
+                        &mut pending_deleted,
+                        &mut pending_inserted,
+                        level_policy,
+                        edits,
+                        fallback_contexts,
+                        record_fallbacks,
+                    )?;
+                }
 
                 let left = a_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Equal",
@@ -129,7 +135,7 @@ fn diff_segment_level(
     flush_replaced_segments(
         &mut pending_deleted,
         &mut pending_inserted,
-        options,
+        level_policy,
         edits,
         fallback_contexts,
         record_fallbacks,
@@ -176,7 +182,7 @@ fn diff_matched_segment(
         OrderPolicy::Ordered => diff_segment_level(
             left_children,
             right_children,
-            left_header.path.0.len(),
+            &left_header.path,
             options,
             edits,
             fallback_contexts,
@@ -223,7 +229,7 @@ fn diff_matched_lines(left: &[ComparisonLine], right: &[ComparisonLine]) -> Opti
 fn flush_replaced_segments(
     deleted: &mut Vec<Segment>,
     inserted: &mut Vec<Segment>,
-    options: &NormalizeOptions,
+    policy: OrderPolicy,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
     record_fallbacks: bool,
@@ -245,13 +251,11 @@ fn flush_replaced_segments(
         .first()
         .or(inserted_lines.first())
         .map(|line| &line.path);
-    let empty_path = netform_ir::Path(Vec::new());
-    let mut fallback = line_diff(
-        &deleted_lines,
-        &inserted_lines,
-        options.policy_for_path(first_path.unwrap_or(&empty_path)),
-    )?;
-    if record_fallbacks && let Some(path) = first_path {
+    let mut fallback = line_diff(&deleted_lines, &inserted_lines, policy)?;
+    if record_fallbacks
+        && !fallback.is_empty()
+        && let Some(path) = first_path
+    {
         fallback_contexts.push(path.clone());
     }
     edits.append(&mut fallback);
@@ -1334,6 +1338,178 @@ mod tests {
             deep.edits.is_empty(),
             "deep override should suppress the reorder: {:?}",
             deep.edits
+        );
+    }
+
+    fn default_policy(policy: OrderPolicy) -> NormalizeOptions {
+        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: policy,
+            overrides: Vec::new(),
+        })
+    }
+
+    fn root_reorder_pair() -> (ComparisonView, ComparisonView) {
+        (
+            view(vec![
+                cline("set system host-name edge-1", 100, vec![0]),
+                cline("set system domain-name example.com", 200, vec![1]),
+            ]),
+            view(vec![
+                cline("set system domain-name example.com", 200, vec![0]),
+                cline("set system host-name edge-1", 100, vec![1]),
+            ]),
+        )
+    }
+
+    fn edit_texts(edits: &[Edit]) -> Vec<&str> {
+        edits
+            .iter()
+            .flat_map(|edit| match edit {
+                Edit::Delete { lines, .. } | Edit::Insert { lines, .. } => lines
+                    .iter()
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>(),
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => old_lines
+                    .iter()
+                    .chain(new_lines.iter())
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn root_level_reorder_cancels_under_unordered() {
+        let (a, b) = root_reorder_pair();
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert!(
+            result.edits.is_empty(),
+            "a pure root-level reorder is not drift under unordered: {:?}",
+            result.edits
+        );
+        assert!(
+            result.fallback_contexts.is_empty(),
+            "a diff that reports nothing must not warn about an unreliable region: {:?}",
+            result.fallback_contexts
+        );
+    }
+
+    #[test]
+    fn root_level_reorder_cancels_under_keyed_stable() {
+        let (a, b) = root_reorder_pair();
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::KeyedStable)).unwrap();
+        assert!(
+            result.edits.is_empty(),
+            "a pure root-level reorder is not drift under keyed-stable: {:?}",
+            result.edits
+        );
+        assert!(
+            result.fallback_contexts.is_empty(),
+            "a diff that reports nothing must not warn about an unreliable region: {:?}",
+            result.fallback_contexts
+        );
+    }
+
+    #[test]
+    fn root_level_reorder_with_a_value_change_reports_only_the_change() {
+        let a = view(vec![
+            cline("set system host-name edge-1", 100, vec![0]),
+            cline("set system domain-name example.com", 200, vec![1]),
+        ]);
+        let b = view(vec![
+            cline("set system domain-name example.com", 200, vec![0]),
+            cline("set system host-name edge-2", 100, vec![1]),
+        ]);
+
+        for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+            let result = diff_views(&a, &b, &default_policy(policy)).unwrap();
+            let texts = edit_texts(&result.edits);
+            assert!(
+                texts.contains(&"set system host-name edge-1")
+                    && texts.contains(&"set system host-name edge-2"),
+                "{policy:?} must still report the value change: {:?}",
+                result.edits
+            );
+            assert!(
+                !texts.contains(&"set system domain-name example.com"),
+                "{policy:?} must not report the reordered-but-unchanged line: {:?}",
+                result.edits
+            );
+        }
+    }
+
+    #[test]
+    fn root_level_reorder_with_an_added_line_reports_only_the_addition() {
+        let a = view(vec![
+            cline("set system host-name edge-1", 100, vec![0]),
+            cline("set system domain-name example.com", 200, vec![1]),
+        ]);
+        let b = view(vec![
+            cline("set system domain-name example.com", 200, vec![0]),
+            cline("set system host-name edge-1", 100, vec![1]),
+            cline("set system time-zone UTC", 300, vec![2]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert_eq!(
+            edit_texts(&result.edits),
+            vec!["set system time-zone UTC"],
+            "only the added line is drift: {:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn root_level_block_reorder_cancels_under_unordered() {
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description uplink", 301, vec![0, 0]),
+            cline("  mtu 9000", 302, vec![0, 1]),
+            cline("interface Eth2", 200, vec![1]),
+            cline("  description peer", 401, vec![1, 0]),
+        ]);
+        let b = view(vec![
+            cline("interface Eth2", 200, vec![0]),
+            cline("  description peer", 401, vec![0, 0]),
+            cline("interface Eth1", 100, vec![1]),
+            cline("  description uplink", 301, vec![1, 0]),
+            cline("  mtu 9000", 302, vec![1, 1]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert!(
+            result.edits.is_empty(),
+            "swapping two whole root blocks is not drift under unordered: {:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn root_level_reorder_under_ordered_reports_a_delete_and_an_insert() {
+        let (a, b) = root_reorder_pair();
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Ordered)).unwrap();
+
+        assert_eq!(result.edits.len(), 2, "{:?}", result.edits);
+        assert!(
+            matches!(&result.edits[0], Edit::Delete { lines, .. }
+                if lines.len() == 1 && lines[0].text == "set system host-name edge-1"),
+            "{:?}",
+            result.edits[0]
+        );
+        assert!(
+            matches!(&result.edits[1], Edit::Insert { lines, .. }
+                if lines.len() == 1 && lines[0].text == "set system host-name edge-1"),
+            "{:?}",
+            result.edits[1]
+        );
+        assert_eq!(
+            result.fallback_contexts,
+            vec![Path(vec![0]), Path(vec![1])],
+            "ordered still flushes each unmatched run at its own position"
         );
     }
 
