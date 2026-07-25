@@ -83,21 +83,28 @@ fn diff_segment_level(
     let mut b_iter = b_segments.into_iter();
     let mut pending_deleted: Vec<Segment> = Vec::new();
     let mut pending_inserted: Vec<Segment> = Vec::new();
+    // (deleted, inserted) index at which each contiguous unmatched run starts.
+    let mut pending_runs: Vec<(usize, usize)> = Vec::new();
+    let mut run_open = false;
 
     for op in ops {
         match op {
             Op::Equal => {
                 // deferred so the multiset diff sees the deleted and inserted lines together.
                 if level_policy == OrderPolicy::Ordered {
+                    let policy =
+                        flush_policy(level_policy, &pending_deleted, &pending_inserted, options);
                     flush_replaced_segments(
                         &mut pending_deleted,
                         &mut pending_inserted,
-                        level_policy,
+                        &mut pending_runs,
+                        policy,
                         edits,
                         fallback_contexts,
                         record_fallbacks,
                     )?;
                 }
+                run_open = false;
 
                 let left = a_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Equal",
@@ -114,6 +121,10 @@ fn diff_segment_level(
                 diff_matched_segment(&left, &right, options, edits, fallback_contexts)?;
             }
             Op::Delete => {
+                if !run_open {
+                    pending_runs.push((pending_deleted.len(), pending_inserted.len()));
+                    run_open = true;
+                }
                 pending_deleted.push(a_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Delete",
                     side: "left",
@@ -122,6 +133,10 @@ fn diff_segment_level(
                 })?);
             }
             Op::Insert => {
+                if !run_open {
+                    pending_runs.push((pending_deleted.len(), pending_inserted.len()));
+                    run_open = true;
+                }
                 pending_inserted.push(b_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Insert",
                     side: "right",
@@ -132,10 +147,12 @@ fn diff_segment_level(
         }
     }
 
+    let policy = flush_policy(level_policy, &pending_deleted, &pending_inserted, options);
     flush_replaced_segments(
         &mut pending_deleted,
         &mut pending_inserted,
-        level_policy,
+        &mut pending_runs,
+        policy,
         edits,
         fallback_contexts,
         record_fallbacks,
@@ -225,18 +242,46 @@ fn diff_matched_lines(left: &[ComparisonLine], right: &[ComparisonLine]) -> Opti
     finalize_edit(deletes, inserts)
 }
 
+/// the policy governing one flush.
+///
+/// only the per-run flush an `Ordered` level performs keys on a sibling's own
+/// path; a merged flush spans siblings and takes the level policy.
+fn flush_policy(
+    level_policy: OrderPolicy,
+    deleted: &[Segment],
+    inserted: &[Segment],
+    options: &NormalizeOptions,
+) -> OrderPolicy {
+    if level_policy != OrderPolicy::Ordered {
+        return level_policy;
+    }
+    deleted
+        .first()
+        .or(inserted.first())
+        .and_then(|segment| segment.lines.first())
+        .map_or(level_policy, |line| options.policy_for_path(&line.path))
+}
+
 /// diffs accumulated non-matching segments as a coarse line-level fallback.
+///
+/// `runs` holds the start index of each contiguous unmatched run, and each run
+/// contributes its own fallback context.
 fn flush_replaced_segments(
     deleted: &mut Vec<Segment>,
     inserted: &mut Vec<Segment>,
+    runs: &mut Vec<(usize, usize)>,
     policy: OrderPolicy,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
     record_fallbacks: bool,
 ) -> Result<(), DiffError> {
     if deleted.is_empty() && inserted.is_empty() {
+        runs.clear();
         return Ok(());
     }
+
+    let contexts = run_contexts(deleted, inserted, runs);
+    runs.clear();
 
     let deleted_lines = deleted
         .drain(..)
@@ -247,19 +292,34 @@ fn flush_replaced_segments(
         .flat_map(|segment| segment.lines)
         .collect::<Vec<_>>();
 
-    let first_path = deleted_lines
-        .first()
-        .or(inserted_lines.first())
-        .map(|line| &line.path);
     let mut fallback = line_diff(&deleted_lines, &inserted_lines, policy)?;
-    if record_fallbacks
-        && !fallback.is_empty()
-        && let Some(path) = first_path
-    {
-        fallback_contexts.push(path.clone());
+    if record_fallbacks && !fallback.is_empty() {
+        fallback_contexts.extend(contexts);
     }
     edits.append(&mut fallback);
     Ok(())
+}
+
+/// the path identifying each contiguous unmatched run, left side first.
+fn run_contexts(
+    deleted: &[Segment],
+    inserted: &[Segment],
+    runs: &[(usize, usize)],
+) -> Vec<netform_ir::Path> {
+    runs.iter()
+        .enumerate()
+        .filter_map(|(index, &(deleted_start, inserted_start))| {
+            let (deleted_end, inserted_end) = runs
+                .get(index + 1)
+                .copied()
+                .unwrap_or((deleted.len(), inserted.len()));
+            deleted[deleted_start..deleted_end]
+                .first()
+                .or_else(|| inserted[inserted_start..inserted_end].first())
+                .and_then(|segment| segment.lines.first())
+                .map(|line| line.path.clone())
+        })
+        .collect()
 }
 
 pub(crate) fn build_stats(edits: &[Edit]) -> DiffStats {
@@ -1510,6 +1570,91 @@ mod tests {
             result.fallback_contexts,
             vec![Path(vec![0]), Path(vec![1])],
             "ordered still flushes each unmatched run at its own position"
+        );
+    }
+
+    fn renamed_block_with_reordered_children() -> (ComparisonView, ComparisonView) {
+        (
+            view(vec![
+                cline("ip access-list extended ACL-IN", 100, vec![0]),
+                cline(" permit tcp any any eq 443", 201, vec![0, 0]),
+                cline(" permit tcp any any eq 80", 202, vec![0, 1]),
+                cline("interface Gi0/1", 300, vec![1]),
+                cline(" description uplink", 301, vec![1, 0]),
+            ]),
+            view(vec![
+                cline("ip access-list extended ACL-OUT", 110, vec![0]),
+                cline(" permit tcp any any eq 80", 202, vec![0, 0]),
+                cline(" permit tcp any any eq 443", 201, vec![0, 1]),
+                cline("interface Gi0/1", 300, vec![1]),
+                cline(" description uplink", 301, vec![1, 0]),
+            ]),
+        )
+    }
+
+    #[test]
+    fn root_level_segment_override_governs_the_fallback_flush() {
+        let (a, b) = renamed_block_with_reordered_children();
+        let options = NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: OrderPolicy::Ordered,
+            overrides: vec![OrderPolicyOverride {
+                context_prefix: vec![0],
+                policy: OrderPolicy::Unordered,
+            }],
+        });
+
+        let result = diff_views(&a, &b, &options).unwrap();
+        let texts = edit_texts(&result.edits);
+        assert!(
+            texts.contains(&"ip access-list extended ACL-IN")
+                && texts.contains(&"ip access-list extended ACL-OUT"),
+            "the rename must still be reported: {:?}",
+            result.edits
+        );
+        assert!(
+            !texts.iter().any(|text| text.contains("permit")),
+            "an override on this segment makes its reordered lines cancel: {:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn renamed_block_without_an_override_reports_its_reordered_children() {
+        let (a, b) = renamed_block_with_reordered_children();
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Ordered)).unwrap();
+        let texts = edit_texts(&result.edits);
+        assert!(
+            texts.iter().any(|text| text.contains("permit")),
+            "without an override the ordered fallback reports the whole segment: {:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn each_fallback_run_at_one_level_warns_under_unordered() {
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  mtu 9000", 101, vec![0, 0]),
+            cline("interface Common", 200, vec![1]),
+            cline("  foo", 201, vec![1, 0]),
+            cline("interface Eth3", 300, vec![2]),
+            cline("  mtu 1500", 301, vec![2, 0]),
+        ]);
+        let b = view(vec![
+            cline("interface Eth2", 110, vec![0]),
+            cline("  mtu 9000", 101, vec![0, 0]),
+            cline("interface Common", 200, vec![1]),
+            cline("  foo", 201, vec![1, 0]),
+            cline("interface Eth4", 310, vec![2]),
+            cline("  mtu 1500", 301, vec![2, 0]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert!(!result.edits.is_empty(), "both renames are drift");
+        assert_eq!(
+            result.fallback_contexts,
+            vec![Path(vec![0]), Path(vec![2])],
+            "each unmatched run is its own unreliable region"
         );
     }
 

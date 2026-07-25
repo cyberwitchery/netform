@@ -1,0 +1,23 @@
+{
+  "name": "root_segment_override_unordered",
+  "dialect": "iosxe",
+  "intended": "ip access-list extended ACL-IN\n permit tcp any any eq 443\n permit tcp any any eq 80\ninterface Gi0/1\n description uplink\n",
+  "actual": "ip access-list extended ACL-OUT\n permit tcp any any eq 80\n permit tcp any any eq 443\ninterface Gi0/1\n description uplink\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": [
+      {
+        "context_prefix": [0],
+        "policy": "unordered"
+      }
+    ]
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Insert", "Delete"],
+    "finding_codes": [
+      "diff_unreliable_region"
+    ]
+  }
+}

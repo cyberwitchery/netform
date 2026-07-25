@@ -1,0 +1,19 @@
+{
+  "name": "two_fallback_regions_unordered",
+  "dialect": "iosxe",
+  "intended": "interface Eth1\n mtu 9000\ninterface Common\n foo\ninterface Eth3\n mtu 1500\n",
+  "actual": "interface Eth2\n mtu 9000\ninterface Common\n foo\ninterface Eth4\n mtu 1500\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "unordered",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Insert", "Delete", "Insert", "Delete"],
+    "finding_codes": [
+      "diff_unreliable_region",
+      "diff_unreliable_region"
+    ]
+  }
+}

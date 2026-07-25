@@ -11,6 +11,7 @@
     "has_changes": true,
     "edit_types": ["Delete", "Insert"],
     "finding_codes": [
+      "diff_unreliable_region",
       "diff_unreliable_region"
     ]
   }

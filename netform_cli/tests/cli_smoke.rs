@@ -1146,6 +1146,44 @@ fn config_diff_policy_override_makes_subtree_unordered() {
 }
 
 #[test]
+fn config_diff_policy_override_on_a_renamed_root_segment() {
+    let left = temp_file_path("left-override-renamed-root");
+    let right = temp_file_path("right-override-renamed-root");
+    fs::write(
+        &left,
+        "ip access-list extended ACL-IN\n permit tcp any any eq 443\n permit tcp any any eq 80\ninterface Gi0/1\n description uplink\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "ip access-list extended ACL-OUT\n permit tcp any any eq 80\n permit tcp any any eq 443\ninterface Gi0/1\n description uplink\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("iosxe")
+        .arg("--policy-override")
+        .arg("0:unordered")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff with an override on a renamed root segment");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    assert!(
+        stdout.contains("- ip access-list extended ACL-IN")
+            && stdout.contains("+ ip access-list extended ACL-OUT"),
+        "the rename must still be reported: {stdout}"
+    );
+    assert!(
+        !stdout.contains("permit"),
+        "--policy-override 0:unordered must cancel the reordered lines it names: {stdout}"
+    );
+}
+
+#[test]
 fn config_diff_multiple_policy_overrides() {
     let left = temp_file_path("left-multi-override");
     let right = temp_file_path("right-multi-override");
