@@ -184,6 +184,58 @@ fn config_diff_exits_one_when_changes_detected() {
 }
 
 #[test]
+fn config_diff_exits_one_for_keyed_leaf_value_change() {
+    let left = temp_file_path("keyed-leaf-left");
+    let right = temp_file_path("keyed-leaf-right");
+    fs::write(
+        &left,
+        "config system global\n    set hostname \"edge-1\"\nend\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "config system global\n    set hostname \"edge-2\"\nend\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("fortios")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a changed `set` value is drift: {}",
+        strip_ansi(&String::from_utf8_lossy(&output.stdout))
+    );
+
+    let json_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("fortios")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --json");
+
+    let diff_json: serde_json::Value =
+        serde_json::from_slice(&json_output.stdout).expect("parse diff json");
+    assert_eq!(diff_json["has_changes"], true);
+    assert!(
+        !diff_json["edits"]
+            .as_array()
+            .expect("edits array")
+            .is_empty(),
+        "edits must not be empty when has_changes is true"
+    );
+}
+
+#[test]
 fn config_diff_no_exit_code_suppresses_exit_one() {
     let left = temp_file_path("no-exit-code-left");
     let right = temp_file_path("no-exit-code-right");

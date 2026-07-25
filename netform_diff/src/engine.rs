@@ -138,8 +138,9 @@ fn diff_segment_level(
 
 /// emits edits for two segments Myers aligned as equal.
 ///
-/// only two matched blocks carry sub-edits: their headers are compared directly
-/// and their children diffed under the policy for this block's path.
+/// two matched blocks compare their headers and diff their children under the
+/// policy for this block's path; any other pairing compares the segments' lines
+/// pairwise.
 fn diff_matched_segment(
     left: &Segment,
     right: &Segment,
@@ -148,6 +149,7 @@ fn diff_matched_segment(
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<(), DiffError> {
     if !(left.is_block && right.is_block) {
+        edits.extend(diff_matched_lines(&left.lines, &right.lines));
         return Ok(());
     }
 
@@ -188,6 +190,32 @@ fn diff_matched_segment(
     }
 
     Ok(())
+}
+
+/// reports text differences between the lines of two segments matched as equal.
+///
+/// their content keys are equal by construction, so `normalized` text is the
+/// only thing that can still separate them.
+fn diff_matched_lines(left: &[ComparisonLine], right: &[ComparisonLine]) -> Option<Edit> {
+    let common = left.len().min(right.len());
+    let mut deletes = Vec::new();
+    let mut inserts = Vec::new();
+
+    for idx in 0..common {
+        if left[idx].normalized != right[idx].normalized {
+            deletes.push(to_diff_line(&left[idx]));
+            inserts.push(to_diff_line(&right[idx]));
+        }
+    }
+
+    for line in &left[common..] {
+        deletes.push(to_diff_line(line));
+    }
+    for line in &right[common..] {
+        inserts.push(to_diff_line(line));
+    }
+
+    finalize_edit(deletes, inserts)
 }
 
 /// diffs accumulated non-matching segments as a coarse line-level fallback.
@@ -1041,6 +1069,89 @@ mod tests {
             }
             _ => panic!("expected Replace"),
         }
+    }
+
+    #[test]
+    fn matched_leaf_value_change_is_reported() {
+        // a stabilising key hint gives both lines the same content key.
+        let a = view(vec![cline("set hostname edge-1", 100, vec![0])]);
+        let b = view(vec![cline("set hostname edge-2", 100, vec![0])]);
+
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        let [
+            Edit::Replace {
+                old_lines,
+                new_lines,
+                ..
+            },
+        ] = &result.edits[..]
+        else {
+            panic!("expected a single Replace, got {:?}", result.edits);
+        };
+        assert_eq!(old_lines[0].text, "set hostname edge-1");
+        assert_eq!(new_lines[0].text, "set hostname edge-2");
+        assert!(result.fallback_contexts.is_empty());
+    }
+
+    #[test]
+    fn matched_leaf_child_value_change_is_reported() {
+        let a = view(vec![
+            cline("config system global", 100, vec![0]),
+            cline("    set hostname edge-1", 200, vec![0, 0]),
+            cline("end", 300, vec![0, 1]),
+        ]);
+        let b = view(vec![
+            cline("config system global", 100, vec![0]),
+            cline("    set hostname edge-2", 200, vec![0, 0]),
+            cline("end", 300, vec![0, 1]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        let [
+            Edit::Replace {
+                old_lines,
+                new_lines,
+                ..
+            },
+        ] = &result.edits[..]
+        else {
+            panic!("expected a single Replace, got {:?}", result.edits);
+        };
+        assert_eq!(old_lines[0].text, "    set hostname edge-1");
+        assert_eq!(new_lines[0].text, "    set hostname edge-2");
+    }
+
+    #[test]
+    fn matched_leaf_identical_text_emits_no_edit() {
+        let a = view(vec![cline("set hostname edge-1", 100, vec![0])]);
+        let b = a.clone();
+
+        let result = diff_views(&a, &b, &default_options()).unwrap();
+        assert!(result.edits.is_empty(), "{:?}", result.edits);
+    }
+
+    #[test]
+    fn matched_segment_with_children_on_one_side_only_reports_them() {
+        // same segment key, but only the left side kept any children.
+        let with_children = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  mtu 9000", 200, vec![0, 0]),
+        ]);
+        let header_only = view(vec![cline("interface Eth1", 100, vec![0])]);
+
+        let dropped = diff_views(&with_children, &header_only, &default_options()).unwrap();
+        let [Edit::Delete { lines, .. }] = &dropped.edits[..] else {
+            panic!("expected a single Delete, got {:?}", dropped.edits);
+        };
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "  mtu 9000");
+
+        let added = diff_views(&header_only, &with_children, &default_options()).unwrap();
+        let [Edit::Insert { lines, .. }] = &added.edits[..] else {
+            panic!("expected a single Insert, got {:?}", added.edits);
+        };
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "  mtu 9000");
     }
 
     #[test]

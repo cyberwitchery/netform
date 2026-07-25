@@ -1,5 +1,6 @@
 use netform_dialect_fortios::parse_fortios;
 use netform_dialect_iosxe::parse_iosxe;
+use netform_dialect_junos::parse_junos;
 use netform_ir::{Path, Span, parse_generic};
 
 use super::{
@@ -1016,6 +1017,85 @@ fn fortios_set_value_change_keyed_stable_emits_replace_unordered_emits_delete_in
             .any(|e| matches!(e, Edit::Insert { .. })),
         "Unordered should emit Insert for the new text"
     );
+}
+
+#[test]
+fn fortios_set_value_change_in_place_reported_by_every_policy() {
+    // nothing is reordered, so the changed value is the only drift to find.
+    let a = parse_fortios("config system global\n    set hostname \"edge-1\"\nend\n");
+    let b = parse_fortios("config system global\n    set hostname \"edge-2\"\nend\n");
+
+    let opts = |policy| {
+        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: policy,
+            overrides: Vec::new(),
+        })
+    };
+
+    for policy in [
+        OrderPolicy::Ordered,
+        OrderPolicy::Unordered,
+        OrderPolicy::KeyedStable,
+    ] {
+        let diff = diff_documents(&a, &b, opts(policy)).unwrap();
+        assert!(diff.has_changes, "{policy:?} missed the hostname change");
+        assert!(!diff.edits.is_empty(), "{policy:?} produced no edits");
+
+        let texts: Vec<&str> = diff
+            .edits
+            .iter()
+            .flat_map(|e| match e {
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => old_lines
+                    .iter()
+                    .chain(new_lines.iter())
+                    .map(|l| l.text.as_str())
+                    .collect::<Vec<_>>(),
+                Edit::Insert { lines, .. } | Edit::Delete { lines, .. } => {
+                    lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>()
+                }
+            })
+            .collect();
+        assert!(
+            texts.iter().any(|t| t.contains("edge-1")),
+            "{policy:?} did not report the old value: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("edge-2")),
+            "{policy:?} did not report the new value: {texts:?}"
+        );
+    }
+
+    // the default policy is Ordered, so the plain defaults must catch it too.
+    let default_diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
+    assert!(default_diff.has_changes);
+    assert!(matches!(default_diff.edits[..], [Edit::Replace { .. }]));
+}
+
+#[test]
+fn junos_set_value_change_reported_under_default_policy() {
+    // Junos keys `set` lines by path, so this pair matches at the top level.
+    let a = parse_junos("set system host-name edge-1\n");
+    let b = parse_junos("set system host-name edge-2\n");
+
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
+    assert!(diff.has_changes);
+
+    let [
+        Edit::Replace {
+            old_lines,
+            new_lines,
+            ..
+        },
+    ] = &diff.edits[..]
+    else {
+        panic!("expected a single Replace, got {:?}", diff.edits);
+    };
+    assert_eq!(old_lines[0].text, "set system host-name edge-1");
+    assert_eq!(new_lines[0].text, "set system host-name edge-2");
 }
 
 #[test]
