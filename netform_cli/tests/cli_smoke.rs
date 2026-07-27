@@ -321,6 +321,103 @@ fn config_diff_keyed_stable_policy_ignores_reordered_children() {
 }
 
 #[test]
+fn config_diff_root_level_reorder_is_silent_and_exits_zero() {
+    let left = temp_file_path("left-root-reorder");
+    let right = temp_file_path("right-root-reorder");
+    fs::write(
+        &left,
+        "set system host-name edge-1\nset system domain-name example.com\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "set system domain-name example.com\nset system host-name edge-1\n",
+    )
+    .expect("write right");
+
+    for policy in ["unordered", "keyed-stable"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+            .arg("--dialect")
+            .arg("junos")
+            .arg("--order-policy")
+            .arg(policy)
+            .arg(&left)
+            .arg(&right)
+            .output()
+            .expect("run config-diff on a root-level reorder");
+
+        assert!(
+            output.status.success(),
+            "{policy} should exit 0 on a pure root-level reorder"
+        );
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        assert!(
+            stdout.trim().is_empty(),
+            "{policy} should report nothing on a pure root-level reorder: {stdout}"
+        );
+
+        let json_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+            .arg("--no-exit-code")
+            .arg("--dialect")
+            .arg("junos")
+            .arg("--order-policy")
+            .arg(policy)
+            .arg("--json")
+            .arg(&left)
+            .arg(&right)
+            .output()
+            .expect("run config-diff --json on a root-level reorder");
+        let diff_json: serde_json::Value =
+            serde_json::from_slice(&json_output.stdout).expect("valid json");
+        assert_eq!(diff_json["has_changes"], false, "{policy}");
+        assert_eq!(
+            diff_json["findings"].as_array().map(Vec::len),
+            Some(0),
+            "{policy} should not warn about an unreliable region when nothing changed: {}",
+            diff_json["findings"]
+        );
+    }
+}
+
+#[test]
+fn config_diff_root_level_reorder_with_a_change_still_exits_nonzero() {
+    let left = temp_file_path("left-root-reorder-change");
+    let right = temp_file_path("right-root-reorder-change");
+    fs::write(
+        &left,
+        "set system host-name edge-1\nset system ntp server 10.0.0.1\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "set system ntp server 10.0.0.1\nset system host-name edge-2\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("junos")
+        .arg("--order-policy")
+        .arg("unordered")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff on a root-level reorder with a change");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    assert!(
+        stdout.contains("- set system host-name edge-1")
+            && stdout.contains("+ set system host-name edge-2"),
+        "the value change must still be reported: {stdout}"
+    );
+    assert!(
+        !stdout.contains("ntp server"),
+        "the reordered-but-unchanged line must not be reported: {stdout}"
+    );
+}
+
+#[test]
 fn config_diff_junos_dialect_with_keyed_stable_policy() {
     let left = temp_file_path("left-junos-keyed");
     let right = temp_file_path("right-junos-keyed");
@@ -1045,6 +1142,44 @@ fn config_diff_policy_override_makes_subtree_unordered() {
     assert_eq!(
         override_json["has_changes"], false,
         "--policy-override 0:unordered should ignore reordering in that subtree"
+    );
+}
+
+#[test]
+fn config_diff_policy_override_on_a_renamed_root_segment() {
+    let left = temp_file_path("left-override-renamed-root");
+    let right = temp_file_path("right-override-renamed-root");
+    fs::write(
+        &left,
+        "ip access-list extended ACL-IN\n permit tcp any any eq 443\n permit tcp any any eq 80\ninterface Gi0/1\n description uplink\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "ip access-list extended ACL-OUT\n permit tcp any any eq 80\n permit tcp any any eq 443\ninterface Gi0/1\n description uplink\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("iosxe")
+        .arg("--policy-override")
+        .arg("0:unordered")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff with an override on a renamed root segment");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    assert!(
+        stdout.contains("- ip access-list extended ACL-IN")
+            && stdout.contains("+ ip access-list extended ACL-OUT"),
+        "the rename must still be reported: {stdout}"
+    );
+    assert!(
+        !stdout.contains("permit"),
+        "--policy-override 0:unordered must cancel the reordered lines it names: {stdout}"
     );
 }
 

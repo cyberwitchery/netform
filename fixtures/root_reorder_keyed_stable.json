@@ -1,0 +1,15 @@
+{
+  "name": "root_reorder_keyed_stable",
+  "intended": "hostname edge-1\nip domain-name example.com\n",
+  "actual": "ip domain-name example.com\nhostname edge-1\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": []
+  }
+}

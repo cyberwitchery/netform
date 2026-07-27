@@ -35,7 +35,7 @@ pub(crate) fn diff_views(
     diff_segment_level(
         &a.lines,
         &b.lines,
-        0,
+        &netform_ir::Path(Vec::new()),
         options,
         &mut edits,
         &mut fallback_contexts,
@@ -46,19 +46,22 @@ pub(crate) fn diff_views(
     })
 }
 
-/// structure-aware sibling matching at one nesting `depth`.
+/// structure-aware sibling matching among the children of `level_path`.
 ///
-/// segments the lines by their path component at `depth`, aligns segments with
-/// Myers, and recurses into each matched block under that block's own order
-/// policy. only the top level (`depth == 0`) records fallback contexts.
+/// segments the lines by their path component at `level_path`'s length, aligns
+/// segments with Myers, and recurses into each matched block under that block's
+/// own order policy. one policy, resolved from `level_path`, governs the whole
+/// level; only the top level (an empty `level_path`) records fallback contexts.
 fn diff_segment_level(
     a_lines: &[ComparisonLine],
     b_lines: &[ComparisonLine],
-    depth: usize,
+    level_path: &netform_ir::Path,
     options: &NormalizeOptions,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<(), DiffError> {
+    let depth = level_path.0.len();
+    let level_policy = options.policy_for_path(level_path);
     let a_segments = segment_at(a_lines, depth);
     let b_segments = segment_at(b_lines, depth);
 
@@ -80,18 +83,28 @@ fn diff_segment_level(
     let mut b_iter = b_segments.into_iter();
     let mut pending_deleted: Vec<Segment> = Vec::new();
     let mut pending_inserted: Vec<Segment> = Vec::new();
+    // (deleted, inserted) index at which each contiguous unmatched run starts.
+    let mut pending_runs: Vec<(usize, usize)> = Vec::new();
+    let mut run_open = false;
 
     for op in ops {
         match op {
             Op::Equal => {
-                flush_replaced_segments(
-                    &mut pending_deleted,
-                    &mut pending_inserted,
-                    options,
-                    edits,
-                    fallback_contexts,
-                    record_fallbacks,
-                )?;
+                // deferred so the multiset diff sees the deleted and inserted lines together.
+                if level_policy == OrderPolicy::Ordered {
+                    let policy =
+                        flush_policy(level_policy, &pending_deleted, &pending_inserted, options);
+                    flush_replaced_segments(
+                        &mut pending_deleted,
+                        &mut pending_inserted,
+                        &mut pending_runs,
+                        policy,
+                        edits,
+                        fallback_contexts,
+                        record_fallbacks,
+                    )?;
+                }
+                run_open = false;
 
                 let left = a_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Equal",
@@ -108,6 +121,10 @@ fn diff_segment_level(
                 diff_matched_segment(&left, &right, options, edits, fallback_contexts)?;
             }
             Op::Delete => {
+                if !run_open {
+                    pending_runs.push((pending_deleted.len(), pending_inserted.len()));
+                    run_open = true;
+                }
                 pending_deleted.push(a_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Delete",
                     side: "left",
@@ -116,6 +133,10 @@ fn diff_segment_level(
                 })?);
             }
             Op::Insert => {
+                if !run_open {
+                    pending_runs.push((pending_deleted.len(), pending_inserted.len()));
+                    run_open = true;
+                }
                 pending_inserted.push(b_iter.next().ok_or(DiffError::EditScriptInconsistency {
                     op: "Insert",
                     side: "right",
@@ -126,10 +147,12 @@ fn diff_segment_level(
         }
     }
 
+    let policy = flush_policy(level_policy, &pending_deleted, &pending_inserted, options);
     flush_replaced_segments(
         &mut pending_deleted,
         &mut pending_inserted,
-        options,
+        &mut pending_runs,
+        policy,
         edits,
         fallback_contexts,
         record_fallbacks,
@@ -176,7 +199,7 @@ fn diff_matched_segment(
         OrderPolicy::Ordered => diff_segment_level(
             left_children,
             right_children,
-            left_header.path.0.len(),
+            &left_header.path,
             options,
             edits,
             fallback_contexts,
@@ -219,18 +242,46 @@ fn diff_matched_lines(left: &[ComparisonLine], right: &[ComparisonLine]) -> Opti
     finalize_edit(deletes, inserts)
 }
 
+/// the policy governing one flush.
+///
+/// only the per-run flush an `Ordered` level performs keys on a sibling's own
+/// path; a merged flush spans siblings and takes the level policy.
+fn flush_policy(
+    level_policy: OrderPolicy,
+    deleted: &[Segment],
+    inserted: &[Segment],
+    options: &NormalizeOptions,
+) -> OrderPolicy {
+    if level_policy != OrderPolicy::Ordered {
+        return level_policy;
+    }
+    deleted
+        .first()
+        .or(inserted.first())
+        .and_then(|segment| segment.lines.first())
+        .map_or(level_policy, |line| options.policy_for_path(&line.path))
+}
+
 /// diffs accumulated non-matching segments as a coarse line-level fallback.
+///
+/// `runs` holds the start index of each contiguous unmatched run, and each run
+/// contributes its own fallback context.
 fn flush_replaced_segments(
     deleted: &mut Vec<Segment>,
     inserted: &mut Vec<Segment>,
-    options: &NormalizeOptions,
+    runs: &mut Vec<(usize, usize)>,
+    policy: OrderPolicy,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
     record_fallbacks: bool,
 ) -> Result<(), DiffError> {
     if deleted.is_empty() && inserted.is_empty() {
+        runs.clear();
         return Ok(());
     }
+
+    let contexts = run_contexts(deleted, inserted, runs);
+    runs.clear();
 
     let deleted_lines = deleted
         .drain(..)
@@ -241,21 +292,34 @@ fn flush_replaced_segments(
         .flat_map(|segment| segment.lines)
         .collect::<Vec<_>>();
 
-    let first_path = deleted_lines
-        .first()
-        .or(inserted_lines.first())
-        .map(|line| &line.path);
-    let empty_path = netform_ir::Path(Vec::new());
-    let mut fallback = line_diff(
-        &deleted_lines,
-        &inserted_lines,
-        options.policy_for_path(first_path.unwrap_or(&empty_path)),
-    )?;
-    if record_fallbacks && let Some(path) = first_path {
-        fallback_contexts.push(path.clone());
+    let mut fallback = line_diff(&deleted_lines, &inserted_lines, policy)?;
+    if record_fallbacks && !fallback.is_empty() {
+        fallback_contexts.extend(contexts);
     }
     edits.append(&mut fallback);
     Ok(())
+}
+
+/// the path identifying each contiguous unmatched run, left side first.
+fn run_contexts(
+    deleted: &[Segment],
+    inserted: &[Segment],
+    runs: &[(usize, usize)],
+) -> Vec<netform_ir::Path> {
+    runs.iter()
+        .enumerate()
+        .filter_map(|(index, &(deleted_start, inserted_start))| {
+            let (deleted_end, inserted_end) = runs
+                .get(index + 1)
+                .copied()
+                .unwrap_or((deleted.len(), inserted.len()));
+            deleted[deleted_start..deleted_end]
+                .first()
+                .or_else(|| inserted[inserted_start..inserted_end].first())
+                .and_then(|segment| segment.lines.first())
+                .map(|line| line.path.clone())
+        })
+        .collect()
 }
 
 pub(crate) fn build_stats(edits: &[Edit]) -> DiffStats {
@@ -1334,6 +1398,263 @@ mod tests {
             deep.edits.is_empty(),
             "deep override should suppress the reorder: {:?}",
             deep.edits
+        );
+    }
+
+    fn default_policy(policy: OrderPolicy) -> NormalizeOptions {
+        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: policy,
+            overrides: Vec::new(),
+        })
+    }
+
+    fn root_reorder_pair() -> (ComparisonView, ComparisonView) {
+        (
+            view(vec![
+                cline("set system host-name edge-1", 100, vec![0]),
+                cline("set system domain-name example.com", 200, vec![1]),
+            ]),
+            view(vec![
+                cline("set system domain-name example.com", 200, vec![0]),
+                cline("set system host-name edge-1", 100, vec![1]),
+            ]),
+        )
+    }
+
+    fn edit_texts(edits: &[Edit]) -> Vec<&str> {
+        edits
+            .iter()
+            .flat_map(|edit| match edit {
+                Edit::Delete { lines, .. } | Edit::Insert { lines, .. } => lines
+                    .iter()
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>(),
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => old_lines
+                    .iter()
+                    .chain(new_lines.iter())
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn root_level_reorder_cancels_under_unordered() {
+        let (a, b) = root_reorder_pair();
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert!(
+            result.edits.is_empty(),
+            "a pure root-level reorder is not drift under unordered: {:?}",
+            result.edits
+        );
+        assert!(
+            result.fallback_contexts.is_empty(),
+            "a diff that reports nothing must not warn about an unreliable region: {:?}",
+            result.fallback_contexts
+        );
+    }
+
+    #[test]
+    fn root_level_reorder_cancels_under_keyed_stable() {
+        let (a, b) = root_reorder_pair();
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::KeyedStable)).unwrap();
+        assert!(
+            result.edits.is_empty(),
+            "a pure root-level reorder is not drift under keyed-stable: {:?}",
+            result.edits
+        );
+        assert!(
+            result.fallback_contexts.is_empty(),
+            "a diff that reports nothing must not warn about an unreliable region: {:?}",
+            result.fallback_contexts
+        );
+    }
+
+    #[test]
+    fn root_level_reorder_with_a_value_change_reports_only_the_change() {
+        let a = view(vec![
+            cline("set system host-name edge-1", 100, vec![0]),
+            cline("set system domain-name example.com", 200, vec![1]),
+        ]);
+        let b = view(vec![
+            cline("set system domain-name example.com", 200, vec![0]),
+            cline("set system host-name edge-2", 100, vec![1]),
+        ]);
+
+        for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+            let result = diff_views(&a, &b, &default_policy(policy)).unwrap();
+            let texts = edit_texts(&result.edits);
+            assert!(
+                texts.contains(&"set system host-name edge-1")
+                    && texts.contains(&"set system host-name edge-2"),
+                "{policy:?} must still report the value change: {:?}",
+                result.edits
+            );
+            assert!(
+                !texts.contains(&"set system domain-name example.com"),
+                "{policy:?} must not report the reordered-but-unchanged line: {:?}",
+                result.edits
+            );
+        }
+    }
+
+    #[test]
+    fn root_level_reorder_with_an_added_line_reports_only_the_addition() {
+        let a = view(vec![
+            cline("set system host-name edge-1", 100, vec![0]),
+            cline("set system domain-name example.com", 200, vec![1]),
+        ]);
+        let b = view(vec![
+            cline("set system domain-name example.com", 200, vec![0]),
+            cline("set system host-name edge-1", 100, vec![1]),
+            cline("set system time-zone UTC", 300, vec![2]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert_eq!(
+            edit_texts(&result.edits),
+            vec!["set system time-zone UTC"],
+            "only the added line is drift: {:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn root_level_block_reorder_cancels_under_unordered() {
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  description uplink", 301, vec![0, 0]),
+            cline("  mtu 9000", 302, vec![0, 1]),
+            cline("interface Eth2", 200, vec![1]),
+            cline("  description peer", 401, vec![1, 0]),
+        ]);
+        let b = view(vec![
+            cline("interface Eth2", 200, vec![0]),
+            cline("  description peer", 401, vec![0, 0]),
+            cline("interface Eth1", 100, vec![1]),
+            cline("  description uplink", 301, vec![1, 0]),
+            cline("  mtu 9000", 302, vec![1, 1]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert!(
+            result.edits.is_empty(),
+            "swapping two whole root blocks is not drift under unordered: {:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn root_level_reorder_under_ordered_reports_a_delete_and_an_insert() {
+        let (a, b) = root_reorder_pair();
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Ordered)).unwrap();
+
+        assert_eq!(result.edits.len(), 2, "{:?}", result.edits);
+        assert!(
+            matches!(&result.edits[0], Edit::Delete { lines, .. }
+                if lines.len() == 1 && lines[0].text == "set system host-name edge-1"),
+            "{:?}",
+            result.edits[0]
+        );
+        assert!(
+            matches!(&result.edits[1], Edit::Insert { lines, .. }
+                if lines.len() == 1 && lines[0].text == "set system host-name edge-1"),
+            "{:?}",
+            result.edits[1]
+        );
+        assert_eq!(
+            result.fallback_contexts,
+            vec![Path(vec![0]), Path(vec![1])],
+            "ordered still flushes each unmatched run at its own position"
+        );
+    }
+
+    fn renamed_block_with_reordered_children() -> (ComparisonView, ComparisonView) {
+        (
+            view(vec![
+                cline("ip access-list extended ACL-IN", 100, vec![0]),
+                cline(" permit tcp any any eq 443", 201, vec![0, 0]),
+                cline(" permit tcp any any eq 80", 202, vec![0, 1]),
+                cline("interface Gi0/1", 300, vec![1]),
+                cline(" description uplink", 301, vec![1, 0]),
+            ]),
+            view(vec![
+                cline("ip access-list extended ACL-OUT", 110, vec![0]),
+                cline(" permit tcp any any eq 80", 202, vec![0, 0]),
+                cline(" permit tcp any any eq 443", 201, vec![0, 1]),
+                cline("interface Gi0/1", 300, vec![1]),
+                cline(" description uplink", 301, vec![1, 0]),
+            ]),
+        )
+    }
+
+    #[test]
+    fn root_level_segment_override_governs_the_fallback_flush() {
+        let (a, b) = renamed_block_with_reordered_children();
+        let options = NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: OrderPolicy::Ordered,
+            overrides: vec![OrderPolicyOverride {
+                context_prefix: vec![0],
+                policy: OrderPolicy::Unordered,
+            }],
+        });
+
+        let result = diff_views(&a, &b, &options).unwrap();
+        let texts = edit_texts(&result.edits);
+        assert!(
+            texts.contains(&"ip access-list extended ACL-IN")
+                && texts.contains(&"ip access-list extended ACL-OUT"),
+            "the rename must still be reported: {:?}",
+            result.edits
+        );
+        assert!(
+            !texts.iter().any(|text| text.contains("permit")),
+            "an override on this segment makes its reordered lines cancel: {:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn renamed_block_without_an_override_reports_its_reordered_children() {
+        let (a, b) = renamed_block_with_reordered_children();
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Ordered)).unwrap();
+        let texts = edit_texts(&result.edits);
+        assert!(
+            texts.iter().any(|text| text.contains("permit")),
+            "without an override the ordered fallback reports the whole segment: {:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn each_fallback_run_at_one_level_warns_under_unordered() {
+        let a = view(vec![
+            cline("interface Eth1", 100, vec![0]),
+            cline("  mtu 9000", 101, vec![0, 0]),
+            cline("interface Common", 200, vec![1]),
+            cline("  foo", 201, vec![1, 0]),
+            cline("interface Eth3", 300, vec![2]),
+            cline("  mtu 1500", 301, vec![2, 0]),
+        ]);
+        let b = view(vec![
+            cline("interface Eth2", 110, vec![0]),
+            cline("  mtu 9000", 101, vec![0, 0]),
+            cline("interface Common", 200, vec![1]),
+            cline("  foo", 201, vec![1, 0]),
+            cline("interface Eth4", 310, vec![2]),
+            cline("  mtu 1500", 301, vec![2, 0]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert!(!result.edits.is_empty(), "both renames are drift");
+        assert_eq!(
+            result.fallback_contexts,
+            vec![Path(vec![0]), Path(vec![2])],
+            "each unmatched run is its own unreliable region"
         );
     }
 
