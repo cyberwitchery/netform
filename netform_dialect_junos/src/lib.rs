@@ -72,64 +72,165 @@ fn parse_junos_parts(raw: &str) -> Option<ParsedLineParts> {
 fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let parsed = parsed?;
     let head = parsed.head.as_str();
-    let args = parsed.args.as_slice();
+    let args = parsed.args.iter().map(String::as_str).collect::<Vec<_>>();
 
     match head {
         "interfaces" | "protocols" | "routing-instances" | "policy-options" | "firewall"
         | "security" | "snmp" | "vlans" | "chassis" | "class-of-service" | "forwarding-options"
         | "applications" | "groups" | "system" | "routing-options" => Some(head.to_string()),
-        "set" => set_style_key_hint(args),
+        "set" => set_style_key_hint(&args),
         _ => None,
     }
 }
 
-fn set_style_key_hint(args: &[String]) -> Option<String> {
+fn set_style_key_hint(args: &[&str]) -> Option<String> {
     match args {
-        [section, name, ..] if section == "interfaces" => Some(format!("set-interface:{name}")),
-        [section, name, ..] if section == "routing-instances" => {
-            Some(format!("set-routing-instance:{name}"))
-        }
-        [section, proto, asn, ..] if section == "protocols" && proto == "bgp" => {
-            Some(format!("set-protocols:bgp:{asn}"))
-        }
-        [section, proto, ..] if section == "protocols" => Some(format!("set-protocols:{proto}")),
-        [section, kind, name, ..]
-            if section == "firewall" && (kind == "filter" || kind == "policer") =>
-        {
+        ["interfaces", name, ..] => Some(format!("set-interface:{name}")),
+        ["routing-instances", name, ..] => Some(format!("set-routing-instance:{name}")),
+        ["protocols", "bgp", asn, ..] => Some(format!("set-protocols:bgp:{asn}")),
+        ["protocols", proto, ..] => Some(format!("set-protocols:{proto}")),
+        ["firewall", kind @ ("filter" | "policer"), name, ..] => {
             Some(format!("set-firewall:{kind}:{name}"))
         }
-        [section, sub, _, name, ..] if section == "security" && sub == "zones" => {
-            Some(format!("set-security:zone:{name}"))
-        }
-        [section, ..] if section == "security" => Some("set-security".into()),
-        [section, name, ..] if section == "vlans" => Some(format!("set-vlan:{name}")),
-        [section, kind, name, ..] if section == "applications" => {
-            Some(format!("set-applications:{kind}:{name}"))
-        }
-        [section, name, ..] if section == "groups" => Some(format!("set-group:{name}")),
-        [section, kind, name, ..] if section == "policy-options" => {
-            Some(format!("set-policy-options:{kind}:{name}"))
-        }
-        [section, sub, ..]
-            if section == "system"
-                && matches!(
-                    sub.as_str(),
-                    "host-name" | "services" | "login" | "ntp" | "syslog"
-                ) =>
-        {
-            Some(format!("set-system:{sub}"))
-        }
-        [section, ..] if section == "system" => Some("set-system".into()),
-        [section, ..]
-            if matches!(
-                section.as_str(),
-                "snmp" | "chassis" | "class-of-service" | "forwarding-options" | "routing-options"
-            ) =>
-        {
-            Some(format!("set-{section}"))
-        }
+        ["vlans", name, ..] => Some(format!("set-vlan:{name}")),
+        ["applications", kind, name, ..] => Some(format!("set-applications:{kind}:{name}")),
+        ["groups", name, ..] => Some(format!("set-group:{name}")),
+        ["policy-options", kind, name, ..] => Some(format!("set-policy-options:{kind}:{name}")),
+        [
+            section @ ("system" | "security" | "snmp" | "chassis" | "class-of-service"
+            | "forwarding-options" | "routing-options"),
+            rest @ ..,
+        ] => set_identity_len(section, rest)
+            .and_then(|len| rest.get(..len))
+            .map(|identity| set_hint(section, identity)),
         _ => None,
     }
+}
+
+/// number of leading tokens in a `set` statement's section-relative arguments
+/// that form its identity; the remaining tokens are its value.
+///
+/// `None` means the statement keys on its full text instead.  That is the
+/// default because a Junos leaf just as often ends in a set member
+/// (`... system-services ssh`) as in a value, and truncating a member would
+/// merge distinct statements onto one key.
+fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
+    match (section, args) {
+        ("system", ["host-name" | "domain-name" | "time-zone", _]) => Some(1),
+        ("system", ["location", _, _]) => Some(2),
+        ("system", ["root-authentication", "encrypted-password", _]) => Some(2),
+        (
+            "system",
+            [
+                "services",
+                "ssh",
+                "ciphers" | "macs" | "key-exchange" | "hostkey-algorithm",
+                _,
+            ],
+        ) => None,
+        ("system", ["services", _, _, _]) => Some(3),
+        (
+            "system",
+            [
+                "login",
+                "user",
+                _,
+                "authentication",
+                "encrypted-password",
+                _,
+            ],
+        ) => Some(5),
+        ("system", ["login", "user", _, "authentication", ..]) => None,
+        ("system", ["login", "user", _, _, ..]) => Some(4),
+        ("system", ["syslog", "host" | "file" | "user", _, _, _]) => Some(4),
+
+        ("security", ["policies", "default-policy", _]) => Some(2),
+        ("security", ["zones", "security-zone", _, "description" | "screen", _]) => Some(4),
+        ("security", ["address-book", _, "address", _, _]) => Some(4),
+
+        ("snmp", ["contact" | "location" | "name", _]) => Some(1),
+        ("snmp", ["community", _, "authorization", _]) => Some(3),
+
+        ("chassis", ["alarm", _, _, _]) => Some(3),
+        ("chassis", ["aggregated-devices", _, "device-count", _]) => Some(3),
+
+        ("class-of-service", ["interfaces", _, "scheduler-map", _]) => Some(3),
+        ("class-of-service", ["interfaces", _, "unit", _, "scheduler-map", _]) => Some(5),
+
+        ("forwarding-options", ["sampling", "input", _, _]) => Some(3),
+
+        ("routing-options", ["autonomous-system" | "router-id", _]) => Some(1),
+        (
+            "routing-options",
+            [
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                "discard" | "reject" | "receive",
+            ],
+        ) => Some(3),
+        (
+            "routing-options",
+            [
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                "qualified-next-hop",
+                _,
+                _,
+                ..,
+            ],
+        ) => Some(6),
+        ("routing-options", ["static" | "aggregate" | "generate", "route", _, _, ..]) => Some(4),
+        (
+            "routing-options",
+            [
+                "rib",
+                _,
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                "discard" | "reject" | "receive",
+            ],
+        ) => Some(5),
+        (
+            "routing-options",
+            [
+                "rib",
+                _,
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                "qualified-next-hop",
+                _,
+                _,
+                ..,
+            ],
+        ) => Some(8),
+        (
+            "routing-options",
+            [
+                "rib",
+                _,
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                _,
+                ..,
+            ],
+        ) => Some(6),
+
+        _ => None,
+    }
+}
+
+fn set_hint(section: &str, identity: &[&str]) -> String {
+    let mut hint = format!("set-{section}");
+    for token in identity {
+        hint.push(':');
+        hint.push_str(token);
+    }
+    hint
 }
 
 #[cfg(test)]
@@ -178,6 +279,18 @@ mod tests {
     fn hint(line: &str) -> Option<String> {
         let parsed = parse_junos_parts(line);
         junos_key_hint(parsed.as_ref())
+    }
+
+    /// every distinct statement must land on a distinct key.
+    fn assert_all_distinct(lines: &[&str]) {
+        let mut seen: Vec<(&str, String)> = Vec::new();
+        for line in lines {
+            let key = hint(line).unwrap_or_else(|| line.to_string());
+            if let Some((other, _)) = seen.iter().find(|(_, k)| *k == key) {
+                panic!("`{line}` and `{other}` collide on key `{key}`");
+            }
+            seen.push((line, key));
+        }
     }
 
     #[test]
@@ -308,20 +421,40 @@ mod tests {
     }
 
     #[test]
-    fn key_hint_set_security_zone() {
+    fn key_hint_set_security_zone_description() {
         assert_eq!(
-            hint(
-                "set security zones security-zone TRUST host-inbound-traffic system-services dhcp"
-            ),
-            Some("set-security:zone:TRUST".into()),
+            hint("set security zones security-zone TRUST description \"trusted\""),
+            Some("set-security:zones:security-zone:TRUST:description".into()),
         );
     }
 
     #[test]
-    fn key_hint_set_security_fallback() {
+    fn key_hint_set_security_address_book() {
+        assert_eq!(
+            hint("set security address-book global address WEB 10.0.0.1/32"),
+            Some("set-security:address-book:global:address:WEB".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_security_default_policy() {
+        assert_eq!(
+            hint("set security policies default-policy deny-all"),
+            Some("set-security:policies:default-policy".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_security_membership_leaves_key_on_full_text() {
+        assert_eq!(
+            hint(
+                "set security zones security-zone TRUST host-inbound-traffic system-services dhcp"
+            ),
+            None,
+        );
         assert_eq!(
             hint("set security nat source rule-set NAT-OUT from zone TRUST"),
-            Some("set-security".into()),
+            None,
         );
     }
 
@@ -385,15 +518,33 @@ mod tests {
     fn key_hint_set_snmp() {
         assert_eq!(
             hint("set snmp community public authorization read-only"),
-            Some("set-snmp".into()),
+            Some("set-snmp:community:public:authorization".into()),
         );
+        assert_eq!(
+            hint("set snmp location \"rack 4\""),
+            Some("set-snmp:location".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_snmp_distinguishes_communities() {
+        assert_all_distinct(&[
+            "set snmp community public authorization read-only",
+            "set snmp community private authorization read-write",
+            "set snmp location \"rack 4\"",
+            "set snmp contact ops@example.com",
+        ]);
     }
 
     #[test]
     fn key_hint_set_chassis() {
         assert_eq!(
             hint("set chassis alarm management-ethernet link-down ignore"),
-            Some("set-chassis".into()),
+            Some("set-chassis:alarm:management-ethernet:link-down".into()),
+        );
+        assert_eq!(
+            hint("set chassis aggregated-devices ethernet device-count 8"),
+            Some("set-chassis:aggregated-devices:ethernet:device-count".into()),
         );
     }
 
@@ -401,15 +552,28 @@ mod tests {
     fn key_hint_set_class_of_service() {
         assert_eq!(
             hint("set class-of-service interfaces ge-0/0/0 scheduler-map SCHED"),
-            Some("set-class-of-service".into()),
+            Some("set-class-of-service:interfaces:ge-0/0/0:scheduler-map".into()),
         );
+        assert_eq!(
+            hint("set class-of-service interfaces ge-0/0/0 unit 0 scheduler-map SCHED"),
+            Some("set-class-of-service:interfaces:ge-0/0/0:unit:0:scheduler-map".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_class_of_service_distinguishes_interfaces() {
+        assert_all_distinct(&[
+            "set class-of-service interfaces ge-0/0/0 scheduler-map SCHED-A",
+            "set class-of-service interfaces ge-0/0/1 scheduler-map SCHED-B",
+            "set class-of-service interfaces ge-0/0/0 unit 0 scheduler-map SCHED-C",
+        ]);
     }
 
     #[test]
     fn key_hint_set_forwarding_options() {
         assert_eq!(
             hint("set forwarding-options sampling input rate 1000"),
-            Some("set-forwarding-options".into()),
+            Some("set-forwarding-options:sampling:input:rate".into()),
         );
     }
 
@@ -432,10 +596,79 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_set_system_domain_name() {
+        assert_eq!(
+            hint("set system domain-name example.com"),
+            Some("set-system:domain-name".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_time_zone() {
+        assert_eq!(
+            hint("set system time-zone UTC"),
+            Some("set-system:time-zone".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_location() {
+        assert_eq!(
+            hint("set system location building \"HQ\""),
+            Some("set-system:location:building".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_root_authentication() {
+        assert_eq!(
+            hint("set system root-authentication encrypted-password \"$6$abc\""),
+            Some("set-system:root-authentication:encrypted-password".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_root_ssh_keys_key_on_full_text() {
+        for kind in ["ssh-rsa", "ssh-ed25519", "ssh-ecdsa", "ssh-dss"] {
+            assert_eq!(
+                hint(&format!(
+                    "set system root-authentication {kind} \"AAAAB3NzaC1yc2E\""
+                )),
+                None,
+                "a root stanza carries several `{kind}` keys",
+            );
+        }
+    }
+
+    #[test]
+    fn key_hint_set_system_root_authentication_distinguishes_entries() {
+        assert_all_distinct(&[
+            "set system root-authentication encrypted-password \"$6$abc\"",
+            "set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@a\"",
+            "set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@b\"",
+            "set system root-authentication ssh-ed25519 \"AAAAC3NzaC1lZDI\"",
+        ]);
+    }
+
+    #[test]
     fn key_hint_set_system_services() {
         assert_eq!(
             hint("set system services ssh root-login deny"),
-            Some("set-system:services".into()),
+            Some("set-system:services:ssh:root-login".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_services_multi_value_leaves_key_on_full_text() {
+        assert_eq!(hint("set system services ssh ciphers aes256-ctr"), None);
+        assert_eq!(hint("set system services ssh macs hmac-sha2-256"), None);
+        assert_eq!(
+            hint("set system services ssh key-exchange ecdh-sha2-nistp256"),
+            None,
+        );
+        assert_eq!(
+            hint("set system services ssh hostkey-algorithm ssh-ed25519"),
+            None,
         );
     }
 
@@ -443,15 +676,23 @@ mod tests {
     fn key_hint_set_system_login() {
         assert_eq!(
             hint("set system login user admin class super-user"),
-            Some("set-system:login".into()),
+            Some("set-system:login:user:admin:class".into()),
+        );
+        assert_eq!(
+            hint("set system login user admin authentication encrypted-password \"$6$abc\""),
+            Some("set-system:login:user:admin:authentication:encrypted-password".into()),
         );
     }
 
     #[test]
-    fn key_hint_set_system_ntp() {
+    fn key_hint_set_system_login_ssh_keys_key_on_full_text() {
         assert_eq!(
-            hint("set system ntp server 10.0.0.1"),
-            Some("set-system:ntp".into()),
+            hint("set system login user admin authentication ssh-rsa \"AAAAB3NzaC1yc2E\""),
+            None,
+        );
+        assert_eq!(
+            hint("set system login user admin authentication ssh-ed25519 \"AAAAC3NzaC1lZDI\""),
+            None,
         );
     }
 
@@ -459,23 +700,126 @@ mod tests {
     fn key_hint_set_system_syslog() {
         assert_eq!(
             hint("set system syslog host 10.0.0.2 any any"),
-            Some("set-system:syslog".into()),
+            Some("set-system:syslog:host:10.0.0.2:any".into()),
         );
-    }
-
-    #[test]
-    fn key_hint_set_system_fallback() {
         assert_eq!(
-            hint("set system name-server 8.8.8.8"),
-            Some("set-system".into()),
+            hint("set system syslog file messages authorization info"),
+            Some("set-system:syslog:file:messages:authorization".into()),
         );
     }
 
     #[test]
-    fn key_hint_set_routing_options() {
+    fn key_hint_set_system_services_distinguishes_multi_value_leaves() {
+        assert_all_distinct(&[
+            "set system services ssh root-login deny",
+            "set system services ssh ciphers aes256-ctr",
+            "set system services ssh ciphers aes128-ctr",
+            "set system services ssh macs hmac-sha2-256",
+            "set system services ssh macs hmac-sha2-512",
+            "set system services ssh key-exchange ecdh-sha2-nistp256",
+            "set system services ssh key-exchange group14-sha1",
+            "set system services ssh hostkey-algorithm ssh-rsa",
+            "set system services ssh hostkey-algorithm ssh-ed25519",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_system_login_distinguishes_authentication_entries() {
+        assert_all_distinct(&[
+            "set system login user admin class super-user",
+            "set system login user admin authentication encrypted-password \"$6$abc\"",
+            "set system login user admin authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@a\"",
+            "set system login user admin authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@b\"",
+            "set system login user admin authentication ssh-ed25519 \"AAAAC3NzaC1lZDI\"",
+            "set system login user ops authentication encrypted-password \"$6$def\"",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_system_membership_leaves_key_on_full_text() {
+        assert_eq!(hint("set system name-server 8.8.8.8"), None);
+        assert_eq!(hint("set system ntp server 10.0.0.1"), None);
+        assert_eq!(hint("set system authentication-order radius"), None);
+        assert_eq!(hint("set system no-redirects"), None);
+    }
+
+    #[test]
+    fn key_hint_set_system_distinguishes_statements() {
+        assert_all_distinct(&[
+            "set system host-name router-1",
+            "set system domain-name example.com",
+            "set system time-zone UTC",
+            "set system name-server 8.8.8.8",
+            "set system name-server 1.1.1.1",
+            "set system services ssh root-login deny",
+            "set system services ssh protocol-version v2",
+            "set system services netconf ssh",
+            "set system login user admin class super-user",
+            "set system login user admin uid 2000",
+            "set system login user ops class read-only",
+            "set system syslog host 10.0.0.2 any any",
+            "set system syslog host 10.0.0.2 authorization info",
+            "set system syslog host 10.0.0.3 any any",
+            "set system ntp server 10.0.0.1",
+            "set system ntp server 10.0.0.2",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_static_route_keys_on_prefix_and_attribute() {
         assert_eq!(
             hint("set routing-options static route 0.0.0.0/0 next-hop 10.0.0.1"),
-            Some("set-routing-options".into()),
+            Some("set-routing-options:static:route:0.0.0.0/0:next-hop".into()),
+        );
+        assert_eq!(
+            hint("set routing-options static route 0.0.0.0/0 preference 5"),
+            Some("set-routing-options:static:route:0.0.0.0/0:preference".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_next_hop_type_flag_keys_on_prefix() {
+        for flag in ["discard", "reject", "receive"] {
+            assert_eq!(
+                hint(&format!(
+                    "set routing-options static route 10.0.0.0/8 {flag}"
+                )),
+                Some("set-routing-options:static:route:10.0.0.0/8".into()),
+                "`{flag}` must key on the route so swapping one for another is a value change",
+            );
+        }
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_bare_route_keys_on_full_text() {
+        assert_eq!(hint("set routing-options static route 10.0.0.0/8"), None);
+        assert_eq!(
+            hint("set routing-options rib inet6.0 static route ::/0"),
+            None,
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_rib_scoped_route() {
+        assert_eq!(
+            hint("set routing-options rib inet6.0 static route ::/0 next-hop 2001:db8::1"),
+            Some("set-routing-options:rib:inet6.0:static:route:::/0:next-hop".into()),
+        );
+        assert_eq!(
+            hint("set routing-options rib inet6.0 static route ::/0 discard"),
+            Some("set-routing-options:rib:inet6.0:static:route:::/0".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_aggregate_and_generate() {
+        assert_eq!(
+            hint("set routing-options aggregate route 10.0.0.0/8 policy AGG"),
+            Some("set-routing-options:aggregate:route:10.0.0.0/8:policy".into()),
+        );
+        assert_eq!(
+            hint("set routing-options generate route 0.0.0.0/0 policy GEN"),
+            Some("set-routing-options:generate:route:0.0.0.0/0:policy".into()),
         );
     }
 
@@ -483,7 +827,88 @@ mod tests {
     fn key_hint_set_routing_options_autonomous_system() {
         assert_eq!(
             hint("set routing-options autonomous-system 65001"),
-            Some("set-routing-options".into()),
+            Some("set-routing-options:autonomous-system".into()),
+        );
+        assert_eq!(
+            hint("set routing-options router-id 10.0.0.1"),
+            Some("set-routing-options:router-id".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_distinguishes_statements() {
+        assert_all_distinct(&[
+            "set routing-options autonomous-system 65001",
+            "set routing-options router-id 10.0.0.1",
+            "set routing-options static route 0.0.0.0/0 next-hop 10.0.0.1",
+            "set routing-options static route 10.0.0.0/8 next-hop 10.0.0.2",
+            "set routing-options rib inet6.0 static route ::/0 next-hop 2001:db8::1",
+            "set routing-options forwarding-table export LOAD-BALANCE",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_distinguishes_route_attributes() {
+        assert_all_distinct(&[
+            "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1",
+            "set routing-options static route 10.0.0.0/8 preference 5",
+            "set routing-options static route 10.0.0.0/8 metric 10",
+            "set routing-options static route 10.0.0.0/8 tag 100",
+            "set routing-options static route 10.0.0.0/8 no-readvertise",
+            "set routing-options static route 10.0.0.0/8 resolve",
+            "set routing-options rib inet6.0 static route ::/0 next-hop 2001:db8::1",
+            "set routing-options rib inet6.0 static route ::/0 preference 5",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_qualified_next_hop_keys_on_address_and_attribute() {
+        assert_eq!(
+            hint(
+                "set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 preference 10"
+            ),
+            Some(
+                "set-routing-options:static:route:10.0.0.0/8:qualified-next-hop:192.0.2.1:preference"
+                    .into()
+            ),
+        );
+        assert_eq!(
+            hint(
+                "set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 metric 5"
+            ),
+            Some(
+                "set-routing-options:rib:inet6.0:static:route:::/0:qualified-next-hop:2001:db8::1:metric"
+                    .into()
+            ),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_bare_qualified_next_hop_keys_on_the_attribute() {
+        assert_eq!(
+            hint("set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1"),
+            Some("set-routing-options:static:route:10.0.0.0/8:qualified-next-hop".into()),
+            "a documented collision, as for `next-hop`",
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_distinguishes_qualified_next_hop_attributes() {
+        assert_all_distinct(&[
+            "set routing-options static route 10.0.0.0/8 preference 5",
+            "set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 preference 10",
+            "set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 metric 5",
+            "set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.2 preference 20",
+            "set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 preference 10",
+            "set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 metric 5",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_value_change_keeps_identity() {
+        assert_eq!(
+            hint("set routing-options static route 0.0.0.0/0 next-hop 10.0.0.1"),
+            hint("set routing-options static route 0.0.0.0/0 next-hop 10.0.0.9"),
         );
     }
 

@@ -1,21 +1,26 @@
 {
   "name": "junos_reorder_keyed_stable",
   "dialect": "junos",
-  "intended": "interfaces {\n    ge-0/0/0 {\n        description \"uplink-a\";\n    }\n    ge-0/0/1 {\n        description \"uplink-b\";\n    }\n}\n",
-  "actual": "interfaces {\n    ge-0/0/1 {\n        description \"uplink-b\";\n    }\n    ge-0/0/0 {\n        description \"uplink-a\";\n    }\n}\n",
+  "intended": "interfaces {\n    ge-0/0/0 {\n        description \"uplink-a\";\n    }\n    ge-0/0/1 {\n        description \"uplink-b\";\n    }\n}\nset system domain-name example.com\nset system time-zone UTC\nset routing-options static route 0.0.0.0/0 next-hop 192.0.2.1\nset routing-options autonomous-system 65001\n",
+  "actual": "interfaces {\n    ge-0/0/1 {\n        description \"uplink-b\";\n    }\n    ge-0/0/0 {\n        description \"uplink-a\";\n    }\n}\nset system domain-name example.com\nset system time-zone Europe/Berlin\nset routing-options static route 0.0.0.0/0 next-hop 192.0.2.9\nset routing-options autonomous-system 65001\n",
   "normalization_steps": [],
   "order_policy": {
     "default": "ordered",
     "overrides": [
       {
-        "context_prefix": [0],
+        "context_prefix": [
+          0
+        ],
         "policy": "keyed-stable"
       }
     ]
   },
   "expected": {
-    "has_changes": false,
-    "edit_types": [],
+    "has_changes": true,
+    "edit_types": [
+      "Replace",
+      "Replace"
+    ],
     "finding_codes": []
   }
 }
