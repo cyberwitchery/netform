@@ -201,6 +201,42 @@ fn self_contained_banner_opens_no_region() {
 }
 
 #[test]
+fn punctuation_delimiter_glued_to_the_text_opens_a_region() {
+    let input = "banner motd #Warning restricted\n! Authorized use only\n#\nhostname edge-1\n";
+    let doc = parse_with_dialect(input, &IOS_LIKE);
+
+    assert_eq!(
+        line_kinds(&doc),
+        vec![
+            (
+                "banner motd #Warning restricted".to_string(),
+                TriviaKind::Content
+            ),
+            ("! Authorized use only".to_string(), TriviaKind::Literal),
+            ("#".to_string(), TriviaKind::Literal),
+            ("hostname edge-1".to_string(), TriviaKind::Content),
+        ],
+    );
+    assert!(doc.metadata.parse_findings.is_empty());
+}
+
+#[test]
+fn word_delimiter_is_not_split_by_its_first_character() {
+    let input = "banner motd EOF\nEnd of the line\nEOF\n! real comment\n";
+    let doc = parse_with_dialect(input, &IOS_LIKE);
+
+    assert_eq!(
+        line_kinds(&doc),
+        vec![
+            ("banner motd EOF".to_string(), TriviaKind::Content),
+            ("End of the line".to_string(), TriviaKind::Literal),
+            ("EOF".to_string(), TriviaKind::Literal),
+            ("! real comment".to_string(), TriviaKind::Comment),
+        ],
+    );
+}
+
+#[test]
 fn delimiter_less_eos_form_ends_at_eof_marker() {
     let input = "banner motd\nWelcome to edge-1\nEOF\n! real comment\n";
     let doc = parse_with_dialect(input, &IOS_LIKE);

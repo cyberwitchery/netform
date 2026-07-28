@@ -1,6 +1,6 @@
 //! Integration coverage for IOS-family banner bodies as literal regions.
 //!
-//! Both tests below fail on the pre-fix code: banner text was classified,
+//! Both symptoms below reproduce on the pre-fix code: banner text was classified,
 //! tokenized and key-hinted as if it were configuration, so a `!`-prefixed
 //! banner line was dropped by `--ignore-comments` and a banner line reading
 //! `interface …` collided with the identity of the real interface.
@@ -87,6 +87,27 @@ fn real_comments_are_still_dropped_by_ignore_comments() {
 fn identical_configs_with_banners_report_no_changes() {
     let diff = diff(BANNER_WITH_BANG, BANNER_WITH_BANG, ignore_comments());
     assert!(!diff.has_changes);
+}
+
+const BANNER_WITH_GLUED_DELIMITER: &str = "\
+banner motd #Warning restricted
+! Authorized use only
+#
+interface GigabitEthernet0/0/0
+  description WAN uplink
+";
+
+#[test]
+fn glued_single_character_delimiter_banner_survives_ignore_comments() {
+    let after = BANNER_WITH_GLUED_DELIMITER.replace("Authorized use only", "CHANGED banner text");
+
+    let diff = diff(BANNER_WITH_GLUED_DELIMITER, &after, ignore_comments());
+
+    assert!(diff.has_changes, "banner text change must be visible");
+    assert_eq!(
+        edit_texts(&diff),
+        vec!["! Authorized use only", "! CHANGED banner text"],
+    );
 }
 
 const BANNER_SHADOWING_AN_INTERFACE: &str = "\

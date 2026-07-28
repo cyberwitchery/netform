@@ -344,6 +344,7 @@ impl Dialect for IosLikeDialect {
 /// closes the free-text body that follows it.
 ///
 /// - `banner motd ^C` — closed by the next line containing the delimiter.
+/// - `banner motd #Warning` — a delimiter glued to the text, closed by the next `#`.
 /// - `banner motd` — the delimiter-less EOS form, closed by a line reading `EOF`.
 ///
 /// returns `None` for a banner whose delimiter reappears on its own line, which
@@ -374,12 +375,13 @@ pub fn ios_like_literal_region(raw: &str) -> Option<LiteralTerminator> {
     }
 
     // the delimiter can be glued to the text: `^CHi^C` is a whole banner, `^CHi` opens one.
+    // a punctuation opener splits that text off; an alphanumeric token is the word form (`EOF`).
     let opener = delimiter_opener(delimiter);
     if delimiter.len() > opener.len() {
         if delimiter.ends_with(opener) {
             return None;
         }
-        if delimiter.starts_with('^') {
+        if !opener.starts_with(char::is_alphanumeric) {
             return Some(LiteralTerminator::Contains(opener.to_string()));
         }
     }
@@ -1303,6 +1305,22 @@ mod tests {
         assert_eq!(
             ios_like_literal_region("banner motd ^CHi"),
             Some(LiteralTerminator::Contains("^C".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_splits_punctuation_delimiter_from_glued_text() {
+        assert_eq!(
+            ios_like_literal_region("banner motd #Warning restricted"),
+            Some(LiteralTerminator::Contains("#".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner login @Hi"),
+            Some(LiteralTerminator::Contains("@".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd \u{3}Warning"),
+            Some(LiteralTerminator::Contains("\u{3}".into())),
         );
     }
 
