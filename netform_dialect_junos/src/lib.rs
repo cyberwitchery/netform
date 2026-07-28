@@ -100,7 +100,9 @@ fn set_style_key_hint(args: &[&str]) -> Option<String> {
             section @ ("system" | "security" | "snmp" | "chassis" | "class-of-service"
             | "forwarding-options" | "routing-options"),
             rest @ ..,
-        ] => set_identity_len(section, rest).map(|len| set_hint(section, &rest[..len])),
+        ] => set_identity_len(section, rest)
+            .and_then(|len| rest.get(..len))
+            .map(|identity| set_hint(section, identity)),
         _ => None,
     }
 }
@@ -116,7 +118,28 @@ fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
     match (section, args) {
         ("system", ["host-name" | "domain-name" | "time-zone", _]) => Some(1),
         ("system", ["location" | "root-authentication", _, _]) => Some(2),
+        (
+            "system",
+            [
+                "services",
+                "ssh",
+                "ciphers" | "macs" | "key-exchange" | "hostkey-algorithm",
+                _,
+            ],
+        ) => None,
         ("system", ["services", _, _, _]) => Some(3),
+        (
+            "system",
+            [
+                "login",
+                "user",
+                _,
+                "authentication",
+                "encrypted-password",
+                _,
+            ],
+        ) => Some(5),
+        ("system", ["login", "user", _, "authentication", ..]) => None,
         ("system", ["login", "user", _, _, ..]) => Some(4),
         ("system", ["syslog", "host" | "file" | "user", _, _, _]) => Some(4),
 
@@ -136,7 +159,16 @@ fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
         ("forwarding-options", ["sampling", "input", _, _]) => Some(3),
 
         ("routing-options", ["autonomous-system" | "router-id", _]) => Some(1),
-        ("routing-options", ["static" | "aggregate" | "generate", "route", _, ..]) => Some(3),
+        (
+            "routing-options",
+            [
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                "discard" | "reject" | "receive",
+            ],
+        ) => Some(3),
+        ("routing-options", ["static" | "aggregate" | "generate", "route", _, _, ..]) => Some(4),
         (
             "routing-options",
             [
@@ -145,9 +177,21 @@ fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
                 "static" | "aggregate" | "generate",
                 "route",
                 _,
-                ..,
+                "discard" | "reject" | "receive",
             ],
         ) => Some(5),
+        (
+            "routing-options",
+            [
+                "rib",
+                _,
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                _,
+                ..,
+            ],
+        ) => Some(6),
 
         _ => None,
     }
@@ -557,6 +601,20 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_set_system_services_multi_value_leaves_key_on_full_text() {
+        assert_eq!(hint("set system services ssh ciphers aes256-ctr"), None);
+        assert_eq!(hint("set system services ssh macs hmac-sha2-256"), None);
+        assert_eq!(
+            hint("set system services ssh key-exchange ecdh-sha2-nistp256"),
+            None,
+        );
+        assert_eq!(
+            hint("set system services ssh hostkey-algorithm ssh-ed25519"),
+            None,
+        );
+    }
+
+    #[test]
     fn key_hint_set_system_login() {
         assert_eq!(
             hint("set system login user admin class super-user"),
@@ -564,7 +622,19 @@ mod tests {
         );
         assert_eq!(
             hint("set system login user admin authentication encrypted-password \"$6$abc\""),
-            Some("set-system:login:user:admin:authentication".into()),
+            Some("set-system:login:user:admin:authentication:encrypted-password".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_system_login_ssh_keys_key_on_full_text() {
+        assert_eq!(
+            hint("set system login user admin authentication ssh-rsa \"AAAAB3NzaC1yc2E\""),
+            None,
+        );
+        assert_eq!(
+            hint("set system login user admin authentication ssh-ed25519 \"AAAAC3NzaC1lZDI\""),
+            None,
         );
     }
 
@@ -578,6 +648,33 @@ mod tests {
             hint("set system syslog file messages authorization info"),
             Some("set-system:syslog:file:messages:authorization".into()),
         );
+    }
+
+    #[test]
+    fn key_hint_set_system_services_distinguishes_multi_value_leaves() {
+        assert_all_distinct(&[
+            "set system services ssh root-login deny",
+            "set system services ssh ciphers aes256-ctr",
+            "set system services ssh ciphers aes128-ctr",
+            "set system services ssh macs hmac-sha2-256",
+            "set system services ssh macs hmac-sha2-512",
+            "set system services ssh key-exchange ecdh-sha2-nistp256",
+            "set system services ssh key-exchange group14-sha1",
+            "set system services ssh hostkey-algorithm ssh-rsa",
+            "set system services ssh hostkey-algorithm ssh-ed25519",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_system_login_distinguishes_authentication_entries() {
+        assert_all_distinct(&[
+            "set system login user admin class super-user",
+            "set system login user admin authentication encrypted-password \"$6$abc\"",
+            "set system login user admin authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@a\"",
+            "set system login user admin authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@b\"",
+            "set system login user admin authentication ssh-ed25519 \"AAAAC3NzaC1lZDI\"",
+            "set system login user ops authentication encrypted-password \"$6$def\"",
+        ]);
     }
 
     #[test]
@@ -611,14 +708,36 @@ mod tests {
     }
 
     #[test]
-    fn key_hint_set_routing_options_static_route_keys_on_prefix() {
+    fn key_hint_set_routing_options_static_route_keys_on_prefix_and_attribute() {
         assert_eq!(
             hint("set routing-options static route 0.0.0.0/0 next-hop 10.0.0.1"),
-            Some("set-routing-options:static:route:0.0.0.0/0".into()),
+            Some("set-routing-options:static:route:0.0.0.0/0:next-hop".into()),
         );
         assert_eq!(
-            hint("set routing-options static route 10.0.0.0/8 discard"),
-            Some("set-routing-options:static:route:10.0.0.0/8".into()),
+            hint("set routing-options static route 0.0.0.0/0 preference 5"),
+            Some("set-routing-options:static:route:0.0.0.0/0:preference".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_next_hop_type_flag_keys_on_prefix() {
+        for flag in ["discard", "reject", "receive"] {
+            assert_eq!(
+                hint(&format!(
+                    "set routing-options static route 10.0.0.0/8 {flag}"
+                )),
+                Some("set-routing-options:static:route:10.0.0.0/8".into()),
+                "`{flag}` must key on the route so swapping one for another is a value change",
+            );
+        }
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_bare_route_keys_on_full_text() {
+        assert_eq!(hint("set routing-options static route 10.0.0.0/8"), None);
+        assert_eq!(
+            hint("set routing-options rib inet6.0 static route ::/0"),
+            None,
         );
     }
 
@@ -626,6 +745,10 @@ mod tests {
     fn key_hint_set_routing_options_rib_scoped_route() {
         assert_eq!(
             hint("set routing-options rib inet6.0 static route ::/0 next-hop 2001:db8::1"),
+            Some("set-routing-options:rib:inet6.0:static:route:::/0:next-hop".into()),
+        );
+        assert_eq!(
+            hint("set routing-options rib inet6.0 static route ::/0 discard"),
             Some("set-routing-options:rib:inet6.0:static:route:::/0".into()),
         );
     }
@@ -634,11 +757,11 @@ mod tests {
     fn key_hint_set_routing_options_aggregate_and_generate() {
         assert_eq!(
             hint("set routing-options aggregate route 10.0.0.0/8 policy AGG"),
-            Some("set-routing-options:aggregate:route:10.0.0.0/8".into()),
+            Some("set-routing-options:aggregate:route:10.0.0.0/8:policy".into()),
         );
         assert_eq!(
             hint("set routing-options generate route 0.0.0.0/0 policy GEN"),
-            Some("set-routing-options:generate:route:0.0.0.0/0".into()),
+            Some("set-routing-options:generate:route:0.0.0.0/0:policy".into()),
         );
     }
 
@@ -663,6 +786,20 @@ mod tests {
             "set routing-options static route 10.0.0.0/8 next-hop 10.0.0.2",
             "set routing-options rib inet6.0 static route ::/0 next-hop 2001:db8::1",
             "set routing-options forwarding-table export LOAD-BALANCE",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_distinguishes_route_attributes() {
+        assert_all_distinct(&[
+            "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1",
+            "set routing-options static route 10.0.0.0/8 preference 5",
+            "set routing-options static route 10.0.0.0/8 metric 10",
+            "set routing-options static route 10.0.0.0/8 tag 100",
+            "set routing-options static route 10.0.0.0/8 no-readvertise",
+            "set routing-options static route 10.0.0.0/8 resolve",
+            "set routing-options rib inet6.0 static route ::/0 next-hop 2001:db8::1",
+            "set routing-options rib inet6.0 static route ::/0 preference 5",
         ]);
     }
 
