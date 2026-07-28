@@ -1,7 +1,8 @@
 //! Integration coverage for Junos `set`-style identity keys under keyed-stable.
 //!
-//! Every test here fails on the pre-fix code, where a section's statements
-//! shared one identity and were therefore paired with each other.
+//! The reorder cases fail on the pre-fix code, where a section's statements
+//! shared one identity and were therefore paired with each other; the
+//! value-change cases pin identities that are deliberately kept coarse.
 
 use netform_dialect_junos::parse_junos;
 use netform_diff::{
@@ -222,6 +223,87 @@ set system login user admin authentication encrypted-password \"$6$xyz\"
             ],
         )],
         "a user has one password, so rotating it is a value change"
+    );
+    assert_no_ambiguous_keys(&diff);
+}
+
+#[test]
+fn reordered_qualified_next_hop_attributes_report_nothing() {
+    let before = "\
+set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 preference 10
+set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 metric 5
+set routing-options static route 10.0.0.0/8 preference 5
+";
+    let after = "\
+set routing-options static route 10.0.0.0/8 preference 5
+set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 metric 5
+set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 preference 10
+";
+
+    let diff = diff(before, after);
+
+    assert!(!diff.has_changes, "pure reordering: {:?}", diff.edits);
+    assert!(diff.findings.is_empty(), "{:?}", diff.findings);
+}
+
+#[test]
+fn reordered_rib_scoped_qualified_next_hop_attributes_report_nothing() {
+    let before = "\
+set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 preference 10
+set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 metric 5
+";
+    let after = "\
+set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 metric 5
+set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 preference 10
+";
+
+    let diff = diff(before, after);
+
+    assert!(!diff.has_changes, "pure reordering: {:?}", diff.edits);
+    assert!(diff.findings.is_empty(), "{:?}", diff.findings);
+}
+
+#[test]
+fn reordered_root_authentication_entries_report_nothing() {
+    let before = "\
+set system root-authentication encrypted-password \"$6$abc\"
+set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@a\"
+set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@b\"
+set system root-authentication ssh-ed25519 \"AAAAC3NzaC1lZDI\"
+";
+    let after = "\
+set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@b\"
+set system root-authentication ssh-ed25519 \"AAAAC3NzaC1lZDI\"
+set system root-authentication encrypted-password \"$6$abc\"
+set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@a\"
+";
+
+    let diff = diff(before, after);
+
+    assert!(!diff.has_changes, "pure reordering: {:?}", diff.edits);
+    assert!(diff.findings.is_empty(), "{:?}", diff.findings);
+}
+
+#[test]
+fn root_password_change_reads_as_a_value_change() {
+    let before = "\
+set system root-authentication encrypted-password \"$6$abc\"
+set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@a\"
+";
+    let after = "\
+set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@a\"
+set system root-authentication encrypted-password \"$6$xyz\"
+";
+
+    let diff = diff(before, after);
+
+    assert_eq!(
+        replaced_pairs(&diff),
+        vec![(
+            vec!["set system root-authentication encrypted-password \"$6$abc\"".to_string()],
+            vec!["set system root-authentication encrypted-password \"$6$xyz\"".to_string()],
+        )],
+        "root has one password, so rotating it is a value change"
     );
     assert_no_ambiguous_keys(&diff);
 }

@@ -117,7 +117,8 @@ fn set_style_key_hint(args: &[&str]) -> Option<String> {
 fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
     match (section, args) {
         ("system", ["host-name" | "domain-name" | "time-zone", _]) => Some(1),
-        ("system", ["location" | "root-authentication", _, _]) => Some(2),
+        ("system", ["location", _, _]) => Some(2),
+        ("system", ["root-authentication", "encrypted-password", _]) => Some(2),
         (
             "system",
             [
@@ -168,6 +169,18 @@ fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
                 "discard" | "reject" | "receive",
             ],
         ) => Some(3),
+        (
+            "routing-options",
+            [
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                "qualified-next-hop",
+                _,
+                _,
+                ..,
+            ],
+        ) => Some(6),
         ("routing-options", ["static" | "aggregate" | "generate", "route", _, _, ..]) => Some(4),
         (
             "routing-options",
@@ -180,6 +193,20 @@ fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
                 "discard" | "reject" | "receive",
             ],
         ) => Some(5),
+        (
+            "routing-options",
+            [
+                "rib",
+                _,
+                "static" | "aggregate" | "generate",
+                "route",
+                _,
+                "qualified-next-hop",
+                _,
+                _,
+                ..,
+            ],
+        ) => Some(8),
         (
             "routing-options",
             [
@@ -585,11 +612,42 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_set_system_location() {
+        assert_eq!(
+            hint("set system location building \"HQ\""),
+            Some("set-system:location:building".into()),
+        );
+    }
+
+    #[test]
     fn key_hint_set_system_root_authentication() {
         assert_eq!(
             hint("set system root-authentication encrypted-password \"$6$abc\""),
             Some("set-system:root-authentication:encrypted-password".into()),
         );
+    }
+
+    #[test]
+    fn key_hint_set_system_root_ssh_keys_key_on_full_text() {
+        for kind in ["ssh-rsa", "ssh-ed25519", "ssh-ecdsa", "ssh-dss"] {
+            assert_eq!(
+                hint(&format!(
+                    "set system root-authentication {kind} \"AAAAB3NzaC1yc2E\""
+                )),
+                None,
+                "a root stanza carries several `{kind}` keys",
+            );
+        }
+    }
+
+    #[test]
+    fn key_hint_set_system_root_authentication_distinguishes_entries() {
+        assert_all_distinct(&[
+            "set system root-authentication encrypted-password \"$6$abc\"",
+            "set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@a\"",
+            "set system root-authentication ssh-rsa \"AAAAB3NzaC1yc2E ops@b\"",
+            "set system root-authentication ssh-ed25519 \"AAAAC3NzaC1lZDI\"",
+        ]);
     }
 
     #[test]
@@ -800,6 +858,49 @@ mod tests {
             "set routing-options static route 10.0.0.0/8 resolve",
             "set routing-options rib inet6.0 static route ::/0 next-hop 2001:db8::1",
             "set routing-options rib inet6.0 static route ::/0 preference 5",
+        ]);
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_qualified_next_hop_keys_on_address_and_attribute() {
+        assert_eq!(
+            hint(
+                "set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 preference 10"
+            ),
+            Some(
+                "set-routing-options:static:route:10.0.0.0/8:qualified-next-hop:192.0.2.1:preference"
+                    .into()
+            ),
+        );
+        assert_eq!(
+            hint(
+                "set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 metric 5"
+            ),
+            Some(
+                "set-routing-options:rib:inet6.0:static:route:::/0:qualified-next-hop:2001:db8::1:metric"
+                    .into()
+            ),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_bare_qualified_next_hop_keys_on_the_attribute() {
+        assert_eq!(
+            hint("set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1"),
+            Some("set-routing-options:static:route:10.0.0.0/8:qualified-next-hop".into()),
+            "a documented collision, as for `next-hop`",
+        );
+    }
+
+    #[test]
+    fn key_hint_set_routing_options_distinguishes_qualified_next_hop_attributes() {
+        assert_all_distinct(&[
+            "set routing-options static route 10.0.0.0/8 preference 5",
+            "set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 preference 10",
+            "set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.1 metric 5",
+            "set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.2 preference 20",
+            "set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 preference 10",
+            "set routing-options rib inet6.0 static route ::/0 qualified-next-hop 2001:db8::1 metric 5",
         ]);
     }
 
