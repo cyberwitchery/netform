@@ -84,7 +84,37 @@ fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::{DialectHint, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts};
+    use netform_ir::{
+        DialectHint, Node, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts,
+    };
+
+    fn root_trivia(doc: &Document) -> Vec<(&str, TriviaKind)> {
+        doc.roots
+            .iter()
+            .map(|id| match doc.node(*id).expect("node in arena") {
+                Node::Line(line) => (line.raw.as_str(), line.trivia),
+                Node::Block(block) => panic!("unexpected block {:?}", block.header.raw),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn nxos_hash_delimited_banner_body_is_literal() {
+        let doc = parse_nxos(
+            "banner motd #\n! not a comment\ninterface Ethernet1/1\n#\nhostname spine-01\n",
+        );
+
+        assert_eq!(
+            root_trivia(&doc),
+            vec![
+                ("banner motd #", TriviaKind::Content),
+                ("! not a comment", TriviaKind::Literal),
+                ("interface Ethernet1/1", TriviaKind::Literal),
+                ("#", TriviaKind::Literal),
+                ("hostname spine-01", TriviaKind::Content),
+            ],
+        );
+    }
 
     #[test]
     fn nxos_comment_classification_supports_bang_and_hash() {
