@@ -20,7 +20,7 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 - stable node ids and path addressing for diff output
 - configurable normalization (comments, blank lines, whitespace)
 - deterministic line-based edits with spans and stats
-- markdown report output plus `diff.json` / `plan.json`
+- unified or markdown reports plus machine-readable `diff.json` / `plan.json`
 
 ## docs
 
@@ -36,13 +36,13 @@ add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-netform_ir = "0.3.0"
-netform_diff = "0.3.0"
-netform_dialect_eos = "0.3.0"
-netform_dialect_iosxe = "0.3.0"
-netform_dialect_junos = "0.3.0"
-netform_dialect_nxos = "0.3.0"
-netform_dialect_fortios = "0.3.0"
+netform_ir = "0.7.0"
+netform_diff = "0.7.0"
+netform_dialect_eos = "0.7.0"
+netform_dialect_iosxe = "0.7.0"
+netform_dialect_junos = "0.7.0"
+netform_dialect_nxos = "0.7.0"
+netform_dialect_fortios = "0.7.0"
 ```
 
 install the cli binary so you can run `config-diff` directly:
@@ -51,7 +51,7 @@ install the cli binary so you can run `config-diff` directly:
 # from this repo checkout
 cargo install --path netform_cli
 
-# or from crates.io (after publish)
+# or from crates.io
 cargo install netform_cli
 ```
 
@@ -76,7 +76,7 @@ use netform_ir::parse_generic;
 let a = parse_generic("interface Ethernet1\n  description old\n");
 let b = parse_generic("interface Ethernet1\n  description new\n");
 
-let diff = diff_documents(&a, &b, NormalizeOptions::default());
+let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
 assert_eq!(diff.stats.replaces, 1);
 ```
 
@@ -92,14 +92,20 @@ config-diff [OPTIONS] <FILE_A> <FILE_B>
 
 options:
 
-- `--dialect <generic|eos|iosxe|junos|nxos|fortios>`: parser profile to apply (default: `generic`)
+- `--dialect <auto|generic|eos|fortios|iosxe|junos|nxos>`: parser profile (default: `auto`, detected from content; falls back to `generic` and warns when the two files disagree)
+- `--format <unified|markdown>`: human-readable report format (default: `unified`)
+- `--context-lines <n>`: lines shown per side of each edit before truncating (default: 10)
 - `--order-policy <ordered|unordered|keyed-stable>`: sibling ordering semantics (default: `ordered`)
+- `--policy-override <PATH:POLICY>`: per-context order-policy override (repeatable)
 - `--ignore-comments`: drop comment lines from comparison
 - `--ignore-blank-lines`: drop blank lines from comparison
 - `--normalize-whitespace`: collapse internal whitespace in comparison view
-- `--json`: print machine-readable `Diff` json instead of markdown
-- `--plan-json`: print machine-readable `Plan` json instead of markdown
-- `--no-exit-code`: suppress the default exit-code behaviour (by default, config-diff exits 1 when configs differ, like `diff(1)`)
+- `--trim-trailing-whitespace`: drop trailing whitespace in comparison view
+- `--normalize-leading-whitespace`: normalize indentation in comparison view
+- `--json`: print machine-readable `Diff` json instead of a report
+- `--plan-json`: print machine-readable `Plan` json instead of a report
+- `--color` / `--no-color`: force or disable colored output
+- `--no-exit-code`: exit 0 even when configs differ (by default, config-diff exits 1 on drift, like `diff(1)`; exit 2 means an I/O or serialization error)
 
 examples:
 

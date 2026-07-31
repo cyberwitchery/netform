@@ -17,7 +17,7 @@ how to use this repo:
 - parse fortios-oriented text with `netform_dialect_fortios::parse_fortios`
 - render with `Document::render()` to preserve exact line text and endings
 - compare two documents with `netform_diff::diff_documents`
-- emit markdown or json using `netform_cli`'s `config-diff` (`--dialect generic|eos|iosxe|junos|nxos|fortios`)
+- emit unified, markdown, or json reports using `netform_cli`'s `config-diff` (dialect auto-detected, or forced with `--dialect`)
 
 quick start:
 
