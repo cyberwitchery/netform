@@ -80,7 +80,8 @@ fn nxos_strategy() -> impl Strategy<Value = String> {
         prop::sample::select(vec!["Ethernet1/1", "Ethernet1/2", "Loopback0", "mgmt0"])
             .prop_map(|name| format!("interface {name}\n  description link\n  no shutdown\n"));
 
-    // leaf-line constructs (hints used for content_key stability, not exposed on ComparisonLine).
+    // leaf-line constructs (hints fold into content keys; see
+    // `key_material_for_line` in flatten.rs).
     let leaf = prop_oneof![feature_line, ntp_line,];
 
     // block-header constructs (hints exposed on ComparisonLine.key_hint).
@@ -365,58 +366,65 @@ proptest! {
     }
 
     #[test]
-    fn nxos_key_hints_cover_dialect_constructs(input in nxos_strategy()) {
+    fn nxos_exposed_key_hints_come_from_known_constructs(input in nxos_strategy()) {
         let dialect = netform_dialect_nxos::NXOS_DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let view = build_comparison_view(&doc, &NormalizeOptions::default());
-        let hints: Vec<&str> = view
-            .lines
-            .iter()
-            .filter_map(|l| l.key_hint.as_deref())
-            .collect();
-        // at least one hint should match a dialect-specific prefix (not just "interface:").
-        let has_dialect_specific = hints.iter().any(|h| {
-            h.starts_with("feature:")
-                || h.starts_with("vpc-domain:")
-                || h.starts_with("role:")
-                || h.starts_with("monitor-session:")
-                || h.starts_with("ntp:")
-                || h.starts_with("system:")
-        });
-        // this won't always hold for every single sample (interface-heavy samples exist),
-        // so we just check that the union of all hint prefixes seen is correct.
-        // the test below uses a fixed corpus for deterministic coverage.
-        let _ = has_dialect_specific;
+        // every exposed hint must come from a block construct the strategy
+        // generates. the allowlist deliberately excludes the leaf hints
+        // (`feature:`, `ntp:`), which fold into content keys and must never
+        // surface on ComparisonLine (see `key_material_for_line` in flatten.rs).
+        for line in &view.lines {
+            if let Some(h) = line.key_hint.as_deref() {
+                prop_assert!(
+                    h.starts_with("vpc-domain:")
+                        || h.starts_with("role:")
+                        || h.starts_with("monitor-session:")
+                        || h.starts_with("system:")
+                        || h.starts_with("interface:"),
+                    "unexpected exposed key hint {h:?} for line {:?}",
+                    line.normalized
+                );
+            }
+        }
     }
 
     #[test]
-    fn eos_key_hints_cover_dialect_constructs(input in eos_strategy()) {
+    fn eos_exposed_key_hints_come_from_known_constructs(input in eos_strategy()) {
         let dialect = netform_dialect_eos::EOS_DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let view = build_comparison_view(&doc, &NormalizeOptions::default());
-        let hints: Vec<&str> = view
-            .lines
-            .iter()
-            .filter_map(|l| l.key_hint.as_deref())
-            .collect();
-        let _ = hints.iter().any(|h| {
-            h.starts_with("mlag")
-                || h.starts_with("management-api:")
-                || h.starts_with("daemon:")
-                || h.starts_with("peer-filter:")
-                || h.starts_with("vlan:")
-                || h.starts_with("router:")
-                || h.starts_with("monitor-session:")
-                || h.starts_with("ntp:")
-        });
+        // every exposed hint must come from a block construct the strategy
+        // generates (`peer-filter` sits in the leaf bucket but parses as a
+        // block, so its hint is exposed). the allowlist deliberately excludes
+        // the true leaf hint (`ntp:`), which folds into content keys and must
+        // never surface on ComparisonLine (see `key_material_for_line` in
+        // flatten.rs).
+        for line in &view.lines {
+            if let Some(h) = line.key_hint.as_deref() {
+                prop_assert!(
+                    h.starts_with("mlag")
+                        || h.starts_with("management-api:")
+                        || h.starts_with("daemon:")
+                        || h.starts_with("peer-filter:")
+                        || h.starts_with("vlan:")
+                        || h.starts_with("router:")
+                        || h.starts_with("monitor-session:")
+                        || h.starts_with("interface:"),
+                    "unexpected exposed key hint {h:?} for line {:?}",
+                    line.normalized
+                );
+            }
+        }
     }
 }
 
 /// verify that NX-OS block-header constructs produce expected key hints.
 ///
 /// leaf lines (feature, ntp) have their hints folded into content_key hashes
-/// but not exposed on ComparisonLine.key_hint — those are tested via
-/// content_key_stability below.
+/// but not exposed on ComparisonLine.key_hint (see `key_material_for_line` in
+/// flatten.rs) — those are tested via `nxos_leaf_hints_stabilise_content_keys`
+/// below.
 #[test]
 fn nxos_dialect_constructs_produce_expected_hints() {
     let input = "\
@@ -539,8 +547,9 @@ interface Management1
 
 /// verify that leaf-line key hints (feature, ntp) produce stable content_keys.
 ///
-/// leaf hints aren't exposed on ComparisonLine.key_hint but DO stabilise
-/// the content_key hash. Two lines with the same text must get the same key.
+/// leaf hints fold into the content key but are not exposed on
+/// ComparisonLine.key_hint (see `key_material_for_line` in flatten.rs).
+/// two lines with the same text must get the same key.
 #[test]
 fn nxos_leaf_hints_stabilise_content_keys() {
     let input = "\
