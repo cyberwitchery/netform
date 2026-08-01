@@ -1,8 +1,6 @@
-//! Integration coverage for Junos `set`-style identity keys under keyed-stable.
+//! integration coverage for Junos `set`-style identity keys under keyed-stable.
 //!
-//! The reorder cases fail on the pre-fix code, where a section's statements
-//! shared one identity and were therefore paired with each other; the
-//! value-change cases pin identities that are deliberately kept coarse.
+//! the value-change cases pin identities that are deliberately kept coarse.
 
 use netform_dialect_junos::parse_junos;
 use netform_diff::{

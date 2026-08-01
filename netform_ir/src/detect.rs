@@ -1,29 +1,10 @@
 //! score-based dialect auto-detection from configuration text.
 //!
-//! scans lines for dialect-specific patterns, accumulates per-dialect scores,
-//! and returns the highest-scoring dialect as a [`DialectHint`].  Falls back to
-//! [`DialectHint::Generic`] when the top score is too low or when the margin
-//! between the top two candidates is too narrow.
-//!
-//! # Scoring algorithm
-//!
-//! each input line is tested against a set of pattern rules per dialect.  When a
-//! rule matches, the corresponding dialect's score is incremented by a weight
-//! that reflects how distinctive the pattern is:
-//!
-//! | Weight | Meaning | Examples |
-//! |--------|---------|---------|
-//! | `STRONG_SIGNAL` (3) | Highly distinctive, near-unique to one dialect | FortiOS `config <section>`, NX-OS `feature <name>`, Junos stanza names |
-//! | `MODERATE_SIGNAL` (2) | Moderately distinctive | FortiOS `end`/`next`, Junos brace blocks, EOS non-slot interfaces |
-//! | `WEAK_SIGNAL` (1) | Weakly suggestive, shared across dialects | Junos semicolons, FortiOS plain `set`, IOS XE wildcard masks |
-//!
-//! after scoring, the highest-scoring dialect is accepted only if:
-//! 1. Its score meets `MIN_CONFIDENCE_SCORE` (currently 3 — at least one
-//!    strong signal or multiple weaker ones).
-//! 2. Its score is at least `MARGIN_FACTOR`× the runner-up's score, ensuring
-//!    the winner stands clearly above the noise.
-//!
-//! both checks must pass; otherwise the result is [`DialectHint::Generic`].
+//! scans lines for dialect-specific patterns, accumulates per-dialect scores
+//! (weights and acceptance thresholds are documented on the constants below),
+//! and returns the highest-scoring dialect as a [`DialectHint`].  the winner
+//! must both meet `MIN_CONFIDENCE_SCORE` and outscore the runner-up by
+//! `MARGIN_FACTOR`; otherwise the result is [`DialectHint::Generic`].
 //!
 //! # Example
 //!
@@ -51,8 +32,9 @@ const MODERATE_SIGNAL: i32 = 2;
 /// semicolons, FortiOS plain `set <field>`, IOS XE wildcard masks in ACLs).
 const WEAK_SIGNAL: i32 = 1;
 
-/// minimum total score a dialect must reach to be considered detected.  Below
-/// this threshold, the input is too short or too ambiguous to identify.
+/// minimum total score a dialect must reach to be considered detected (at
+/// least one strong signal or multiple weaker ones).  below this threshold,
+/// the input is too short or too ambiguous to identify.
 const MIN_CONFIDENCE_SCORE: i32 = 3;
 
 /// the winning dialect must outscore the runner-up by at least this factor.

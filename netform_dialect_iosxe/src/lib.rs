@@ -29,10 +29,7 @@ pub fn parse_iosxe(input: &str) -> Document {
 
 /// IOS XE interface type prefixes in canonical lowercase form.
 ///
-/// order matters: longer prefixes must come first so that e.g.
-/// `tengigabitethernet` matches before `gigabitethernet`.  Matching is
-/// case-insensitive so that `GigabitEthernet0/0/0`, `gigabitethernet0/0/0`,
-/// and `GIGABITETHERNET0/0/0` all normalize the same way.
+/// longest-prefix-first (see `parse_interface`).
 const IOSXE_INTERFACE_TYPES: &[&str] = &[
     "appgigabitethernet",
     "fortygigabitethernet",

@@ -922,8 +922,8 @@ fn emits_finding_for_ambiguous_extracted_stanza_keys() {
     }));
 }
 
-// these tests run the same parsed documents through all three policies and
-// assert the different outcomes, documenting when and how the policies diverge.
+// three-policy comparison tests on parsed documents; see the view-level
+// counterpart section in engine.rs.
 
 #[test]
 fn reordered_block_children_only_changed_under_ordered_policy() {
@@ -1159,7 +1159,7 @@ fn fortios_reorder_plus_value_change_three_way_contrast() {
 
 #[test]
 fn fortios_block_footer_participates_in_comparison_and_diff() {
-    // the producer now captures FortiOS `end` as the config block's footer, so
+    // FortiOS `end` is captured as the config block's footer, so
     // it flows through the flattener as a KeyKind::BlockFooter line (keyed under
     // the block header, at path [block, children_len]) and takes part in diffs.
     let closed = parse_fortios("config system global\n    set hostname \"x\"\nend\n");

@@ -8,21 +8,21 @@ pub enum DiffError {
     /// the Myers shortest-edit-script algorithm did not converge within
     /// the expected number of steps.
     SesNotConverged {
-        /// Number of elements on the left side.
+        /// number of elements on the left side.
         a_len: usize,
-        /// Number of elements on the right side.
+        /// number of elements on the right side.
         b_len: usize,
     },
     /// the edit-script operation sequence was inconsistent with the input
     /// data (e.g., referenced more elements than present in one side).
     EditScriptInconsistency {
-        /// Which SES operation was being applied ("Equal", "Delete", or "Insert").
+        /// which SES operation was being applied ("Equal", "Delete", or "Insert").
         op: &'static str,
-        /// Which side's iterator was exhausted ("left" or "right").
+        /// which side's iterator was exhausted ("left" or "right").
         side: &'static str,
-        /// Total number of segments/lines on the left side.
+        /// total number of segments/lines on the left side.
         a_count: usize,
-        /// Total number of segments/lines on the right side.
+        /// total number of segments/lines on the right side.
         b_count: usize,
     },
 }
@@ -363,8 +363,7 @@ impl U64Buf {
 /// derive a content key from parent signature, key kind, trivia, and normalized text.
 ///
 /// uses incremental xxh3 hashing over the canonical byte sequence
-/// `p=<sig>|k=<kind>|t=<trivia>|n=<text>`, avoiding an intermediate `String`
-/// allocation.
+/// `p=<sig>|k=<kind>|t=<trivia>|n=<text>`.
 pub fn derive_content_key(
     parent_signature: u64,
     kind: KeyKind,
@@ -658,7 +657,8 @@ mod tests {
         }
     }
 
-    /// reference implementation using the old format!() + xxh3_64() approach.
+    /// reference implementation: build the canonical string, hash once (pins the
+    /// incremental hasher to the same format).
     fn derive_content_key_reference(
         parent_signature: u64,
         kind: KeyKind,

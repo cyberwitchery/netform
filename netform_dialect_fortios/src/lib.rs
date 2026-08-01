@@ -2,7 +2,7 @@
 //!
 //! fortinet FortiOS configuration uses `config`/`end` block markers for
 //! sections, `edit`/`next` for entries within sections, and `set`/`unset`
-//! keywords for key-value assignments.  Comments use `#`.
+//! keywords for key-value assignments.  comments use `#`.
 //!
 //! # Example
 //!
@@ -80,7 +80,7 @@ fn unquote(s: &str) -> &str {
 /// - `edit <name>` → `edit:<name>` (quotes stripped)
 /// - `set <field> ...` → `set:<field>` (stable across value changes)
 /// - `unset <field>` → `unset:<field>`
-/// - Block markers (`end`, `next`) do not get key hints.
+/// - block markers (`end`, `next`) do not get key hints.
 fn fortios_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let parsed = parsed?;
     let head = parsed.head.as_str();

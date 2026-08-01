@@ -29,9 +29,7 @@ pub fn parse_eos(input: &str) -> Document {
 
 /// EOS interface type prefixes in canonical lowercase form.
 ///
-/// order matters: longer prefixes must come first so `port-channel` matches
-/// before a hypothetical `port` prefix. Matching is case-insensitive so that
-/// `Ethernet1`, `ethernet1`, and `ETHERNET1` all normalize the same way.
+/// longest-prefix-first (see `parse_interface`).
 const EOS_INTERFACE_TYPES: &[&str] = &[
     "port-channel",
     "management",

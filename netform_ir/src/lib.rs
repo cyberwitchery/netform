@@ -5,7 +5,7 @@
 //! - a conservative parser (`parse_generic`, `parse_with_dialect`)
 //! - a lossless renderer (`Document::render`)
 //!
-//! the parser is intentionally conservative for pre-alpha use:
+//! the parser is intentionally conservative:
 //! - it only uses indentation as a structural cue
 //! - unknown patterns are preserved as regular lines
 //! - no input lines are dropped
@@ -226,7 +226,7 @@ pub trait Dialect {
     /// delimiter-terminated dialects (FortiOS `end`/`next`, Junos `}`/`};`)
     /// return `true` so the parser attaches the terminator to the block it
     /// closes as that [`BlockNode`]'s footer instead of leaving it a detached
-    /// sibling.  Indentation-only dialects (IOS XE, EOS, NX-OS) keep the default
+    /// sibling.  indentation-only dialects (IOS XE, EOS, NX-OS) keep the default
     /// `false` and are unaffected.
     fn block_terminator(&self, _raw: &str) -> bool {
         false
@@ -237,7 +237,7 @@ pub trait Dialect {
 ///
 /// all IOS-like dialects share the same trivia classification and line
 /// tokenization; they differ only in the hint name stored in
-/// [`DocumentMetadata`] and the key-hint derivation function.  Construct with
+/// [`DocumentMetadata`] and the key-hint derivation function.  construct with
 /// [`IosLikeDialect::new`], passing the dialect name and its key-hint function:
 ///
 /// ```rust
@@ -356,10 +356,8 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
         })
         .collect();
 
-    // pre-compute which content lines are dialect block terminators (e.g.
-    // FortiOS `end`/`next`, Junos `}`/`};`).  A line that itself opens a block
-    // is never treated as a terminator, so the mechanism stays inert for
-    // indentation-only dialects whose `block_terminator` is the default `false`.
+    // pre-compute terminator lines (see `block_terminator`); a line that
+    // itself opens a block is never one.
     let is_terminator: Vec<bool> = (0..lines.len())
         .map(|idx| {
             lines[idx].trivia == TriviaKind::Content
@@ -391,10 +389,8 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
             }
         }
 
-        // a terminator attaches to the block it just closed (the outermost block
-        // it dedented past) as that block's footer, rather than being emitted as
-        // a detached sibling.  The renderer places the footer after the block's
-        // children, so the byte-for-byte round trip is preserved.
+        // attach the terminator as the closed block's footer; the renderer
+        // emits the footer after the children, preserving the round trip.
         if is_terminator[idx]
             && let Some(block_id) = closed_block
             && let Some(Node::Block(block)) = doc.arena.get_mut(block_id.0)
@@ -563,7 +559,7 @@ fn parse_parts(raw: &str) -> Option<ParsedLineParts> {
 }
 
 /// tokenize a raw configuration line, splitting on whitespace while preserving
-/// quoted strings. Characters in `punctuation` are emitted as their own tokens
+/// quoted strings. characters in `punctuation` are emitted as their own tokens
 /// (flushing any accumulated word first), matching the Junos-style brace/semicolon
 /// handling.
 ///
@@ -643,7 +639,7 @@ pub struct IosKeyHintConfig {
 /// derive a key hint for constructs shared across IOS-family dialects.
 ///
 /// handles `interface`, `vrf`, `router`, and `ip` using the provided
-/// [`IosKeyHintConfig`].  Returns `None` when the head keyword is not one of
+/// [`IosKeyHintConfig`].  returns `None` when the head keyword is not one of
 /// these four, allowing the caller to try dialect-specific arms before falling
 /// back to [`common_key_hint`].
 pub fn ios_family_key_hint(
@@ -701,7 +697,7 @@ pub fn ios_family_key_hint(
 ///
 /// this covers the match arms that are identical in every IOS-family dialect:
 /// `vlan`, `route-map`, `class-map`, `policy-map`, `ipv6`, `crypto`,
-/// `spanning-tree`, `line`, `monitor`, and `ntp`.  Dialect-specific
+/// `spanning-tree`, `line`, `monitor`, and `ntp`.  dialect-specific
 /// functions should match their own constructs first, then fall back here.
 ///
 /// numbered `access-list N ...` rules are intentionally *not* keyed here:
@@ -776,7 +772,7 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 /// prefix table.
 ///
 /// uses case-insensitive prefix matching so that any casing of a known
-/// interface type normalizes to the canonical lowercase form.  The `types`
+/// interface type normalizes to the canonical lowercase form.  the `types`
 /// slice must be ordered longest-prefix-first so that e.g. `tengigabitethernet`
 /// matches before `gigabitethernet`.
 ///
@@ -910,8 +906,7 @@ mod tests {
 
     #[test]
     fn common_key_hint_access_list_has_no_hint() {
-        // see key_hint_numbered_access_list_has_no_hint: numbered ACL entries
-        // key on full text so a body change is a detectable edit.
+        // see key_hint_numbered_access_list_has_no_hint.
         assert_eq!(common_hint("access-list 100 permit ip any any"), None);
     }
 

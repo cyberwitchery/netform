@@ -114,6 +114,11 @@ fn set_style_key_hint(args: &[&str]) -> Option<String> {
 /// default because a Junos leaf just as often ends in a set member
 /// (`... system-services ssh`) as in a value, and truncating a member would
 /// merge distinct statements onto one key.
+///
+/// a returned length can drop a trailing value (`next-hop <addr>`, bare
+/// `qualified-next-hop <addr>`); statements differing only in that value
+/// collide on one key, accepted so a value change diffs as an edit rather
+/// than an add/remove pair.
 fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
     match (section, args) {
         ("system", ["host-name" | "domain-name" | "time-zone", _]) => Some(1),

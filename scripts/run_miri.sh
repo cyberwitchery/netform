@@ -38,7 +38,7 @@ echo "Using toolchain: ${TOOLCHAIN}"
 
 if [[ "${1:-}" == "--full" ]]; then
   echo "Running full Miri-capable suite..."
-  # On macOS, Miri does not support std::process spawning (posix_spawnattr_init),
+  # on macOS, Miri does not support std::process spawning (posix_spawnattr_init),
   # so we intentionally exclude subprocess-based cli_smoke integration tests.
   cargo +"${TOOLCHAIN}" miri test -p netform_ir --all-targets
   cargo +"${TOOLCHAIN}" miri test -p netform_dialect_iosxe --all-targets
@@ -53,7 +53,7 @@ if [[ "${1:-}" == "--full" ]]; then
 fi
 
 echo "Running Miri-safe subset..."
-# Keep this subset isolation-safe: no subprocess spawning, no testdata directory scans.
+# keep this subset isolation-safe: no subprocess spawning, no testdata directory scans.
 cargo +"${TOOLCHAIN}" miri test -p netform_diff --lib
 cargo +"${TOOLCHAIN}" miri test -p netform_ir --test round_trip --test parser_structure
 cargo +"${TOOLCHAIN}" miri test -p netform_dialect_iosxe --all-targets

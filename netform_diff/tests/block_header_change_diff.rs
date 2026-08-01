@@ -1,15 +1,7 @@
-//! Integration coverage for the block-header silent-miss root-cause fix.
-//!
-//! A block header's key hint doubles as its match key, and the diff engine's
-//! `Equal` branch only re-diffs a matched block's *children* — never the two
-//! headers themselves.  So two textually different headers that collided on the
-//! same key hint had their header change silently dropped, yielding an empty
-//! diff for a config that genuinely changed.
-//!
-//! These cases go beyond the per-construct patches (#91, #92): `class-map
-//! match-any VOICE` vs `match-all VOICE` both key to `class-map:VOICE`, and
-//! `router ospfv3 1` vs `2` both key to `router:ospfv3`.  Each fails on the
-//! pre-fix code.
+//! a block header's key hint doubles as its match key, so textually different
+//! headers can collide on one key; the engine compares matched headers
+//! directly (see the engine's `diff_matched_segment`).  `class-map
+//! match-any/match-all VOICE` and `router ospfv3 1/2` are such collisions.
 
 use netform_diff::{Diff, Edit, NormalizeOptions, diff_documents};
 

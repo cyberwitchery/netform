@@ -1,15 +1,5 @@
-//! Integration coverage for the tagged router-instance silent-miss fix.
-//!
-//! A block header's key hint doubles as its match key, and the diff engine's
-//! `Equal` branch only re-diffs a matched block's *children* — never the two
-//! headers themselves.  So two textually different headers that collided on the
-//! same key hint had their header change silently dropped, yielding an empty
-//! diff for a config that genuinely changed.
-//!
-//! Tagged `router eigrp <as>` (NX-OS, EOS) and `router isis <tag>` (IOS family)
-//! used to collapse to `router:eigrp` / `router:isis`, discarding the instance
-//! id.  These tests parse configs that differ only in that id and assert the
-//! diff is non-empty; each fails on the pre-fix code.
+//! tagged `router eigrp <as>` (NX-OS, EOS) and `router isis <tag>` (IOS
+//! family) key on their instance id; these configs differ only in that id.
 
 use netform_diff::{Diff, Edit, NormalizeOptions, diff_documents};
 

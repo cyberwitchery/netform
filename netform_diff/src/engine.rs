@@ -517,9 +517,9 @@ where
     edits
 }
 
-/// Turns a chunk collected by the multiset paths into a single edit.
+/// turns a chunk collected by the multiset paths into a single edit.
 ///
-/// The multiset paths gather lines bucket by bucket, so the chunk has no
+/// the multiset paths gather lines bucket by bucket, so the chunk has no
 /// meaningful order until it is sorted here.
 fn finalize_chunked_edits(mut deletes: Vec<DiffLine>, mut inserts: Vec<DiffLine>) -> Vec<Edit> {
     deletes.sort_by(|a, b| {
@@ -538,10 +538,10 @@ fn finalize_chunked_edits(mut deletes: Vec<DiffLine>, mut inserts: Vec<DiffLine>
     finalize_edit(deletes, inserts).into_iter().collect()
 }
 
-/// Builds the edit describing a chunk of deleted and inserted lines, or `None`
+/// builds the edit describing a chunk of deleted and inserted lines, or `None`
 /// when both sides are empty.
 ///
-/// Anchors and keys are taken from the first line of each side, so callers must
+/// anchors and keys are taken from the first line of each side, so callers must
 /// pass the lines in the order the edit should report them.
 fn finalize_edit(deletes: Vec<DiffLine>, inserts: Vec<DiffLine>) -> Option<Edit> {
     if !deletes.is_empty() && !inserts.is_empty() {
@@ -593,10 +593,10 @@ fn to_anchor(line: &DiffLine) -> EditAnchor {
     }
 }
 
-/// Compact snapshot of the v-vector at a single Myers edit step.
+/// compact snapshot of the v-vector at a single Myers edit step.
 ///
-/// At step d, only diagonals -d, -d+2, ..., d are live (d+1 values).
-/// Storing just those instead of cloning the full v-vector (length
+/// at step d, only diagonals -d, -d+2, ..., d are live (d+1 values).
+/// storing just those instead of cloning the full v-vector (length
 /// 2*(a+b)+3) reduces trace memory from O(D*(a+b)) to O(D^2).
 struct TraceSnapshot {
     d: isize,
@@ -634,7 +634,7 @@ pub(crate) fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
     let offset = max + 1;
     let v_len = (2 * max + 3) as usize;
 
-    // Myers SES trace over diagonals. This avoids the quadratic LCS matrix and
+    // Myers SES trace over diagonals. this avoids the quadratic LCS matrix and
     // remains deterministic for a fixed input/order.
     let mut v = vec![0isize; v_len];
     let mut trace: Vec<TraceSnapshot> = Vec::with_capacity((max + 1) as usize);
@@ -1305,7 +1305,7 @@ mod tests {
 
     #[test]
     fn colliding_block_header_change_surfaces_whether_top_level_or_nested() {
-        // a top-level colliding-key header change already surfaces (#97).
+        // the top-level case:
         let a_top = view(vec![
             cline("class-map match-any VOICE", 200, vec![0]),
             cline("  match dscp ef", 300, vec![0, 0]),
@@ -1317,7 +1317,7 @@ mod tests {
         let top = diff_views(&a_top, &b_top, &default_options()).unwrap();
         assert_only_class_map_header_replace(&top.edits);
 
-        // the same collision nested inside a matched block now surfaces too.
+        // the same collision nested inside a matched block.
         let a_nested = view(vec![
             cline("policy-map PM", 100, vec![0]),
             cline("class-map match-any VOICE", 200, vec![0, 0]),
@@ -1384,7 +1384,7 @@ mod tests {
                 .is_empty()
         );
 
-        // a shallow [0] override already suppressed the shallow reorder.
+        // a shallow [0] override suppresses the shallow reorder.
         let shallow = diff_views(&shallow_a, &shallow_b, &unordered_at(vec![0])).unwrap();
         assert!(
             shallow.edits.is_empty(),
@@ -1392,7 +1392,7 @@ mod tests {
             shallow.edits
         );
 
-        // a deep [0, 0] override now suppresses the deep reorder.
+        // a deep [0, 0] override suppresses the deep reorder.
         let deep = diff_views(&deep_a, &deep_b, &unordered_at(vec![0, 0])).unwrap();
         assert!(
             deep.edits.is_empty(),
@@ -1675,7 +1675,7 @@ mod tests {
 
     #[test]
     fn fallback_delete_only_emits_deletes() {
-        // Side A has a block; side B is empty.  All segments are deleted,
+        // side A has a block; side B is empty.  all segments are deleted,
         // triggering the fallback with only deletions.
         let a = view(vec![
             cline("interface Eth1", 100, vec![0]),
@@ -1699,7 +1699,7 @@ mod tests {
 
     #[test]
     fn fallback_insert_only_emits_inserts() {
-        // Side A is empty; side B has a block.  All segments are inserted,
+        // side A is empty; side B has a block.  all segments are inserted,
         // triggering the fallback with only insertions.
         let a = view(vec![]);
         let b = view(vec![
@@ -1723,7 +1723,7 @@ mod tests {
 
     #[test]
     fn fallback_multiple_segments_flushed_together() {
-        // Both sides have multiple unrelated segments — none of the segment
+        // both sides have multiple unrelated segments — none of the segment
         // keys match, so all segments accumulate as pending and are flushed
         // together at the end via the fallback path.
         let a = view(vec![
@@ -1744,7 +1744,7 @@ mod tests {
             !result.fallback_contexts.is_empty(),
             "multi-segment replacement should use fallback"
         );
-        // The fallback flattens all pending segments into lines before
+        // the fallback flattens all pending segments into lines before
         // diffing, so we should see individual line-level edits.
         let total_edit_lines: usize = result
             .edits
@@ -1769,7 +1769,7 @@ mod tests {
     fn fallback_flushed_before_equal_segment() {
         // A has [block-X, block-Y], B has [block-Z, block-Y].
         // block-Z is unrelated to block-X (different keys) so X→Delete and
-        // Z→Insert accumulate.  When block-Y matches (Equal), the pending
+        // Z→Insert accumulate.  when block-Y matches (Equal), the pending
         // segments must be flushed via fallback before the Equal is processed.
         let a = view(vec![
             cline("interface Eth1", 100, vec![0]),
@@ -1786,7 +1786,7 @@ mod tests {
             !result.fallback_contexts.is_empty(),
             "pending segments before Equal should be flushed via fallback"
         );
-        // The shared segment (hostname) should not appear in edits.
+        // the shared segment (hostname) should not appear in edits.
         let all_edit_texts: Vec<&str> = result
             .edits
             .iter()
@@ -1816,7 +1816,7 @@ mod tests {
 
     #[test]
     fn fallback_not_triggered_when_segments_match() {
-        // When all segments match, no fallback should be invoked.
+        // when all segments match, no fallback should be invoked.
         let a = view(vec![
             cline("interface Eth1", 100, vec![0]),
             cline("  description old", 101, vec![0, 0]),
@@ -1977,7 +1977,7 @@ mod tests {
     }
 
     // each test runs the same input through all three policies and asserts the
-    // different outcomes side by side.  These complement the per-policy tests
+    // different outcomes side by side.  these complement the per-policy tests
     // above by showing *when* the policies diverge on identical data.
 
     #[test]

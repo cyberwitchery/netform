@@ -142,8 +142,7 @@ fn nested_terminators_close_their_own_block() {
 #[test]
 fn generic_dialect_does_not_attach_footers() {
     // the generic dialect has no block terminators, so a `}` line dedents to a
-    // plain sibling and the block keeps `footer: None` — this is what keeps the
-    // indentation-only dialects (IOS XE, EOS, NX-OS) completely unchanged.
+    // plain sibling and the block keeps `footer: None`.
     let input = "root {\n    child a\n}\n";
     let doc = parse_generic(input);
 

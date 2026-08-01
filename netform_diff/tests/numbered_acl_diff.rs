@@ -1,13 +1,6 @@
-//! Integration coverage for the numbered-ACL silent-miss fix.
-//!
-//! A numbered `access-list N ...` rule is an ordered sequence entry whose
-//! identity is its full text, not the shared ACL number.  Before the fix these
-//! lines were keyed by the ACL number alone, so two rules under the same ACL
-//! shared a content key: changing a rule body left the key sequence unchanged
-//! and the diff reported no change under the default (Ordered) policy.
-//!
-//! These tests parse real IOS XE configs and exercise the public
-//! `diff_documents` entry point end to end; all three fail on the pre-fix code.
+//! a numbered `access-list N ...` rule's identity is its full text, not the
+//! shared ACL number (see `common_key_hint` in netform_ir).  these tests parse
+//! real IOS XE configs and exercise `diff_documents` end to end.
 
 use netform_dialect_iosxe::parse_iosxe;
 use netform_diff::{Diff, Edit, NormalizeOptions, diff_documents};
@@ -15,8 +8,7 @@ use netform_diff::{Diff, Edit, NormalizeOptions, diff_documents};
 fn diff(a: &str, b: &str) -> Diff {
     let left = parse_iosxe(a);
     let right = parse_iosxe(b);
-    // NormalizeOptions::default() uses the Ordered order policy — the default
-    // path where the silent miss occurred.
+    // NormalizeOptions::default() uses the Ordered policy.
     diff_documents(&left, &right, NormalizeOptions::default()).unwrap()
 }
 

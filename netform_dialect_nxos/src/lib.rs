@@ -29,9 +29,7 @@ pub fn parse_nxos(input: &str) -> Document {
 
 /// NX-OS interface type prefixes in canonical lowercase form.
 ///
-/// order matters: longer prefixes must come first so `port-channel` matches
-/// before a hypothetical `port` prefix. Matching is case-insensitive so that
-/// `Ethernet1/1`, `ethernet1/1`, and `ETHERNET1/1` all normalize the same way.
+/// longest-prefix-first (see `parse_interface`).
 const NXOS_INTERFACE_TYPES: &[&str] = &[
     "port-channel",
     "ethernet",

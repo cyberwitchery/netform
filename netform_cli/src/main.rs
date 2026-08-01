@@ -46,9 +46,9 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = CliOrderPolicy::Ordered)]
     order_policy: CliOrderPolicy,
 
-    /// per-context order-policy override.  Format: PATH:POLICY where PATH
+    /// per-context order-policy override.  format: PATH:POLICY where PATH
     /// is a dot-separated context prefix (e.g. "0.1") and POLICY is one of
-    /// ordered, unordered, or keyed-stable.  May be repeated.
+    /// ordered, unordered, or keyed-stable.  may be repeated.
     #[arg(long, value_parser = parse_policy_override)]
     policy_override: Vec<OrderPolicyOverride>,
 
@@ -60,7 +60,7 @@ struct Cli {
     format: CliFormat,
 
     /// maximum number of lines shown per side of each edit before
-    /// truncating with "and N more".  Applies to unified and markdown
+    /// truncating with "and N more".  applies to unified and markdown
     /// output (ignored with --json / --plan-json).
     #[arg(long, default_value_t = DEFAULT_CONTEXT_LINES)]
     context_lines: usize,
@@ -73,9 +73,9 @@ struct Cli {
     #[arg(long)]
     no_color: bool,
 
-    /// suppress exit code 1 when configs differ.  By default config-diff
-    /// exits 1 when the configs differ (like `diff(1)`).  Pass this flag
-    /// to exit 0 instead.  Exit code 2 (I/O or serialization error) is
+    /// suppress exit code 1 when configs differ.  by default config-diff
+    /// exits 1 when the configs differ (like `diff(1)`).  pass this flag
+    /// to exit 0 instead.  exit code 2 (I/O or serialization error) is
     /// never suppressed.
     #[arg(long)]
     no_exit_code: bool,

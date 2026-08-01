@@ -8,7 +8,7 @@ use crate::model::{
 };
 use crate::normalize::normalize_for_compare;
 
-/// Maximum nesting depth for `flatten_node` recursion.  Real-world network
+/// maximum nesting depth for `flatten_node` recursion.  real-world network
 /// configs rarely exceed 10–15 levels; a limit of 128 is generous enough to
 /// handle any legitimate document while preventing stack overflow on
 /// pathologically deep (or cyclic) input.
@@ -192,7 +192,7 @@ fn key_material_for_line(
             }
             KeyKind::Line => {
                 // leaf-line hints (e.g. FortiOS `set:<field>`) stabilise content
-                // keys across value changes.  We intentionally do NOT expose the
+                // keys across value changes.  we intentionally do NOT expose the
                 // hint on ComparisonLine — leaf hints repeat across many sibling
                 // blocks and would flood extracted-key ambiguity findings.
                 let for_hash = format!("subkey:{hint}");
@@ -570,11 +570,9 @@ mod tests {
         let view_a = build_comparison_view(&doc_a, &default_opts());
         let view_b = build_comparison_view(&doc_b, &default_opts());
 
-        // the set lines should share a content key despite different text.
         assert_eq!(view_a.lines[1].content_key, view_b.lines[1].content_key);
 
-        // the hint should NOT be exposed on the ComparisonLine (avoids
-        // extracted-key ambiguity noise).
+        // hint not exposed on ComparisonLine (see `key_material_for_line`).
         assert_eq!(view_a.lines[1].key_hint, None);
     }
 
@@ -855,11 +853,11 @@ mod tests {
 
     #[test]
     fn flatten_respects_max_nesting_depth() {
-        // Build a document that nests blocks deeper than MAX_NESTING_DEPTH.
-        // The flattener should silently stop recursing beyond the limit.
+        // build a document that nests blocks deeper than MAX_NESTING_DEPTH.
+        // the flattener should silently stop recursing beyond the limit.
         let mut doc = Document::default();
 
-        // Start with the deepest leaf.
+        // start with the deepest leaf.
         let leaf = doc.insert_node(Node::Line(LineNode {
             raw: "  deep leaf".to_string(),
             line_ending: "\n".to_string(),
@@ -869,7 +867,7 @@ mod tests {
             trivia: TriviaKind::Content,
         }));
 
-        // Wrap it in MAX_NESTING_DEPTH layers of blocks.
+        // wrap it in MAX_NESTING_DEPTH layers of blocks.
         let mut inner = leaf;
         for depth in (1..=MAX_NESTING_DEPTH).rev() {
             inner = doc.insert_node(Node::Block(BlockNode {
@@ -890,15 +888,15 @@ mod tests {
 
         let view = build_comparison_view(&doc, &default_opts());
 
-        // The leaf sits at depth MAX_NESTING_DEPTH + 1 (root header is
-        // depth 1, its child header is depth 2, …). The guard truncates
+        // the leaf sits at depth MAX_NESTING_DEPTH + 1 (root header is
+        // depth 1, its child header is depth 2, …). the guard truncates
         // at MAX_NESTING_DEPTH so the leaf must be absent.
         assert!(
             !view.lines.iter().any(|l| l.normalized == "  deep leaf"),
             "leaf beyond MAX_NESTING_DEPTH should be excluded"
         );
 
-        // Headers up to the limit should still be present.
+        // headers up to the limit should still be present.
         assert!(
             view.lines.iter().any(|l| l.normalized == "level-1"),
             "top-level header should be present"
@@ -907,7 +905,7 @@ mod tests {
 
     #[test]
     fn flatten_within_depth_limit_includes_everything() {
-        // A modest nesting depth should not be truncated.
+        // a modest nesting depth should not be truncated.
         let mut doc = Document::default();
         let leaf = doc.insert_node(Node::Line(LineNode {
             raw: "  deep leaf".to_string(),
