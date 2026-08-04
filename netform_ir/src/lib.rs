@@ -242,7 +242,7 @@ pub trait Dialect {
     ///
     /// lines after the opener up to and including the terminator become
     /// [`TriviaKind::Literal`]; the opener itself stays [`TriviaKind::Content`].
-    /// The returned pattern must be non-empty.
+    /// the returned pattern must be non-empty.
     fn literal_region(&self, _raw: &str) -> Option<LiteralTerminator> {
         None
     }
@@ -347,8 +347,8 @@ impl Dialect for IosLikeDialect {
 /// - `banner motd #Warning` — a delimiter glued to the text, closed by the next `#`.
 /// - `banner motd` — the delimiter-less EOS form, closed by a line reading `EOF`.
 ///
-/// returns `None` for a banner whose delimiter reappears on its own line, which
-/// carries its whole body there.
+/// returns `None` for a banner whose delimiter reappears on the banner line
+/// itself, which carries its whole body there.
 ///
 /// # Example
 ///
@@ -374,14 +374,17 @@ pub fn ios_like_literal_region(raw: &str) -> Option<LiteralTerminator> {
         return None;
     }
 
-    // the delimiter can be glued to the text: `^CHi^C` is a whole banner, `^CHi` opens one.
-    // a punctuation opener splits that text off; an alphanumeric token is the word form (`EOF`).
+    // a punctuation opener splits glued text off; an alphanumeric token is the
+    // delimiter-less word form (`EOF`) and is never split.
     let opener = delimiter_opener(delimiter);
     if delimiter.len() > opener.len() {
         if delimiter.ends_with(opener) {
             return None;
         }
         if !opener.starts_with(char::is_alphanumeric) {
+            if delimiter[opener.len()..].contains(opener) || tail.contains(opener) {
+                return None;
+            }
             return Some(LiteralTerminator::Contains(opener.to_string()));
         }
     }
@@ -1321,6 +1324,28 @@ mod tests {
         assert_eq!(
             ios_like_literal_region("banner motd \u{3}Warning"),
             Some(LiteralTerminator::Contains("\u{3}".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_a_one_line_banner_whose_text_contains_a_space() {
+        assert_eq!(ios_like_literal_region("banner motd #Hello world#"), None);
+        assert_eq!(ios_like_literal_region("banner motd ^CHello world^C"), None);
+        assert_eq!(
+            ios_like_literal_region("banner exec %Please log out at %the end%"),
+            None,
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd \u{3}Hello world\u{3}"),
+            None,
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd #Hello world"),
+            Some(LiteralTerminator::Contains("#".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd ^CHello world"),
+            Some(LiteralTerminator::Contains("^C".into())),
         );
     }
 

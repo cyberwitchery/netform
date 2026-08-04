@@ -110,6 +110,48 @@ fn glued_single_character_delimiter_banner_survives_ignore_comments() {
     );
 }
 
+const NO_BANNER_WITH_COMMENT: &str = "\
+interface GigabitEthernet0/0/0
+  ! WAN side
+  description WAN uplink
+";
+
+#[test]
+fn one_line_banner_with_a_space_does_not_swallow_the_configuration_below() {
+    for (motd, login) in [
+        ("banner motd #Hello world#", "banner login #Second#"),
+        ("banner motd ^CHello world^C", "banner login ^CSecond^C"),
+    ] {
+        let config = format!(
+            "{motd}\ninterface GigabitEthernet0/0/0\n  ! WAN side\n  description WAN uplink\n{login}\n"
+        );
+
+        let comments = diff(
+            &config,
+            &config.replace("! WAN side", "! LAN side"),
+            ignore_comments(),
+        );
+        assert!(
+            !comments.has_changes,
+            "{motd}: --ignore-comments must still drop a comment below the banner: {:?}",
+            edit_texts(&comments),
+        );
+
+        let below = diff(
+            &config,
+            &config.replace("WAN uplink", "WAN backup"),
+            keyed_stable(),
+        );
+        let baseline = diff(
+            NO_BANNER_WITH_COMMENT,
+            &NO_BANNER_WITH_COMMENT.replace("WAN uplink", "WAN backup"),
+            keyed_stable(),
+        );
+        assert_eq!(edit_texts(&below), edit_texts(&baseline), "{motd}");
+        assert_eq!(below.findings, baseline.findings, "{motd}");
+    }
+}
+
 const BANNER_SHADOWING_AN_INTERFACE: &str = "\
 banner motd ^C
 Notice to operators:

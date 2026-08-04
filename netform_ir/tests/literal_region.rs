@@ -164,6 +164,47 @@ fn body_lines_do_not_close_an_enclosing_block() {
 }
 
 #[test]
+fn one_line_banner_whose_text_contains_a_space_opens_no_region() {
+    for (motd, login) in [
+        ("banner motd #Hello world#", "banner login #Second#"),
+        ("banner motd ^CHello world^C", "banner login ^CSecond^C"),
+    ] {
+        let input = format!(
+            "{motd}\ninterface GigabitEthernet0/0/0\n  ! WAN side\n  description uplink\n{login}\n"
+        );
+        let doc = parse_with_dialect(&input, &IOS_LIKE);
+
+        assert_eq!(
+            line_kinds(&doc),
+            vec![
+                (motd.to_string(), TriviaKind::Content),
+                (
+                    "interface GigabitEthernet0/0/0".to_string(),
+                    TriviaKind::Content
+                ),
+                ("  ! WAN side".to_string(), TriviaKind::Comment),
+                ("  description uplink".to_string(), TriviaKind::Content),
+                (login.to_string(), TriviaKind::Content),
+            ],
+            "{motd}",
+        );
+        assert!(doc.metadata.parse_findings.is_empty(), "{motd}");
+
+        let block = doc
+            .roots
+            .iter()
+            .filter_map(|id| match doc.node(*id) {
+                Some(Node::Block(block)) => Some(block),
+                _ => None,
+            })
+            .next()
+            .expect("interface block below the banner");
+        assert_eq!(block.header.raw, "interface GigabitEthernet0/0/0");
+        assert_eq!(block.children.len(), 2, "{motd}");
+    }
+}
+
+#[test]
 fn unterminated_region_is_declined_and_reported() {
     let input = "banner motd ^C\ninterface GigabitEthernet0/0/0\n  description WAN\n";
     let doc = parse_with_dialect(input, &IOS_LIKE);
