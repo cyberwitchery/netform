@@ -110,6 +110,27 @@ fn glued_single_character_delimiter_banner_survives_ignore_comments() {
     );
 }
 
+const BANNER_WITH_GLUED_CARET: &str = "\
+banner motd ^Warning restricted
+! Authorized use only
+^
+interface GigabitEthernet0/0/0
+  description WAN uplink
+";
+
+#[test]
+fn glued_plain_caret_delimiter_banner_survives_ignore_comments() {
+    let after = BANNER_WITH_GLUED_CARET.replace("Authorized use only", "CHANGED banner text");
+
+    let diff = diff(BANNER_WITH_GLUED_CARET, &after, ignore_comments());
+
+    assert!(diff.has_changes, "banner text change must be visible");
+    assert_eq!(
+        edit_texts(&diff),
+        vec!["! Authorized use only", "! CHANGED banner text"],
+    );
+}
+
 const NO_BANNER_WITH_COMMENT: &str = "\
 interface GigabitEthernet0/0/0
   ! WAN side
@@ -121,6 +142,7 @@ fn one_line_banner_with_a_space_does_not_swallow_the_configuration_below() {
     for (motd, login) in [
         ("banner motd #Hello world#", "banner login #Second#"),
         ("banner motd ^CHello world^C", "banner login ^CSecond^C"),
+        ("banner motd ^Hello world^", "banner login ^Second^"),
     ] {
         let config = format!(
             "{motd}\ninterface GigabitEthernet0/0/0\n  ! WAN side\n  description WAN uplink\n{login}\n"

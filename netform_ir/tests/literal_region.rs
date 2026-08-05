@@ -168,6 +168,7 @@ fn one_line_banner_whose_text_contains_a_space_opens_no_region() {
     for (motd, login) in [
         ("banner motd #Hello world#", "banner login #Second#"),
         ("banner motd ^CHello world^C", "banner login ^CSecond^C"),
+        ("banner motd ^Hello world^", "banner login ^Second^"),
     ] {
         let input = format!(
             "{motd}\ninterface GigabitEthernet0/0/0\n  ! WAN side\n  description uplink\n{login}\n"
@@ -259,6 +260,46 @@ fn punctuation_delimiter_glued_to_the_text_opens_a_region() {
         ],
     );
     assert!(doc.metadata.parse_findings.is_empty());
+}
+
+#[test]
+fn plain_caret_delimiter_glued_to_the_text_opens_a_region() {
+    let input = "banner motd ^Warning restricted\n! Authorized use only\n^\nhostname edge-1\n";
+    let doc = parse_with_dialect(input, &IOS_LIKE);
+
+    assert_eq!(
+        line_kinds(&doc),
+        vec![
+            (
+                "banner motd ^Warning restricted".to_string(),
+                TriviaKind::Content
+            ),
+            ("! Authorized use only".to_string(), TriviaKind::Literal),
+            ("^".to_string(), TriviaKind::Literal),
+            ("hostname edge-1".to_string(), TriviaKind::Content),
+        ],
+    );
+    assert!(doc.metadata.parse_findings.is_empty());
+}
+
+#[test]
+fn unterminated_plain_caret_region_names_the_caret_as_its_terminator() {
+    let input =
+        "banner motd ^Warning restricted\ninterface GigabitEthernet0/0/0\n  description WAN\n";
+    let doc = parse_with_dialect(input, &IOS_LIKE);
+
+    let finding = doc
+        .metadata
+        .parse_findings
+        .iter()
+        .find(|finding| finding.code == "unterminated-literal-region")
+        .expect("unterminated-literal-region finding");
+    assert_eq!(finding.span.line, 1);
+    assert!(
+        finding.message.contains("closed by `^`;"),
+        "{}",
+        finding.message,
+    );
 }
 
 #[test]

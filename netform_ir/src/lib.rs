@@ -400,7 +400,9 @@ fn delimiter_opener(token: &str) -> &str {
         return token;
     };
     match chars.next() {
-        Some(second) if first == '^' => &token[..first.len_utf8() + second.len_utf8()],
+        Some(second) if first == '^' && second == 'C' => {
+            &token[..first.len_utf8() + second.len_utf8()]
+        }
         _ => &token[..first.len_utf8()],
     }
 }
@@ -1312,6 +1314,18 @@ mod tests {
     }
 
     #[test]
+    fn literal_region_splits_a_plain_caret_delimiter_from_glued_text() {
+        assert_eq!(
+            ios_like_literal_region("banner motd ^Warning restricted"),
+            Some(LiteralTerminator::Contains("^".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd ^1st line"),
+            Some(LiteralTerminator::Contains("^".into())),
+        );
+    }
+
+    #[test]
     fn literal_region_splits_punctuation_delimiter_from_glued_text() {
         assert_eq!(
             ios_like_literal_region("banner motd #Warning restricted"),
@@ -1331,6 +1345,7 @@ mod tests {
     fn literal_region_declines_a_one_line_banner_whose_text_contains_a_space() {
         assert_eq!(ios_like_literal_region("banner motd #Hello world#"), None);
         assert_eq!(ios_like_literal_region("banner motd ^CHello world^C"), None);
+        assert_eq!(ios_like_literal_region("banner motd ^Hello world^"), None);
         assert_eq!(
             ios_like_literal_region("banner exec %Please log out at %the end%"),
             None,
@@ -1346,6 +1361,10 @@ mod tests {
         assert_eq!(
             ios_like_literal_region("banner motd ^CHello world"),
             Some(LiteralTerminator::Contains("^C".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd ^Hello world"),
+            Some(LiteralTerminator::Contains("^".into())),
         );
     }
 
