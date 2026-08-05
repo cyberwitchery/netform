@@ -131,6 +131,25 @@ fn glued_plain_caret_delimiter_banner_survives_ignore_comments() {
     );
 }
 
+#[test]
+fn standalone_caret_escape_banner_with_a_caret_in_its_body_survives_ignore_comments() {
+    for delimiter in ["^C", "^Z", "^A", "^^"] {
+        let before = format!(
+            "hostname edge-1\nbanner motd {delimiter}\nPress ^ for help\n! Authorized use only\n{delimiter}\ninterface GigabitEthernet0/0/0\n  description WAN uplink\n"
+        );
+        let after = before.replace("Authorized use only", "CHANGED banner text");
+
+        let diff = diff(&before, &after, ignore_comments());
+
+        assert!(diff.has_changes, "{delimiter}");
+        assert_eq!(
+            edit_texts(&diff),
+            vec!["! Authorized use only", "! CHANGED banner text"],
+            "{delimiter}",
+        );
+    }
+}
+
 const NO_BANNER_WITH_COMMENT: &str = "\
 interface GigabitEthernet0/0/0
   ! WAN side

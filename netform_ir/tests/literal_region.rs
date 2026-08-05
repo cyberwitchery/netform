@@ -283,6 +283,60 @@ fn plain_caret_delimiter_glued_to_the_text_opens_a_region() {
 }
 
 #[test]
+fn a_caret_in_the_body_does_not_close_a_standalone_caret_escape_region() {
+    for delimiter in ["^C", "^Z", "^A", "^^"] {
+        let input = format!(
+            "banner motd {delimiter}\nPress ^ for help\n! Authorized use only\n{delimiter}\nhostname edge-1\n"
+        );
+        let doc = parse_with_dialect(&input, &IOS_LIKE);
+
+        assert_eq!(
+            line_kinds(&doc),
+            vec![
+                (format!("banner motd {delimiter}"), TriviaKind::Content),
+                ("Press ^ for help".to_string(), TriviaKind::Literal),
+                ("! Authorized use only".to_string(), TriviaKind::Literal),
+                (delimiter.to_string(), TriviaKind::Literal),
+                ("hostname edge-1".to_string(), TriviaKind::Content),
+            ],
+            "{delimiter}",
+        );
+        assert!(doc.metadata.parse_findings.is_empty(), "{delimiter}");
+    }
+}
+
+#[test]
+fn unterminated_standalone_caret_escape_region_names_the_whole_escape() {
+    for delimiter in ["^Z", "^A", "^^"] {
+        let input =
+            format!("banner motd {delimiter}\ninterface GigabitEthernet0/0/0\n  description WAN\n");
+        let doc = parse_with_dialect(&input, &IOS_LIKE);
+
+        assert!(
+            line_kinds(&doc)
+                .iter()
+                .all(|(_, trivia)| *trivia != TriviaKind::Literal),
+            "{delimiter}",
+        );
+
+        let finding = doc
+            .metadata
+            .parse_findings
+            .iter()
+            .find(|finding| finding.code == "unterminated-literal-region")
+            .unwrap_or_else(|| panic!("{delimiter}: unterminated-literal-region finding"));
+        assert_eq!(finding.span.line, 1);
+        assert!(
+            finding
+                .message
+                .contains(&format!("closed by `{delimiter}`;")),
+            "{}",
+            finding.message,
+        );
+    }
+}
+
+#[test]
 fn unterminated_plain_caret_region_names_the_caret_as_its_terminator() {
     let input =
         "banner motd ^Warning restricted\ninterface GigabitEthernet0/0/0\n  description WAN\n";

@@ -392,15 +392,18 @@ pub fn ios_like_literal_region(raw: &str) -> Option<LiteralTerminator> {
     Some(LiteralTerminator::Contains(delimiter.to_string()))
 }
 
-/// the leading delimiter of a banner token: a caret escape (`^C`) if present,
-/// otherwise the first character.
+/// the leading delimiter of a banner token: `^C` anywhere, any other `^X` only
+/// as the whole token, otherwise the first character.
 fn delimiter_opener(token: &str) -> &str {
     let mut chars = token.chars();
     let Some(first) = chars.next() else {
         return token;
     };
     match chars.next() {
-        Some(second) if first == '^' && second == 'C' => {
+        Some(second)
+            if first == '^'
+                && (second == 'C' || token.len() == first.len_utf8() + second.len_utf8()) =>
+        {
             &token[..first.len_utf8() + second.len_utf8()]
         }
         _ => &token[..first.len_utf8()],
@@ -1321,6 +1324,32 @@ mod tests {
         );
         assert_eq!(
             ios_like_literal_region("banner motd ^1st line"),
+            Some(LiteralTerminator::Contains("^".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_keeps_a_standalone_caret_escape_whole() {
+        for delimiter in ["^C", "^Z", "^A", "^X", "^^", "^é"] {
+            assert_eq!(
+                ios_like_literal_region(&format!("banner motd {delimiter}")),
+                Some(LiteralTerminator::Contains(delimiter.into())),
+                "{delimiter}",
+            );
+            assert_eq!(
+                ios_like_literal_region(&format!("banner motd {delimiter} Authorized use only")),
+                Some(LiteralTerminator::Contains(delimiter.into())),
+                "{delimiter}",
+            );
+        }
+    }
+
+    /// `^Z` + `danger` and `^` + `Zdanger` are indistinguishable: an ambiguous
+    /// reading, not a correct one.
+    #[test]
+    fn literal_region_splits_a_non_c_caret_escape_glued_to_its_text() {
+        assert_eq!(
+            ios_like_literal_region("banner motd ^Zdanger"),
             Some(LiteralTerminator::Contains("^".into())),
         );
     }
