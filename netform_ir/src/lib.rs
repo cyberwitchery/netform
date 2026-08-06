@@ -55,6 +55,9 @@ pub enum TriviaKind {
     Comment,
     Content,
     Unknown,
+    /// free-text body of a multi-line literal region (see [`Dialect::literal_region`]):
+    /// never tokenized or key-hinted, inert for block structure, compared verbatim.
+    Literal,
 }
 
 /// leaf node preserving original raw text and parse metadata for one line.
@@ -231,6 +234,44 @@ pub trait Dialect {
     fn block_terminator(&self, _raw: &str) -> bool {
         false
     }
+
+    /// report whether a raw line opens a multi-line literal region, and what
+    /// closes it.
+    ///
+    /// lines after the opener up to and including the terminator become
+    /// [`TriviaKind::Literal`]; the opener itself stays [`TriviaKind::Content`].
+    /// the returned pattern must be non-empty.
+    fn literal_region(&self, _raw: &str) -> Option<LiteralTerminator> {
+        None
+    }
+}
+
+/// what closes a multi-line literal region opened by [`Dialect::literal_region`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiteralTerminator {
+    /// closed by the first later line containing this text, matching how IOS
+    /// ends a `banner <type> <delimiter>` at the next delimiter occurrence.
+    Contains(String),
+    /// closed by the first later line whose trimmed text equals this, matching
+    /// the delimiter-less EOS `banner <type>` … `EOF` form.
+    ExactLine(String),
+}
+
+impl LiteralTerminator {
+    /// report whether `raw` closes this region.
+    pub fn terminates(&self, raw: &str) -> bool {
+        match self {
+            Self::Contains(pattern) => raw.contains(pattern.as_str()),
+            Self::ExactLine(pattern) => raw.trim() == pattern,
+        }
+    }
+
+    /// the text this terminator matches on, for diagnostics.
+    pub fn pattern(&self) -> &str {
+        match self {
+            Self::Contains(pattern) | Self::ExactLine(pattern) => pattern,
+        }
+    }
 }
 
 /// parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
@@ -291,6 +332,91 @@ impl Dialect for IosLikeDialect {
         }
         (self.key_hint)(parsed)
     }
+
+    fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
+        ios_like_literal_region(raw)
+    }
+}
+
+/// recognize an IOS-family `banner <type> [delimiter]` line and report what
+/// closes the free-text body that follows it.
+///
+/// - `banner motd ^C` — closed by the next line containing the delimiter.
+/// - `banner motd #Warning` — a delimiter glued to the text, closed by the next `#`.
+/// - `banner motd` — the delimiter-less EOS form, closed by a line reading `EOF`.
+///
+/// returns `None` for a banner whose delimiter reappears on the banner line
+/// itself, which carries its whole body there.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_ir::{LiteralTerminator, ios_like_literal_region};
+///
+/// let region = ios_like_literal_region("banner motd ^C").unwrap();
+/// assert!(region.terminates("^C"));
+/// assert!(!region.terminates("Authorized use only"));
+/// ```
+pub fn ios_like_literal_region(raw: &str) -> Option<LiteralTerminator> {
+    let after_head = raw.trim_start().strip_prefix("banner")?;
+    if !after_head.starts_with([' ', '\t']) {
+        return None;
+    }
+
+    let (_banner_type, after_type) = split_first_token(after_head)?;
+    let Some((delimiter, tail)) = split_first_token(after_type) else {
+        return Some(LiteralTerminator::ExactLine("EOF".to_string()));
+    };
+
+    if tail.contains(delimiter) {
+        return None;
+    }
+
+    // a punctuation opener splits glued text off; an alphanumeric token is the
+    // delimiter-less word form (`EOF`) and is never split.
+    let opener = delimiter_opener(delimiter);
+    if delimiter.len() > opener.len() {
+        if delimiter.ends_with(opener) {
+            return None;
+        }
+        if !opener.starts_with(char::is_alphanumeric) {
+            if delimiter[opener.len()..].contains(opener) || tail.contains(opener) {
+                return None;
+            }
+            return Some(LiteralTerminator::Contains(opener.to_string()));
+        }
+    }
+
+    Some(LiteralTerminator::Contains(delimiter.to_string()))
+}
+
+/// the leading delimiter of a banner token: `^C` anywhere, any other `^X` only
+/// as the whole token, otherwise the first character.
+fn delimiter_opener(token: &str) -> &str {
+    let mut chars = token.chars();
+    let Some(first) = chars.next() else {
+        return token;
+    };
+    match chars.next() {
+        Some(second)
+            if first == '^'
+                && (second == 'C' || token.len() == first.len_utf8() + second.len_utf8()) =>
+        {
+            &token[..first.len_utf8() + second.len_utf8()]
+        }
+        _ => &token[..first.len_utf8()],
+    }
+}
+
+/// split leading whitespace and the first whitespace-delimited token off `raw`,
+/// returning that token and the untrimmed remainder.
+fn split_first_token(raw: &str) -> Option<(&str, &str)> {
+    let trimmed = raw.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    Some(trimmed.split_at(end))
 }
 
 /// conservative default dialect for vendor-agnostic parsing.
@@ -376,9 +502,9 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
             });
         }
 
-        // non-blank lines can close open blocks when indentation decreases.
+        // non-blank, non-literal lines can close open blocks when indentation decreases.
         let mut closed_block: Option<NodeId> = None;
-        if line.trivia != TriviaKind::Blank {
+        if !matches!(line.trivia, TriviaKind::Blank | TriviaKind::Literal) {
             while let Some((parent_indent, parent_id)) = parent_stack.last().copied() {
                 if line.indent <= parent_indent {
                     closed_block = Some(parent_id);
@@ -445,12 +571,69 @@ impl LineCandidate {
     }
 }
 
+/// one physical source line, before dialect classification.
+struct RawLine<'a> {
+    raw: &'a str,
+    line_ending: &'a str,
+    span: Span,
+}
+
 fn collect_lines<D: Dialect>(
     input: &str,
     dialect: &D,
     line_count: &mut usize,
     parse_findings: &mut Vec<ParseFinding>,
 ) -> Vec<LineCandidate> {
+    let raw_lines = split_raw_lines(input);
+    *line_count = raw_lines.len();
+
+    let literal = mark_literal_regions(&raw_lines, dialect, parse_findings);
+
+    raw_lines
+        .into_iter()
+        .zip(literal)
+        .map(|(line, is_literal)| {
+            let RawLine {
+                raw,
+                line_ending,
+                span,
+            } = line;
+
+            let trivia = if is_literal {
+                TriviaKind::Literal
+            } else {
+                dialect.classify_trivia(raw)
+            };
+            let parsed = if trivia == TriviaKind::Content {
+                dialect.parse_parts(raw)
+            } else {
+                None
+            };
+            let key_hint = dialect.key_hint(raw, parsed.as_ref(), trivia);
+
+            if !is_literal && has_mixed_leading_whitespace(raw) {
+                parse_findings.push(ParseFinding {
+                    code: "mixed-leading-whitespace".to_string(),
+                    message: "line indentation mixes spaces and tabs; structure may be ambiguous"
+                        .to_string(),
+                    span: span.clone(),
+                });
+            }
+
+            LineCandidate {
+                raw: raw.to_string(),
+                line_ending: line_ending.to_string(),
+                span,
+                parsed,
+                key_hint,
+                trivia,
+                indent: count_indent(raw),
+            }
+        })
+        .collect()
+}
+
+fn split_raw_lines(input: &str) -> Vec<RawLine<'_>> {
     let mut out = Vec::new();
     let mut start = 0usize;
     let mut line_no = 1usize;
@@ -464,45 +647,62 @@ fn collect_lines<D: Dialect>(
         };
 
         let (raw, line_ending) = split_line_ending(segment);
-        let trivia = dialect.classify_trivia(raw);
-        let span = Span {
-            line: line_no,
-            start_byte: start,
-            // spans currently cover the content bytes only (not trailing newline bytes).
-            end_byte: start + raw.len(),
-        };
-        let parsed = if trivia == TriviaKind::Content {
-            dialect.parse_parts(raw)
-        } else {
-            None
-        };
-        let key_hint = dialect.key_hint(raw, parsed.as_ref(), trivia);
-
-        if has_mixed_leading_whitespace(raw) {
-            parse_findings.push(ParseFinding {
-                code: "mixed-leading-whitespace".to_string(),
-                message: "line indentation mixes spaces and tabs; structure may be ambiguous"
-                    .to_string(),
-                span: span.clone(),
-            });
-        }
-
-        out.push(LineCandidate {
-            raw: raw.to_string(),
-            line_ending: line_ending.to_string(),
-            span,
-            parsed,
-            key_hint,
-            trivia,
-            indent: count_indent(raw),
+        out.push(RawLine {
+            raw,
+            line_ending,
+            span: Span {
+                line: line_no,
+                start_byte: start,
+                // spans currently cover the content bytes only (not trailing newline bytes).
+                end_byte: start + raw.len(),
+            },
         });
 
-        *line_count += 1;
         line_no += 1;
         start = next_start;
     }
 
     out
+}
+
+/// mark every line that falls inside a dialect literal region.
+///
+/// an opener whose terminator never appears is not entered; it gets an
+/// `unterminated-literal-region` finding instead.
+fn mark_literal_regions<D: Dialect>(
+    lines: &[RawLine<'_>],
+    dialect: &D,
+    parse_findings: &mut Vec<ParseFinding>,
+) -> Vec<bool> {
+    let mut literal = vec![false; lines.len()];
+    let mut idx = 0usize;
+
+    while idx < lines.len() {
+        let Some(terminator) = dialect.literal_region(lines[idx].raw) else {
+            idx += 1;
+            continue;
+        };
+
+        match (idx + 1..lines.len()).find(|&next| terminator.terminates(lines[next].raw)) {
+            Some(end) => {
+                literal[idx + 1..=end].fill(true);
+                idx = end + 1;
+            }
+            None => {
+                parse_findings.push(ParseFinding {
+                    code: "unterminated-literal-region".to_string(),
+                    message: format!(
+                        "literal region is never closed by `{}`; its body is parsed as configuration",
+                        terminator.pattern()
+                    ),
+                    span: lines[idx].span.clone(),
+                });
+                idx += 1;
+            }
+        }
+    }
+
+    literal
 }
 
 fn attach_node(doc: &mut Document, parent_stack: &[(usize, NodeId)], id: NodeId) {
@@ -1059,5 +1259,183 @@ mod tests {
     #[test]
     fn common_key_hint_ntp_no_match() {
         assert_eq!(common_hint("ntp source-interface mgmt0"), None);
+    }
+
+    #[test]
+    fn literal_region_delimiter_form() {
+        assert_eq!(
+            ios_like_literal_region("banner motd ^C"),
+            Some(LiteralTerminator::Contains("^C".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner login #"),
+            Some(LiteralTerminator::Contains("#".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_accepts_control_byte_delimiter() {
+        assert_eq!(
+            ios_like_literal_region("banner motd \u{3}"),
+            Some(LiteralTerminator::Contains("\u{3}".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_delimiter_less_eos_form() {
+        assert_eq!(
+            ios_like_literal_region("banner motd"),
+            Some(LiteralTerminator::ExactLine("EOF".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_self_contained_banner() {
+        assert_eq!(ios_like_literal_region("banner motd ^C Hi there ^C"), None);
+        assert_eq!(ios_like_literal_region("banner motd ^CHi^C"), None);
+        assert_eq!(ios_like_literal_region("banner motd ^C^C"), None);
+        assert_eq!(ios_like_literal_region("banner motd #Hi#"), None);
+    }
+
+    #[test]
+    fn literal_region_keeps_multi_character_delimiters_whole() {
+        assert_eq!(
+            ios_like_literal_region("banner motd EOF"),
+            Some(LiteralTerminator::Contains("EOF".into())),
+        );
+        assert_eq!(ios_like_literal_region("banner motd \u{3}Hi\u{3}"), None,);
+    }
+
+    #[test]
+    fn literal_region_splits_caret_delimiter_from_glued_text() {
+        assert_eq!(
+            ios_like_literal_region("banner motd ^CHi"),
+            Some(LiteralTerminator::Contains("^C".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_splits_a_plain_caret_delimiter_from_glued_text() {
+        assert_eq!(
+            ios_like_literal_region("banner motd ^Warning restricted"),
+            Some(LiteralTerminator::Contains("^".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd ^1st line"),
+            Some(LiteralTerminator::Contains("^".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_keeps_a_standalone_caret_escape_whole() {
+        for delimiter in ["^C", "^Z", "^A", "^X", "^^", "^é"] {
+            assert_eq!(
+                ios_like_literal_region(&format!("banner motd {delimiter}")),
+                Some(LiteralTerminator::Contains(delimiter.into())),
+                "{delimiter}",
+            );
+            assert_eq!(
+                ios_like_literal_region(&format!("banner motd {delimiter} Authorized use only")),
+                Some(LiteralTerminator::Contains(delimiter.into())),
+                "{delimiter}",
+            );
+        }
+    }
+
+    #[test]
+    fn literal_region_splits_a_non_c_caret_escape_glued_to_its_text() {
+        // `^Z` + `danger` and `^` + `Zdanger` are indistinguishable (see `delimiter_opener`).
+        assert_eq!(
+            ios_like_literal_region("banner motd ^Zdanger"),
+            Some(LiteralTerminator::Contains("^".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_splits_punctuation_delimiter_from_glued_text() {
+        assert_eq!(
+            ios_like_literal_region("banner motd #Warning restricted"),
+            Some(LiteralTerminator::Contains("#".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner login @Hi"),
+            Some(LiteralTerminator::Contains("@".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd \u{3}Warning"),
+            Some(LiteralTerminator::Contains("\u{3}".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_a_one_line_banner_whose_text_contains_a_space() {
+        assert_eq!(ios_like_literal_region("banner motd #Hello world#"), None);
+        assert_eq!(ios_like_literal_region("banner motd ^CHello world^C"), None);
+        assert_eq!(ios_like_literal_region("banner motd ^Hello world^"), None);
+        assert_eq!(
+            ios_like_literal_region("banner exec %Please log out at %the end%"),
+            None,
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd \u{3}Hello world\u{3}"),
+            None,
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd #Hello world"),
+            Some(LiteralTerminator::Contains("#".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd ^CHello world"),
+            Some(LiteralTerminator::Contains("^C".into())),
+        );
+        assert_eq!(
+            ios_like_literal_region("banner motd ^Hello world"),
+            Some(LiteralTerminator::Contains("^".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_opens_when_text_starts_on_the_banner_line() {
+        assert_eq!(
+            ios_like_literal_region("banner motd ^C Authorized use only"),
+            Some(LiteralTerminator::Contains("^C".into())),
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_non_banner_lines() {
+        assert_eq!(ios_like_literal_region("interface Ethernet1"), None);
+        assert_eq!(ios_like_literal_region("bannermotd ^C"), None);
+        assert_eq!(ios_like_literal_region("no banner motd"), None);
+        assert_eq!(ios_like_literal_region("banner"), None);
+        assert_eq!(ios_like_literal_region("banner   "), None);
+    }
+
+    #[test]
+    fn literal_region_ignores_leading_indentation() {
+        assert_eq!(
+            ios_like_literal_region("   banner motd ^C"),
+            Some(LiteralTerminator::Contains("^C".into())),
+        );
+    }
+
+    #[test]
+    fn terminator_contains_matches_anywhere_on_the_line() {
+        let term = LiteralTerminator::Contains("^C".into());
+        assert!(term.terminates("^C"));
+        assert!(term.terminates("  ^C  "));
+        assert!(term.terminates("goodbye^C"));
+        assert!(!term.terminates("no delimiter here"));
+        assert_eq!(term.pattern(), "^C");
+    }
+
+    #[test]
+    fn terminator_exact_line_ignores_surrounding_whitespace_only() {
+        let term = LiteralTerminator::ExactLine("EOF".into());
+        assert!(term.terminates("EOF"));
+        assert!(term.terminates("  EOF  "));
+        assert!(!term.terminates("EOF and more"));
+        assert!(!term.terminates("not EOF"));
+        assert_eq!(term.pattern(), "EOF");
     }
 }

@@ -9,6 +9,11 @@ pub(crate) fn normalize_for_compare(
     trivia: TriviaKind,
     options: &NormalizeOptions,
 ) -> Option<String> {
+    // no step may drop or rewrite opaque literal text.
+    if trivia == TriviaKind::Literal {
+        return Some(raw.to_string());
+    }
+
     let mut output: Cow<'_, str> = Cow::Borrowed(raw);
 
     for step in &options.steps {
@@ -75,6 +80,7 @@ pub(crate) fn trivia_tag(kind: TriviaKind) -> &'static str {
         TriviaKind::Comment => "comment",
         TriviaKind::Content => "content",
         TriviaKind::Unknown => "unknown",
+        TriviaKind::Literal => "literal",
     }
 }
 

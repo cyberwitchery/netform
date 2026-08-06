@@ -83,7 +83,49 @@ fn eos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::{DialectHint, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts};
+    use netform_ir::{
+        DialectHint, Node, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts,
+    };
+
+    fn root_trivia(doc: &Document) -> Vec<(&str, TriviaKind)> {
+        doc.roots
+            .iter()
+            .map(|id| match doc.node(*id).expect("node in arena") {
+                Node::Line(line) => (line.raw.as_str(), line.trivia),
+                Node::Block(block) => panic!("unexpected block {:?}", block.header.raw),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn eos_delimiter_less_banner_body_ends_at_eof() {
+        let doc = parse_eos("banner motd\n! not a comment\nEOF\nhostname leaf-01\n");
+
+        assert_eq!(
+            root_trivia(&doc),
+            vec![
+                ("banner motd", TriviaKind::Content),
+                ("! not a comment", TriviaKind::Literal),
+                ("EOF", TriviaKind::Literal),
+                ("hostname leaf-01", TriviaKind::Content),
+            ],
+        );
+    }
+
+    #[test]
+    fn eos_delimiter_banner_body_ends_at_the_delimiter() {
+        let doc = parse_eos("banner login ^C\nRestricted\n^C\nhostname leaf-01\n");
+
+        assert_eq!(
+            root_trivia(&doc),
+            vec![
+                ("banner login ^C", TriviaKind::Content),
+                ("Restricted", TriviaKind::Literal),
+                ("^C", TriviaKind::Literal),
+                ("hostname leaf-01", TriviaKind::Content),
+            ],
+        );
+    }
 
     #[test]
     fn eos_comment_classification_supports_bang_and_hash() {

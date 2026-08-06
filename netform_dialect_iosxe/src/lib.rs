@@ -101,7 +101,51 @@ fn iosxe_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::{DialectHint, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts};
+    use netform_ir::{
+        DialectHint, Node, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts,
+    };
+
+    /// `(raw, trivia, key_hint)` for each root line of a flat document.
+    fn root_lines(doc: &Document) -> Vec<(&str, TriviaKind, Option<&str>)> {
+        doc.roots
+            .iter()
+            .map(|id| match doc.node(*id).expect("node in arena") {
+                Node::Line(line) => (line.raw.as_str(), line.trivia, line.key_hint.as_deref()),
+                Node::Block(block) => panic!("unexpected block {:?}", block.header.raw),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn iosxe_banner_body_is_opaque_literal_text() {
+        let doc = parse_iosxe(
+            "banner motd ^C\n! not a comment\ninterface GigabitEthernet0/0/0\n^C\nhostname edge-1\n",
+        );
+
+        assert_eq!(
+            root_lines(&doc),
+            vec![
+                ("banner motd ^C", TriviaKind::Content, None),
+                ("! not a comment", TriviaKind::Literal, None),
+                ("interface GigabitEthernet0/0/0", TriviaKind::Literal, None),
+                ("^C", TriviaKind::Literal, None),
+                ("hostname edge-1", TriviaKind::Content, None),
+            ],
+        );
+    }
+
+    #[test]
+    fn iosxe_interface_after_a_banner_still_gets_its_key_hint() {
+        let doc = parse_iosxe(
+            "banner motd ^C\ninterface GigabitEthernet0/0/0\n^C\ninterface GigabitEthernet0/0/0\n",
+        );
+
+        let hints: Vec<_> = root_lines(&doc)
+            .into_iter()
+            .filter_map(|(_, _, hint)| hint.map(str::to_string))
+            .collect();
+        assert_eq!(hints, vec!["interface:gigabitethernet:0/0/0"]);
+    }
 
     #[test]
     fn iosxe_comment_classification_supports_bang_and_hash() {
