@@ -55,10 +55,8 @@ pub enum TriviaKind {
     Comment,
     Content,
     Unknown,
-    /// free-text body of a multi-line literal region (see [`Dialect::literal_region`]).
-    ///
-    /// opaque: no tokenization, no key hint, no effect on block structure, and
-    /// compared verbatim.
+    /// free-text body of a multi-line literal region (see [`Dialect::literal_region`]):
+    /// never tokenized or key-hinted, inert for block structure, compared verbatim.
     Literal,
 }
 
@@ -1344,10 +1342,9 @@ mod tests {
         }
     }
 
-    /// `^Z` + `danger` and `^` + `Zdanger` are indistinguishable: an ambiguous
-    /// reading, not a correct one.
     #[test]
     fn literal_region_splits_a_non_c_caret_escape_glued_to_its_text() {
+        // `^Z` + `danger` and `^` + `Zdanger` are indistinguishable (see `delimiter_opener`).
         assert_eq!(
             ios_like_literal_region("banner motd ^Zdanger"),
             Some(LiteralTerminator::Contains("^".into())),

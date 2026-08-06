@@ -1,4 +1,4 @@
-//! Parser coverage for multi-line literal regions (IOS-family banners).
+//! parser coverage for multi-line literal regions (IOS-family banners).
 
 use netform_ir::{
     Dialect, IosLikeDialect, LiteralTerminator, Node, ParsedLineParts, TriviaKind, common_key_hint,
@@ -7,8 +7,8 @@ use netform_ir::{
 
 const IOS_LIKE: IosLikeDialect = IosLikeDialect::new("iosxe", common_key_hint);
 
-/// dialect whose only customization is a literal region, so region handling is
-/// exercised independently of any vendor banner syntax.
+/// dialect whose only customization is a literal region, independent of any
+/// vendor banner syntax.
 struct MarkerDialect;
 
 impl Dialect for MarkerDialect {

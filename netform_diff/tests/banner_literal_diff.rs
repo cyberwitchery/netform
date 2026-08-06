@@ -1,9 +1,6 @@
-//! Integration coverage for IOS-family banner bodies as literal regions.
-//!
-//! Both symptoms below reproduce on the pre-fix code: banner text was classified,
-//! tokenized and key-hinted as if it were configuration, so a `!`-prefixed
-//! banner line was dropped by `--ignore-comments` and a banner line reading
-//! `interface …` collided with the identity of the real interface.
+//! an IOS-family banner body is opaque free text, not configuration (see
+//! `Dialect::literal_region` in netform_ir).  these tests parse real IOS XE
+//! configs and exercise `diff_documents` end to end.
 
 use netform_dialect_iosxe::parse_iosxe;
 use netform_diff::{
