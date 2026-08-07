@@ -1,6 +1,6 @@
 # changelog
 
-## Unreleased
+## [0.8.0] - 2026-08-07
 
 - IOS-family banners (`banner motd ^C` … `^C`, the delimiter glued to the text as `banner motd #Warning restricted` … `#`, and the delimiter-less Arista `banner motd` … `EOF`) are now read as free text on Arista EOS, Cisco NX-OS and Cisco IOS XE. a banner line beginning with `!` or `#` was dropped by `--ignore-comments`, so a real edit to the banner produced no output and exit 0, and a banner line reading `interface GigabitEthernet0/0/0` claimed the real interface's identity, giving `ambiguous extracted key` warnings and mis-paired lines under `--order-policy keyed-stable`. banner text is now compared verbatim — never matched as a comment, never keyed as configuration, never nested into blocks by its own indentation — so an edit to it is still reported as an edit
 - because banner text is opaque, no normalization applies inside a banner, so whitespace-only and blank-line edits to banner text now surface as changes
