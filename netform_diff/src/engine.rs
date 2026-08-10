@@ -1333,7 +1333,7 @@ mod tests {
     }
 
     #[test]
-    fn deep_order_policy_override_now_honored_like_a_shallow_one() {
+    fn order_policy_override_suppresses_the_reorder_whether_shallow_or_deep() {
         // a pure reorder of two children of the block at [0].
         let shallow_a = view(vec![
             cline("block A", 100, vec![0]),
