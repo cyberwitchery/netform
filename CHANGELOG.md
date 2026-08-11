@@ -1,5 +1,10 @@
 # changelog
 
+## Unreleased
+
+- `--dialect auto` now recognizes Cisco IOS XE from its interface names — the speed-prefixed Ethernet family (`GigabitEthernet1/0/1`, `FastEthernet0/0`, `TenGigabitEthernet`, `TwentyFiveGigE`, `FortyGigabitEthernet`, `HundredGigE`, `TwoGigabitEthernet`, `FiveGigabitEthernet`, `AppGigabitEthernet`). IOS XE previously scored only on `ip access-list extended`, dotted-decimal masks and `network … mask …`, so a switching-only Catalyst configuration — `switchport` settings with no `ip address` anywhere — matched nothing at all and fell back to the generic profile, losing the IOS XE key hints that keep diff output stable across reorderings. the equivalent Arista config already detected, because EOS scores its own interface naming
+- a configuration mixing IOS XE and NX-OS interface names with no other dialect signal is now reported as ambiguous (generic) rather than NX-OS, since both namings score
+
 ## [0.8.0] - 2026-08-07
 
 - IOS-family banners (`banner motd ^C` … `^C`, the delimiter glued to the text as `banner motd #Warning restricted` … `#`, and the delimiter-less Arista `banner motd` … `EOF`) are now read as free text on Arista EOS, Cisco NX-OS and Cisco IOS XE. a banner line beginning with `!` or `#` was dropped by `--ignore-comments`, so a real edit to the banner produced no output and exit 0, and a banner line reading `interface GigabitEthernet0/0/0` claimed the real interface's identity, giving `ambiguous extracted key` warnings and mis-paired lines under `--order-policy keyed-stable`. banner text is now compared verbatim — never matched as a comment, never keyed as configuration, never nested into blocks by its own indentation — so an edit to it is still reported as an edit

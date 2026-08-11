@@ -25,7 +25,8 @@ use crate::DialectHint;
 const STRONG_SIGNAL: i32 = 3;
 
 /// score for a moderately distinctive pattern (e.g. FortiOS `end`/`next`,
-/// Junos brace open/close, EOS non-slot Ethernet interfaces).
+/// Junos brace open/close, EOS non-slot and IOS XE speed-prefixed Ethernet
+/// interfaces).
 const MODERATE_SIGNAL: i32 = 2;
 
 /// score for a pattern that weakly suggests a dialect (e.g. Junos trailing
@@ -112,9 +113,10 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         // slot/port interfaces: Ethernet1/1, port-channel1, etc.
         if line.starts_with("interface ") {
             let iface = line.trim_start_matches("interface ");
-            if iface.starts_with("Ethernet") && iface.contains('/') {
+            if is_iosxe_ethernet_name(iface) {
+                iosxe += MODERATE_SIGNAL;
+            } else if iface.starts_with("Ethernet") && iface.contains('/') {
                 // NX-OS uses plain Ethernet with slot/port (Ethernet1/1).
-                // IOS XE uses GigabitEthernet, TenGigabitEthernet etc. with slashes.
                 nxos += STRONG_SIGNAL;
             } else if iface.starts_with("Ethernet") || iface.starts_with("Management") {
                 // no slot → could be EOS.
@@ -209,6 +211,23 @@ fn is_junos_stanza_name(name: &str) -> bool {
             | "groups"
             | "routing-instances"
     )
+}
+
+/// returns `true` if `name` is an IOS XE speed-prefixed Ethernet interface
+/// name (e.g. `GigabitEthernet1/0/1`, `HundredGigE1/0/1`).
+fn is_iosxe_ethernet_name(name: &str) -> bool {
+    const PREFIXES: [&str; 9] = [
+        "AppGigabitEthernet",
+        "FastEthernet",
+        "FiveGigabitEthernet",
+        "FortyGigabitEthernet",
+        "GigabitEthernet",
+        "HundredGigE",
+        "TenGigabitEthernet",
+        "TwentyFiveGigE",
+        "TwoGigabitEthernet",
+    ];
+    PREFIXES.iter().any(|prefix| name.starts_with(prefix))
 }
 
 /// returns `true` if `s` looks like a dotted-decimal subnet or wildcard mask
@@ -329,6 +348,42 @@ ip access-list extended ACL-EDGE-IN
   deny ip any any log
 ";
         assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_iosxe_layer2_only_config() {
+        let input = "\
+hostname cat9k-access-01
+!
+interface GigabitEthernet1/0/1
+ switchport mode access
+ switchport access vlan 10
+!
+interface GigabitEthernet1/0/2
+ switchport mode access
+ switchport access vlan 20
+!
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_iosxe_from_other_speed_prefixes() {
+        let input = "\
+interface TenGigabitEthernet1/1/1
+interface HundredGigE1/0/1
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_generic_when_iosxe_and_nxos_interfaces_mix() {
+        // iosxe MODERATE(2) vs nxos STRONG(3): 3 < 2 * MARGIN_FACTOR(2).
+        let input = "\
+interface GigabitEthernet1/0/1
+interface Ethernet1/1
+";
+        assert_eq!(detect_dialect(input), DialectHint::Generic);
     }
 
     #[test]
