@@ -255,6 +255,10 @@ pub enum LiteralTerminator {
     /// closed by the first later line whose trimmed text equals this, matching
     /// the delimiter-less EOS `banner <type>` … `EOF` form.
     ExactLine(String),
+    /// closed by the first later line holding a double quote that is not
+    /// backslash-escaped, matching how FortiOS ends a multi-line
+    /// `set <field> "…"` value.
+    UnescapedQuote,
 }
 
 impl LiteralTerminator {
@@ -263,6 +267,7 @@ impl LiteralTerminator {
         match self {
             Self::Contains(pattern) => raw.contains(pattern.as_str()),
             Self::ExactLine(pattern) => raw.trim() == pattern,
+            Self::UnescapedQuote => unescaped_quote_count(raw) > 0,
         }
     }
 
@@ -270,8 +275,45 @@ impl LiteralTerminator {
     pub fn pattern(&self) -> &str {
         match self {
             Self::Contains(pattern) | Self::ExactLine(pattern) => pattern,
+            Self::UnescapedQuote => "\"",
         }
     }
+}
+
+/// report whether `raw` ends with a double-quoted value still open.
+///
+/// a backslash escapes the character after it, so an inner `\"` neither opens
+/// nor closes a value and `\\` is a literal backslash.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_ir::ends_inside_quoted_value;
+///
+/// assert!(ends_inside_quoted_value("set buffer \"<a href=\\\"x\\\">"));
+/// assert!(!ends_inside_quoted_value("set hostname \"FortiGate\""));
+/// ```
+pub fn ends_inside_quoted_value(raw: &str) -> bool {
+    unescaped_quote_count(raw) % 2 == 1
+}
+
+/// count the double quotes in `raw` that are not backslash-escaped.
+fn unescaped_quote_count(raw: &str) -> usize {
+    let mut count = 0usize;
+    let mut escaped = false;
+
+    // no UTF-8 continuation byte can equal `\` or `"`, so bytes suffice.
+    for byte in raw.bytes() {
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' {
+            count += 1;
+        }
+    }
+
+    count
 }
 
 /// parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
@@ -1437,5 +1479,55 @@ mod tests {
         assert!(!term.terminates("EOF and more"));
         assert!(!term.terminates("not EOF"));
         assert_eq!(term.pattern(), "EOF");
+    }
+
+    #[test]
+    fn terminator_unescaped_quote_matches_a_quote_anywhere_on_the_line() {
+        let term = LiteralTerminator::UnescapedQuote;
+        assert!(term.terminates("\""));
+        assert!(term.terminates("-----END CERTIFICATE-----\""));
+        assert!(term.terminates("</html>\"  "));
+        assert!(!term.terminates("MIIFDjBABgkqhkiG9w0BBQ0wMzAbBgkq"));
+        assert!(!term.terminates(""));
+        assert_eq!(term.pattern(), "\"");
+    }
+
+    #[test]
+    fn terminator_unescaped_quote_respects_backslash_parity() {
+        let term = LiteralTerminator::UnescapedQuote;
+        assert!(!term.terminates(r#"<a href=\"help\">"#));
+        assert!(term.terminates(r#"a windows path C:\\""#));
+        assert!(!term.terminates(r#"C:\\\""#));
+        assert!(term.terminates(r#"C:\\\\""#));
+    }
+
+    #[test]
+    fn ends_inside_quoted_value_tracks_quote_state() {
+        assert!(ends_inside_quoted_value(
+            "        set private-key \"-----BEGIN ENCRYPTED PRIVATE KEY-----"
+        ));
+        assert!(!ends_inside_quoted_value("    set hostname \"FortiGate\""));
+        assert!(!ends_inside_quoted_value("    edit \"port1\""));
+        assert!(!ends_inside_quoted_value("        set range global"));
+        assert!(!ends_inside_quoted_value(""));
+    }
+
+    #[test]
+    fn ends_inside_quoted_value_ignores_escaped_quotes() {
+        assert!(ends_inside_quoted_value(
+            r#"        set buffer "<a href=\"/help\">Help</a>"#
+        ));
+        assert!(!ends_inside_quoted_value(
+            r#"        set comment "he said \"hi\"""#
+        ));
+        assert!(ends_inside_quoted_value(r#"        set path "C:\\"#));
+        assert!(!ends_inside_quoted_value(r#"        set path "C:\\""#));
+    }
+
+    #[test]
+    fn ends_inside_quoted_value_handles_multi_byte_text() {
+        assert!(ends_inside_quoted_value("        set comment \"Grüße"));
+        assert!(!ends_inside_quoted_value("        set comment \"Grüße\""));
+        assert!(!ends_inside_quoted_value(r#"        set comment "\é""#));
     }
 }
