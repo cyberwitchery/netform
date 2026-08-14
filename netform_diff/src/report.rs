@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Write;
 
 use owo_colors::OwoColorize;
@@ -12,6 +13,9 @@ pub const DEFAULT_CONTEXT_LINES: usize = 10;
 ///
 /// `max_lines_shown` controls how many lines are printed per side of each edit
 /// before the output is truncated with an "and N more" message.
+///
+/// configuration text and both labels are escaped, so markdown syntax in a
+/// config renders as the literal text the device holds.
 pub fn format_markdown_report(
     diff: &Diff,
     left_label: &str,
@@ -20,8 +24,8 @@ pub fn format_markdown_report(
 ) -> String {
     let mut out = String::new();
     out.push_str("# Config Diff Report\n\n");
-    writeln!(out, "- Left: `{left_label}`").unwrap();
-    writeln!(out, "- Right: `{right_label}`\n").unwrap();
+    writeln!(out, "- Left: {}", code_span(left_label)).unwrap();
+    writeln!(out, "- Right: {}\n", code_span(right_label)).unwrap();
 
     out.push_str("## Stats\n\n");
     writeln!(
@@ -262,6 +266,44 @@ impl LineRenderer for ColoredRenderer {
     }
 }
 
+/// markdown openers that are significant anywhere in a line, not just at its start.
+const INLINE_MARKDOWN: &[char] = &['\\', '`', '*', '_', '[', ']', '<', '&', '~'];
+
+/// backslash-escape the inline markdown syntax in a run of configuration text.
+fn escape_markdown(text: &str) -> Cow<'_, str> {
+    if !text.contains(INLINE_MARKDOWN) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        if INLINE_MARKDOWN.contains(&c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    Cow::Owned(out)
+}
+
+/// wrap text in a code span, widening the backtick fence past the longest run
+/// inside it and padding when the content would otherwise merge with the fence.
+///
+/// empty text yields an empty string: CommonMark has no empty code span.
+fn code_span(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let longest_run = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest_run + 1);
+    let pad = text.starts_with('`')
+        || text.ends_with('`')
+        || (text.starts_with(' ') && text.ends_with(' ') && !text.trim().is_empty());
+    if pad {
+        format!("{fence} {text} {fence}")
+    } else {
+        format!("{fence}{text}{fence}")
+    }
+}
+
 /// renders lines for the markdown report.
 struct MarkdownRenderer;
 
@@ -273,11 +315,14 @@ impl LineRenderer for MarkdownRenderer {
         };
         write!(out, "\n   {marker} L{}: ", line.span.line).unwrap();
         for span in spans {
-            if span.changed {
-                write!(out, "**{}**", span.text).unwrap();
-            } else {
-                write!(out, "{}", span.text).unwrap();
+            let text = escape_markdown(span.text);
+            match (span.changed, span.text.trim().is_empty()) {
+                // `**` around whitespace is not emphasis under CommonMark's flanking rules.
+                (true, true) => write!(out, "{}", code_span(span.text)),
+                (true, false) => write!(out, "**{text}**"),
+                (false, _) => write!(out, "{text}"),
             }
+            .unwrap();
         }
     }
 
@@ -286,7 +331,13 @@ impl LineRenderer for MarkdownRenderer {
             Side::Old => "-",
             Side::New => "+",
         };
-        write!(out, "\n   {marker} L{}: {}", line.span.line, line.text).unwrap();
+        write!(
+            out,
+            "\n   {marker} L{}: {}",
+            line.span.line,
+            escape_markdown(&line.text)
+        )
+        .unwrap();
     }
 
     fn truncation(&self, out: &mut String, side: Side, remaining: usize) {
@@ -369,7 +420,7 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 out,
                 "Insert {} line(s) at key {}",
                 lines.len(),
-                crate::util::key_label(*at_key),
+                escape_markdown(&crate::util::key_label(*at_key)),
             )
             .unwrap();
             walk_single(
@@ -385,7 +436,7 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 out,
                 "Delete {} line(s) at key {}",
                 lines.len(),
-                crate::util::key_label(*at_key),
+                escape_markdown(&crate::util::key_label(*at_key)),
             )
             .unwrap();
             walk_single(
@@ -407,9 +458,9 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 out,
                 "Replace {} line(s) at key {} with {} line(s) at key {}",
                 old_lines.len(),
-                crate::util::key_label(*old_at_key),
+                escape_markdown(&crate::util::key_label(*old_at_key)),
                 new_lines.len(),
-                crate::util::key_label(*new_at_key),
+                escape_markdown(&crate::util::key_label(*new_at_key)),
             )
             .unwrap();
             walk_replace(
@@ -671,7 +722,7 @@ mod tests {
             ..Default::default()
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
-        assert!(report.contains("at key <unknown>"));
+        assert!(report.contains(r"at key \<unknown>"));
     }
 
     #[test]
@@ -925,5 +976,108 @@ mod tests {
     #[test]
     fn default_context_lines_is_ten() {
         assert_eq!(DEFAULT_CONTEXT_LINES, 10);
+    }
+
+    #[test]
+    fn escape_markdown_borrows_text_without_inline_syntax() {
+        assert!(matches!(
+            escape_markdown("set mtu 1500 # comment | pipe"),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn escape_markdown_covers_every_inline_opener() {
+        assert_eq!(
+            escape_markdown(r"a\b`c*d_e[f]g<h&i~j"),
+            r"a\\b\`c\*d\_e\[f\]g\<h\&i\~j"
+        );
+    }
+
+    #[test]
+    fn code_span_widens_fence_past_longest_backtick_run() {
+        assert_eq!(code_span("a``b`c"), "```a``b`c```");
+    }
+
+    #[test]
+    fn code_span_pads_when_content_touches_the_fence() {
+        assert_eq!(code_span("`x`"), "`` `x` ``");
+        assert_eq!(code_span(" x "), "`  x  `");
+    }
+
+    #[test]
+    fn code_span_leaves_all_whitespace_content_unpadded() {
+        assert_eq!(code_span(" "), "` `");
+        assert_eq!(code_span("  "), "`  `");
+    }
+
+    #[test]
+    fn code_span_of_empty_text_is_empty() {
+        assert_eq!(code_span(""), "");
+    }
+
+    #[test]
+    fn markdown_escapes_inline_syntax_in_plain_lines() {
+        let diff = Diff {
+            edits: vec![insert_edit(&["banner motd *** <b>halt</b> `now` ***"])],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        assert!(report.contains(r"+ L1: banner motd \*\*\* \<b>halt\</b> \`now\` \*\*\*"));
+    }
+
+    #[test]
+    fn markdown_escapes_inline_syntax_in_changed_and_unchanged_spans() {
+        let diff = Diff {
+            edits: vec![replace_edit(
+                &["set banner *old* [x]"],
+                &["set banner *new* [x]"],
+            )],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        assert!(report.contains(r"- L1: set banner **\*old\*** \[x\]"));
+        assert!(report.contains(r"+ L1: set banner **\*new\*** \[x\]"));
+    }
+
+    #[test]
+    fn markdown_whitespace_only_change_renders_as_code_span() {
+        let diff = Diff {
+            edits: vec![replace_edit(&["set mtu  1500"], &["set mtu 1500"])],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        assert!(report.contains("- L1: set mtu`  `1500"));
+        assert!(report.contains("+ L1: set mtu` `1500"));
+    }
+
+    #[test]
+    fn markdown_labels_survive_a_backtick() {
+        let diff = empty_diff();
+        let report = format_markdown_report(&diff, "a`b.cfg", "`c.cfg", 10);
+
+        assert!(report.contains("- Left: ``a`b.cfg``"));
+        assert!(report.contains("- Right: `` `c.cfg ``"));
+    }
+
+    #[test]
+    fn unified_leaves_config_text_and_labels_unescaped() {
+        owo_colors::set_override(false);
+        let diff = Diff {
+            edits: vec![
+                insert_edit(&["banner motd *** <b>halt</b> ***"]),
+                replace_edit(&["set mtu  1500"], &["set mtu 1500"]),
+            ],
+            ..Default::default()
+        };
+        let result = strip_ansi(&format_unified_diff(&diff, "a`b.cfg", "*c.cfg", 10));
+
+        assert!(result.contains("--- a`b.cfg"));
+        assert!(result.contains("+++ *c.cfg"));
+        assert!(result.contains("+ banner motd *** <b>halt</b> ***"));
+        assert!(result.contains("- set mtu  1500"));
     }
 }
