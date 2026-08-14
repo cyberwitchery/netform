@@ -15,8 +15,9 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_trivia_with_prefixes,
-    parse_ios_like_parts, parse_with_dialect,
+    Dialect, DialectHint, Document, LiteralTerminator, ParsedLineParts, TriviaKind,
+    classify_trivia_with_prefixes, ends_inside_quoted_value, parse_ios_like_parts,
+    parse_with_dialect,
 };
 
 /// dialect implementation for FortiOS configuration text.
@@ -56,6 +57,35 @@ impl Dialect for FortiosDialect {
     fn block_terminator(&self, raw: &str) -> bool {
         matches!(raw.trim(), "end" | "next")
     }
+
+    fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
+        fortios_literal_region(raw)
+    }
+}
+
+/// recognize a FortiOS line whose double-quoted value is still open at the end
+/// of the line, and report what closes it.
+///
+/// certificates, private keys and replacement-message buffers are emitted as a
+/// `set <field> "…"` whose value spans many physical lines; the value ends at
+/// the next unescaped double quote.  a self-contained value (`set hostname
+/// "FortiGate"`, `edit "port1"`) and a comment line open no region.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_dialect_fortios::fortios_literal_region;
+///
+/// let region = fortios_literal_region("    set private-key \"-----BEGIN KEY-----").unwrap();
+/// assert!(region.terminates("-----END KEY-----\""));
+/// assert!(fortios_literal_region("    set hostname \"FortiGate\"").is_none());
+/// ```
+pub fn fortios_literal_region(raw: &str) -> Option<LiteralTerminator> {
+    if classify_fortios_trivia(raw) != TriviaKind::Content {
+        return None;
+    }
+
+    ends_inside_quoted_value(raw).then_some(LiteralTerminator::UnescapedQuote)
 }
 
 /// classify trivia for FortiOS configs.
@@ -381,6 +411,47 @@ end
             edit.footer.as_ref().map(|f| f.raw.as_str()),
             Some("    next"),
         );
+    }
+
+    #[test]
+    fn literal_region_opens_on_an_unclosed_quoted_value() {
+        assert_eq!(
+            fortios_literal_region("        set private-key \"-----BEGIN KEY-----"),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+        assert_eq!(
+            fortios_literal_region("        set buffer \"<html>"),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_self_contained_values() {
+        assert_eq!(
+            fortios_literal_region("    set hostname \"FortiGate\""),
+            None
+        );
+        assert_eq!(fortios_literal_region("    edit \"port1\""), None);
+        assert_eq!(fortios_literal_region("config system global"), None);
+        assert_eq!(fortios_literal_region("    next"), None);
+        assert_eq!(fortios_literal_region(""), None);
+    }
+
+    #[test]
+    fn literal_region_opens_on_an_escaped_quote_in_the_opener() {
+        assert_eq!(
+            fortios_literal_region(r#"        set buffer "<a href=\"/help\">Help</a>"#),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+        assert_eq!(
+            fortios_literal_region(r#"        set comment "he said \"hi\"""#),
+            None,
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_a_comment_holding_an_odd_quote() {
+        assert_eq!(fortios_literal_region("#config-version=FGT\"6.4"), None);
     }
 
     #[test]
