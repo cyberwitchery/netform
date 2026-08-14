@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `--format markdown` now escapes the configuration text and labels it quotes
+- a whitespace-only change now renders as a code span rather than `**` markers
 - `--dialect auto` now recognizes Cisco IOS XE from its interface names — the speed-prefixed Ethernet family (`GigabitEthernet1/0/1`, `FastEthernet0/0`, `TenGigabitEthernet`, `TwentyFiveGigE`, `FortyGigabitEthernet`, `HundredGigE`, `TwoGigabitEthernet`, `FiveGigabitEthernet`, `AppGigabitEthernet`). IOS XE previously scored only on `ip access-list extended`, dotted-decimal masks and `network … mask …`, so a switching-only Catalyst configuration — `switchport` settings with no `ip address` anywhere — matched nothing at all and fell back to the generic profile, losing the IOS XE key hints that keep diff output stable across reorderings. the equivalent Arista config already detected, because EOS scores its own interface naming
 - a configuration mixing IOS XE and NX-OS interface names with no other dialect signal is now reported as ambiguous (generic) rather than NX-OS, since both namings score
 - read FortiOS multi-line quoted values (certificates, keys, banners) as free text
