@@ -1,16 +1,16 @@
-//! a FortiOS certificate rotation is a value change inside one `edit` entry,
-//! not structural churn across the file (see `fortios_literal_region` in
-//! netform_dialect_fortios).
+//! a Junos certificate rotation is a value change inside the block that holds
+//! it, not structural churn across the file (see `junos_literal_region` in
+//! netform_dialect_junos).
 
-use netform_dialect_fortios::parse_fortios;
+use netform_dialect_junos::parse_junos;
 use netform_diff::{
     Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     diff_documents, finding_code,
 };
-use netform_ir::{Dialect, LiteralTerminator, Path};
+use netform_ir::{Dialect, Path};
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
-    diff_documents(&parse_fortios(a), &parse_fortios(b), options).unwrap()
+    diff_documents(&parse_junos(a), &parse_junos(b), options).unwrap()
 }
 
 fn keyed_stable() -> NormalizeOptions {
@@ -63,33 +63,39 @@ fn edit_paths(diff: &Diff) -> Vec<Path> {
     out
 }
 
-const CERTIFICATE_AND_POLICY: &str = "\
-config vpn certificate local
-    edit \"Fortinet_CA\"
-        set private-key \"-----BEGIN ENCRYPTED PRIVATE KEY-----
-MIIFDjBABgkqhkiG9w0BBQ0wMzAbBgkq
+const CERTIFICATE_AND_INTERFACES: &str = "\
+security {
+    certificates {
+        local {
+            SSL-CERT {
+                certificate \"-----BEGIN CERTIFICATE-----
+MIIDXTCCAkWgAwIBAgIJAKL0UG+mRkSP
 hkiG9w0BBQwwDgQIabcd+/EFGH==
------END ENCRYPTED PRIVATE KEY-----\"
-        set range global
-    next
-end
-config firewall policy
-    edit 1
-        set srcintf \"port1\"
-        set dstintf \"port2\"
-        set action accept
-    next
-end
+-----END CERTIFICATE-----\";
+            }
+        }
+    }
+}
+interfaces {
+    ge-0/0/0 {
+        description \"uplink to core\";
+        unit 0 {
+            family inet {
+                address 10.0.0.1/30;
+            }
+        }
+    }
+}
 ";
 
 #[test]
-fn a_rotated_key_line_is_the_only_change_reported() {
-    let after = CERTIFICATE_AND_POLICY.replace(
+fn a_rotated_certificate_line_is_the_only_change_reported() {
+    let after = CERTIFICATE_AND_INTERFACES.replace(
         "hkiG9w0BBQwwDgQIabcd+/EFGH==",
         "hkiG9w0BBQwwDgQIzyxw9/8VUTS=",
     );
 
-    let diff = diff(CERTIFICATE_AND_POLICY, &after, keyed_stable());
+    let diff = diff(CERTIFICATE_AND_INTERFACES, &after, keyed_stable());
 
     assert!(diff.has_changes);
     let mut texts = edit_texts(&diff);
@@ -105,40 +111,39 @@ fn a_rotated_key_line_is_the_only_change_reported() {
 }
 
 #[test]
-fn the_change_is_scoped_to_the_certificate_entry() {
-    let after = CERTIFICATE_AND_POLICY.replace(
+fn the_change_is_scoped_to_the_block_holding_the_certificate() {
+    let after = CERTIFICATE_AND_INTERFACES.replace(
         "hkiG9w0BBQwwDgQIabcd+/EFGH==",
         "hkiG9w0BBQwwDgQIzyxw9/8VUTS=",
     );
 
-    let diff = diff(CERTIFICATE_AND_POLICY, &after, keyed_stable());
+    let paths = edit_paths(&diff(CERTIFICATE_AND_INTERFACES, &after, keyed_stable()));
 
-    let paths = edit_paths(&diff);
     assert!(!paths.is_empty());
     for path in &paths {
         assert_eq!(
             path.0.first(),
             Some(&0),
-            "the firewall policy is root 1 and must not be touched: {paths:?}",
+            "`interfaces` is root 1 and must not be touched: {paths:?}",
         );
         assert!(
-            path.0.len() >= 3,
-            "a key body line is nested under the edit entry, not a root sibling: {paths:?}",
+            path.0.len() >= 5,
+            "a certificate body line sits under `SSL-CERT`, not at the root: {paths:?}",
         );
     }
 }
 
 #[test]
-fn a_longer_key_adds_one_contained_line() {
-    let after = CERTIFICATE_AND_POLICY.replace(
-        "-----END ENCRYPTED PRIVATE KEY-----\"",
-        "QklTM1RyYWlsaW5nQmxvY2s9PQ==\n-----END ENCRYPTED PRIVATE KEY-----\"",
+fn a_longer_certificate_adds_one_contained_line() {
+    let after = CERTIFICATE_AND_INTERFACES.replace(
+        "-----END CERTIFICATE-----\";",
+        "QklTM1RyYWlsaW5nQmxvY2s9PQ==\n-----END CERTIFICATE-----\";",
     );
 
-    let diff = diff(CERTIFICATE_AND_POLICY, &after, keyed_stable());
+    let diff = diff(CERTIFICATE_AND_INTERFACES, &after, keyed_stable());
 
     assert_eq!(edit_texts(&diff), vec!["QklTM1RyYWlsaW5nQmxvY2s9PQ=="]);
-    assert_eq!(edit_paths(&diff), vec![Path(vec![0, 0, 3])]);
+    assert_eq!(edit_paths(&diff), vec![Path(vec![0, 0, 0, 0, 3])]);
     assert!(
         !diff
             .findings
@@ -150,39 +155,40 @@ fn a_longer_key_adds_one_contained_line() {
 }
 
 #[test]
-fn a_certificate_does_not_shift_the_root_index_of_the_sections_below_it() {
-    let with_certificate = diff(
-        CERTIFICATE_AND_POLICY,
-        &CERTIFICATE_AND_POLICY.replace("set action accept", "set action deny"),
-        keyed_stable(),
-    );
-
-    assert_eq!(
-        edit_paths(&with_certificate),
-        vec![Path(vec![1, 0, 2]), Path(vec![1, 0, 2]),]
+fn an_unchanged_certificate_reports_no_changes() {
+    assert!(
+        !diff(
+            CERTIFICATE_AND_INTERFACES,
+            CERTIFICATE_AND_INTERFACES,
+            keyed_stable(),
+        )
+        .has_changes
     );
 }
 
 #[test]
-fn an_unrelated_edit_below_the_certificate_diffs_as_it_would_without_one() {
+fn an_edit_below_a_certificate_diffs_as_it_would_without_one() {
     const NO_CERTIFICATE: &str = "\
-config firewall policy
-    edit 1
-        set srcintf \"port1\"
-        set dstintf \"port2\"
-        set action accept
-    next
-end
+interfaces {
+    ge-0/0/0 {
+        description \"uplink to core\";
+        unit 0 {
+            family inet {
+                address 10.0.0.1/30;
+            }
+        }
+    }
+}
 ";
 
     let with_certificate = diff(
-        CERTIFICATE_AND_POLICY,
-        &CERTIFICATE_AND_POLICY.replace("set action accept", "set action deny"),
+        CERTIFICATE_AND_INTERFACES,
+        &CERTIFICATE_AND_INTERFACES.replace("10.0.0.1/30", "10.0.0.5/30"),
         keyed_stable(),
     );
     let baseline = diff(
         NO_CERTIFICATE,
-        &NO_CERTIFICATE.replace("set action accept", "set action deny"),
+        &NO_CERTIFICATE.replace("10.0.0.1/30", "10.0.0.5/30"),
         keyed_stable(),
     );
 
@@ -198,21 +204,10 @@ end
 }
 
 #[test]
-fn identical_configs_with_a_certificate_report_no_changes() {
-    assert!(
-        !diff(
-            CERTIFICATE_AND_POLICY,
-            CERTIFICATE_AND_POLICY,
-            keyed_stable()
-        )
-        .has_changes
-    );
-}
-
-#[test]
 fn normalization_never_masks_a_change_inside_a_quoted_value() {
-    let before = "config system global\n    set comment \"top\n\thard  wrapped\nbottom\"\nend\n";
-    let after = "config system global\n    set comment \"top\n    hard wrapped \nbottom\"\nend\n";
+    let before =
+        "system {\n    login {\n        announcement \"top\n\thard  wrapped\nbottom\";\n    }\n}\n";
+    let after = "system {\n    login {\n        announcement \"top\n    hard wrapped \nbottom\";\n    }\n}\n";
 
     let options = NormalizeOptions::new(vec![
         NormalizationStep::NormalizeLeadingWhitespace,
@@ -227,8 +222,8 @@ fn normalization_never_masks_a_change_inside_a_quoted_value() {
 
 #[test]
 fn a_hash_line_inside_a_quoted_value_survives_ignore_comments() {
-    let before = "config system replacemsg webproxy \"deny\"\n    set buffer \"<style>\n#banner { color: red; }\n</style>\"\nend\n";
-    let after = before.replace("color: red", "color: blue");
+    let before = "system {\n    login {\n        announcement \"Authorized use only\n## contact ops@example.com\n\";\n    }\n}\n";
+    let after = before.replace("ops@example.com", "noc@example.com");
 
     let options = NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
 
@@ -236,29 +231,29 @@ fn a_hash_line_inside_a_quoted_value_survives_ignore_comments() {
     assert!(diff.has_changes);
     assert_eq!(
         edit_texts(&diff),
-        vec!["#banner { color: red; }", "#banner { color: blue; }"],
+        vec!["## contact ops@example.com", "## contact noc@example.com"],
     );
 }
 
 #[test]
-fn the_ios_family_dialects_open_no_region_on_a_quoted_line() {
-    let quoted = "    set private-key \"-----BEGIN ENCRYPTED PRIVATE KEY-----";
-    let dialects: Vec<(&str, Option<LiteralTerminator>)> = vec![
-        (
-            "iosxe",
-            netform_dialect_iosxe::IOSXE_DIALECT.literal_region(quoted),
-        ),
-        (
-            "eos",
-            netform_dialect_eos::EOS_DIALECT.literal_region(quoted),
-        ),
-        (
-            "nxos",
-            netform_dialect_nxos::NXOS_DIALECT.literal_region(quoted),
-        ),
-    ];
+fn the_ios_family_dialects_open_no_region_on_a_junos_quoted_line() {
+    let quoted = "                certificate \"-----BEGIN CERTIFICATE-----";
 
-    for (name, region) in dialects {
-        assert_eq!(region, None, "{name}");
-    }
+    assert!(
+        netform_dialect_junos::JunosDialect
+            .literal_region(quoted)
+            .is_some()
+    );
+    assert_eq!(
+        netform_dialect_iosxe::IOSXE_DIALECT.literal_region(quoted),
+        None,
+    );
+    assert_eq!(
+        netform_dialect_eos::EOS_DIALECT.literal_region(quoted),
+        None
+    );
+    assert_eq!(
+        netform_dialect_nxos::NXOS_DIALECT.literal_region(quoted),
+        None,
+    );
 }

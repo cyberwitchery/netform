@@ -1,0 +1,16 @@
+{
+  "name": "junos_certificate_rotation",
+  "dialect": "junos",
+  "intended": "security {\n    certificates {\n        local {\n            SSL-CERT {\n                certificate \"-----BEGIN CERTIFICATE-----\nMIIDXTCCAkWgAwIBAgIJAKL0UG+mRkSP\nhkiG9w0BBQwwDgQIabcd+/EFGH==\n-----END CERTIFICATE-----\";\n            }\n        }\n    }\n}\ninterfaces {\n    ge-0/0/0 {\n        description \"uplink to core\";\n        unit 0 {\n            family inet {\n                address 10.0.0.1/30;\n            }\n        }\n    }\n}\n",
+  "actual": "security {\n    certificates {\n        local {\n            SSL-CERT {\n                certificate \"-----BEGIN CERTIFICATE-----\nMIIDXTCCAkWgAwIBAgIJAKL0UG+mRkSP\nhkiG9w0BBQwwDgQIabcd+/EFGH==\nQklTM1RyYWlsaW5nQmxvY2s9PQ==\n-----END CERTIFICATE-----\";\n            }\n        }\n    }\n}\ninterfaces {\n    ge-0/0/0 {\n        description \"uplink to core\";\n        unit 0 {\n            family inet {\n                address 10.0.0.1/30;\n            }\n        }\n    }\n}\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": ["Insert"],
+    "finding_codes": []
+  }
+}

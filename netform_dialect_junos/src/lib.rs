@@ -15,8 +15,8 @@
 //! ```
 
 use netform_ir::{
-    Dialect, DialectHint, Document, ParsedLineParts, TriviaKind, classify_trivia_with_prefixes,
-    parse_with_dialect, tokenize,
+    Dialect, DialectHint, Document, LiteralTerminator, ParsedLineParts, TriviaKind,
+    classify_trivia_with_prefixes, ends_inside_quoted_value, parse_with_dialect, tokenize,
 };
 
 /// dialect implementation for Junos-like configuration text.
@@ -56,6 +56,36 @@ impl Dialect for JunosDialect {
     fn block_terminator(&self, raw: &str) -> bool {
         matches!(raw.trim(), "}" | "};")
     }
+
+    fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
+        junos_literal_region(raw)
+    }
+}
+
+/// recognize a Junos line whose double-quoted value is still open at the end of
+/// the line, and report what closes it.
+///
+/// certificates, ssh keys and login banners are emitted as a quoted value
+/// spanning many physical lines, in both the braced and the `set` form; the
+/// value ends at the next unescaped double quote, wherever on its line that
+/// falls.  a self-contained value (`description "uplink";`) and a comment line
+/// open no region.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_dialect_junos::junos_literal_region;
+///
+/// let region = junos_literal_region("    certificate \"-----BEGIN CERTIFICATE-----").unwrap();
+/// assert!(region.terminates("-----END CERTIFICATE-----\";"));
+/// assert!(junos_literal_region("    description \"uplink\";").is_none());
+/// ```
+pub fn junos_literal_region(raw: &str) -> Option<LiteralTerminator> {
+    if classify_junos_trivia(raw) != TriviaKind::Content {
+        return None;
+    }
+
+    ends_inside_quoted_value(raw).then_some(LiteralTerminator::UnescapedQuote)
 }
 
 fn classify_junos_trivia(raw: &str) -> TriviaKind {
@@ -258,6 +288,68 @@ mod tests {
     fn star_without_trailing_space_is_not_a_comment() {
         assert_eq!(classify_junos_trivia("*10.0.0.0/8"), TriviaKind::Content);
         assert_eq!(classify_junos_trivia("*[BGP/170]"), TriviaKind::Content);
+    }
+
+    #[test]
+    fn literal_region_opens_on_an_unclosed_quoted_value() {
+        assert_eq!(
+            junos_literal_region("                certificate \"-----BEGIN CERTIFICATE-----"),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+        assert_eq!(
+            junos_literal_region("        ssh-rsa \"ssh-rsa AAAAB3Nz"),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+        assert_eq!(
+            junos_literal_region("set system login announcement \"Authorized use only"),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_self_contained_values() {
+        assert_eq!(junos_literal_region("    description \"uplink\";"), None);
+        assert_eq!(junos_literal_region("set snmp location \"rack 4\""), None);
+        assert_eq!(junos_literal_region("interfaces {"), None);
+        assert_eq!(junos_literal_region("    }"), None);
+        assert_eq!(junos_literal_region("};"), None);
+        assert_eq!(junos_literal_region(""), None);
+    }
+
+    #[test]
+    fn literal_region_declines_unquoted_junos_statements() {
+        assert_eq!(junos_literal_region("    apply-groups GRP-DEFAULTS;"), None);
+        assert_eq!(junos_literal_region("    apply-groups-except RE1;"), None);
+        assert_eq!(
+            junos_literal_region("annotate interfaces \"managed by netops\""),
+            None,
+        );
+        assert_eq!(junos_literal_region("    inactive: disable;"), None);
+        assert_eq!(
+            junos_literal_region("set protocols bgp group PEERS neighbor 10.0.0.1"),
+            None,
+        );
+    }
+
+    #[test]
+    fn literal_region_opens_on_an_escaped_quote_in_the_opener() {
+        assert_eq!(
+            junos_literal_region(r#"    message "say \"hello\" first"#),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+        assert_eq!(
+            junos_literal_region(r#"    message "say \"hello\" first";"#),
+            None,
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_a_comment_holding_an_odd_quote() {
+        assert_eq!(junos_literal_region("## Last changed by \"admin"), None);
+        assert_eq!(junos_literal_region("# unbalanced \" here"), None);
+        assert_eq!(junos_literal_region("/* he said \" and left"), None);
+        assert_eq!(junos_literal_region(" * still a \" comment"), None);
+        assert_eq!(junos_literal_region("*/ trailing \""), None);
     }
 
     #[test]
