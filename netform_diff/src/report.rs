@@ -307,13 +307,18 @@ fn code_span(text: &str) -> String {
 /// renders lines for the markdown report.
 struct MarkdownRenderer;
 
+/// open a nested list item for one diff line; a bare `-`/`+` here would be
+/// eaten as the list marker, so the side marker rides in a code span.
+fn markdown_bullet(side: Side) -> &'static str {
+    match side {
+        Side::Old => "\n   - `-`",
+        Side::New => "\n   - `+`",
+    }
+}
+
 impl LineRenderer for MarkdownRenderer {
     fn inline_line(&self, out: &mut String, side: Side, line: &DiffLine, spans: &[TokenSpan]) {
-        let marker = match side {
-            Side::Old => "-",
-            Side::New => "+",
-        };
-        write!(out, "\n   {marker} L{}: ", line.span.line).unwrap();
+        write!(out, "{} L{}: ", markdown_bullet(side), line.span.line).unwrap();
         for span in spans {
             let text = escape_markdown(span.text);
             match (span.changed, span.text.trim().is_empty()) {
@@ -327,13 +332,10 @@ impl LineRenderer for MarkdownRenderer {
     }
 
     fn plain_line(&self, out: &mut String, side: Side, line: &DiffLine) {
-        let marker = match side {
-            Side::Old => "-",
-            Side::New => "+",
-        };
         write!(
             out,
-            "\n   {marker} L{}: {}",
+            "{} L{}: {}",
+            markdown_bullet(side),
             line.span.line,
             escape_markdown(&line.text)
         )
@@ -341,11 +343,7 @@ impl LineRenderer for MarkdownRenderer {
     }
 
     fn truncation(&self, out: &mut String, side: Side, remaining: usize) {
-        let marker = match side {
-            Side::Old => "-",
-            Side::New => "+",
-        };
-        write!(out, "\n   {marker} ... and {remaining} more").unwrap();
+        write!(out, "{} ... and {remaining} more", markdown_bullet(side)).unwrap();
     }
 }
 
@@ -601,7 +599,7 @@ mod tests {
 
         assert!(report.contains("- Inserts: 1 (1 lines)"));
         assert!(report.contains("1. Insert 1 line(s) at key 0x000000000000002a"));
-        assert!(report.contains("+ L1: permit any"));
+        assert!(report.contains("   - `+` L1: permit any"));
         assert!(!report.contains("No changes detected."));
     }
 
@@ -620,7 +618,7 @@ mod tests {
 
         assert!(report.contains("- Deletes: 1 (1 lines)"));
         assert!(report.contains("1. Delete 1 line(s) at key 0x0000000000000063"));
-        assert!(report.contains("- L1: deny all"));
+        assert!(report.contains("   - `-` L1: deny all"));
     }
 
     #[test]
@@ -641,8 +639,8 @@ mod tests {
         assert!(report.contains(
             "Replace 1 line(s) at key 0x000000000000000a with 1 line(s) at key 0x0000000000000014"
         ));
-        assert!(report.contains("- L1: **old** line"));
-        assert!(report.contains("+ L1: **new** line"));
+        assert!(report.contains("   - `-` L1: **old** line"));
+        assert!(report.contains("   - `+` L1: **new** line"));
     }
 
     #[test]
@@ -667,7 +665,7 @@ mod tests {
         let report = format_markdown_report(&diff, "a", "b", 2);
 
         // should show 2 lines then truncation message
-        assert!(report.contains("... and 3 more"));
+        assert!(report.contains("   - `+` ... and 3 more"));
     }
 
     #[test]
@@ -679,8 +677,8 @@ mod tests {
         let report = format_markdown_report(&diff, "a", "b", 5);
 
         assert!(!report.contains("... and"));
-        assert!(report.contains("+ L1: line1"));
-        assert!(report.contains("+ L2: line2"));
+        assert!(report.contains("   - `+` L1: line1"));
+        assert!(report.contains("   - `+` L2: line2"));
     }
 
     #[test]
@@ -914,8 +912,8 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 2);
 
-        assert!(report.contains("- ... and 2 more"));
-        assert!(report.contains("+ ... and 4 more"));
+        assert!(report.contains("   - `-` ... and 2 more"));
+        assert!(report.contains("   - `+` ... and 4 more"));
     }
 
     #[test]
@@ -935,9 +933,9 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains("+ L10: first"));
-        assert!(report.contains("+ L11: second"));
-        assert!(report.contains("+ L12: third"));
+        assert!(report.contains("   - `+` L10: first"));
+        assert!(report.contains("   - `+` L11: second"));
+        assert!(report.contains("   - `+` L12: third"));
     }
 
     #[test]
@@ -1024,7 +1022,7 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains(r"+ L1: banner motd \*\*\* \<b>halt\</b> \`now\` \*\*\*"));
+        assert!(report.contains(r"   - `+` L1: banner motd \*\*\* \<b>halt\</b> \`now\` \*\*\*"));
     }
 
     #[test]
@@ -1038,8 +1036,8 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains(r"- L1: set banner **\*old\*** \[x\]"));
-        assert!(report.contains(r"+ L1: set banner **\*new\*** \[x\]"));
+        assert!(report.contains(r"   - `-` L1: set banner **\*old\*** \[x\]"));
+        assert!(report.contains(r"   - `+` L1: set banner **\*new\*** \[x\]"));
     }
 
     #[test]
@@ -1050,8 +1048,8 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains("- L1: set mtu`  `1500"));
-        assert!(report.contains("+ L1: set mtu` `1500"));
+        assert!(report.contains("   - `-` L1: set mtu`  `1500"));
+        assert!(report.contains("   - `+` L1: set mtu` `1500"));
     }
 
     #[test]
@@ -1061,6 +1059,47 @@ mod tests {
 
         assert!(report.contains("- Left: ``a`b.cfg``"));
         assert!(report.contains("- Right: `` `c.cfg ``"));
+    }
+
+    #[test]
+    fn markdown_edit_lines_keep_side_markers() {
+        let diff = Diff {
+            edits: vec![insert_edit(&["permit any"]), delete_edit(&["deny all"])],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        assert!(report.ends_with(concat!(
+            "## Edits\n\n",
+            "1. Insert 1 line(s) at key 0x000000000000002a\n",
+            "   - `+` L1: permit any\n",
+            "2. Delete 1 line(s) at key 0x0000000000000063\n",
+            "   - `-` L1: deny all\n",
+        )));
+    }
+
+    #[test]
+    fn markdown_no_diff_line_opens_with_a_bare_side_marker() {
+        let diff = Diff {
+            edits: vec![
+                insert_edit(&["permit any", "permit tcp"]),
+                delete_edit(&["deny all"]),
+                replace_edit(&["set mtu 1500"], &["set mtu 9000"]),
+            ],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 1);
+
+        let edits = report.split_once("## Edits\n\n").unwrap().1;
+        for line in edits.lines().filter(|l| l.starts_with(' ')) {
+            assert!(
+                line.starts_with("   - `-` ") || line.starts_with("   - `+` "),
+                "side marker would be eaten as a list marker: {line:?}"
+            );
+        }
+        assert!(edits.contains("`-`"));
+        assert!(edits.contains("`+`"));
+        assert!(edits.contains("   - `+` ... and 1 more"));
     }
 
     #[test]

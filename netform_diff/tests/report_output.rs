@@ -44,11 +44,11 @@ fn markdown_report_mentions_keyed_replace() {
     );
     // verify line numbers are present in diff lines
     assert!(
-        report.contains("- L"),
+        report.contains("- `-` L"),
         "removed lines should include source line number"
     );
     assert!(
-        report.contains("+ L"),
+        report.contains("- `+` L"),
         "added lines should include source line number"
     );
 }
