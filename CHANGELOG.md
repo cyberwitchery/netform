@@ -13,6 +13,7 @@
 - an inner `\"` does not end a FortiOS quoted value, so HTML replacement messages (`set buffer "<a href=\"…\">`) stay intact; `\\"` — an escaped backslash followed by the real closing quote — does end it
 - because a FortiOS quoted value is opaque, no normalization applies inside one: whitespace-only edits to certificate or replacement-message text now surface as changes, a body line starting with `#` is no longer dropped by `--ignore-comments`, and a blank body line is no longer dropped by `--ignore-blank-lines`
 - a FortiOS quoted value whose closing quote never appears is not read as a value at all: its text stays ordinary configuration and gets an `unterminated-literal-region` warning. where a later line does carry a quote, the value runs to that line as it does on the device, and the configuration in between is compared verbatim but loses its block structure and identity keys
+- read Junos multi-line `/* … */` comments as comments
 - **breaking:** `netform_ir::LiteralTerminator` gains an `UnescapedQuote` variant, so an exhaustive `match` over it needs a new arm
 
 ## [0.8.0] - 2026-08-07
