@@ -1,7 +1,7 @@
 //! junos-oriented dialect profile for `netform_ir`.
 //!
 //! this crate provides a conservative Junos profile that customizes:
-//! - comment classification (`#`, `/*`, `*`, `*/`)
+//! - comment classification (`#`, `/*`, `*`, `*/`), including multi-line `/* … */`
 //! - line tokenization for braces/semicolons and quoted strings
 //!
 //! # Example
@@ -60,6 +60,10 @@ impl Dialect for JunosDialect {
     fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
         junos_literal_region(raw)
     }
+
+    fn comment_region(&self, raw: &str) -> Option<LiteralTerminator> {
+        junos_comment_region(raw)
+    }
 }
 
 /// recognize a Junos line whose double-quoted value is still open at the end of
@@ -86,6 +90,28 @@ pub fn junos_literal_region(raw: &str) -> Option<LiteralTerminator> {
     }
 
     ends_inside_quoted_value(raw).then_some(LiteralTerminator::UnescapedQuote)
+}
+
+/// recognize a Junos line opening a `/* … */` comment that runs past the end of
+/// the line, and report what closes it.
+///
+/// only a line whose first non-blank text is `/*` opens one, matching what
+/// `classify_trivia` already reads as a comment; a trailing `/*` after
+/// configuration text opens nothing.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_dialect_junos::junos_comment_region;
+///
+/// let region = junos_comment_region("/* rack notes").unwrap();
+/// assert!(region.terminates("   row B */"));
+/// assert!(junos_comment_region("/* rack notes */").is_none());
+/// ```
+pub fn junos_comment_region(raw: &str) -> Option<LiteralTerminator> {
+    let after_opener = raw.trim_start().strip_prefix("/*")?;
+
+    (!after_opener.contains("*/")).then(|| LiteralTerminator::Contains("*/".to_string()))
 }
 
 fn classify_junos_trivia(raw: &str) -> TriviaKind {
@@ -350,6 +376,48 @@ mod tests {
         assert_eq!(junos_literal_region("/* he said \" and left"), None);
         assert_eq!(junos_literal_region(" * still a \" comment"), None);
         assert_eq!(junos_literal_region("*/ trailing \""), None);
+    }
+
+    fn comment_terminator() -> Option<LiteralTerminator> {
+        Some(LiteralTerminator::Contains("*/".to_string()))
+    }
+
+    #[test]
+    fn comment_region_opens_on_an_unclosed_block_comment() {
+        assert_eq!(junos_comment_region("/* site notes"), comment_terminator());
+        assert_eq!(
+            junos_comment_region("    /* uplink notes"),
+            comment_terminator(),
+        );
+        assert_eq!(junos_comment_region("/*"), comment_terminator());
+    }
+
+    #[test]
+    fn comment_region_declines_a_self_contained_block_comment() {
+        assert_eq!(junos_comment_region("/* one line */"), None);
+        assert_eq!(junos_comment_region("/**/"), None);
+        assert_eq!(junos_comment_region("/* a */ /* b"), None);
+    }
+
+    #[test]
+    fn comment_region_declines_anything_not_opening_with_a_block_comment() {
+        assert_eq!(junos_comment_region("## Last changed by admin"), None);
+        assert_eq!(junos_comment_region(" * continuation"), None);
+        assert_eq!(junos_comment_region("*/"), None);
+        assert_eq!(junos_comment_region("interfaces {"), None);
+        assert_eq!(
+            junos_comment_region("    host-name router-1; /* note"),
+            None
+        );
+        assert_eq!(junos_comment_region(""), None);
+    }
+
+    #[test]
+    fn a_comment_region_terminator_matches_a_closer_anywhere_on_its_line() {
+        let region = junos_comment_region("/* site notes").expect("an open comment");
+        assert!(region.terminates(" */"));
+        assert!(region.terminates("   row B */"));
+        assert!(!region.terminates("   Rack 4, 19\" cabinet"));
     }
 
     #[test]
