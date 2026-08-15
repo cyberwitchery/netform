@@ -544,9 +544,9 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
             });
         }
 
-        // non-blank, non-literal lines can close open blocks when indentation decreases.
+        // only a structurally meaningful line closes open blocks, and only on a dedent.
         let mut closed_block: Option<NodeId> = None;
-        if !matches!(line.trivia, TriviaKind::Blank | TriviaKind::Literal) {
+        if !line.in_region && !matches!(line.trivia, TriviaKind::Blank | TriviaKind::Literal) {
             while let Some((parent_indent, parent_id)) = parent_stack.last().copied() {
                 if line.indent <= parent_indent {
                     closed_block = Some(parent_id);
@@ -598,6 +598,8 @@ struct LineCandidate {
     key_hint: Option<String>,
     trivia: TriviaKind,
     indent: usize,
+    /// inside a dialect region, so inert for block structure.
+    in_region: bool,
 }
 
 impl LineCandidate {
@@ -670,6 +672,7 @@ fn collect_lines<D: Dialect>(
                 key_hint,
                 trivia,
                 indent: count_indent(raw),
+                in_region: is_literal,
             }
         })
         .collect()

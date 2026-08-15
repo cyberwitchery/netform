@@ -29,6 +29,25 @@ impl Dialect for MarkerDialect {
     }
 }
 
+/// dialect returning [`TriviaKind::Literal`] from `classify_trivia`, with no region.
+struct LiteralTriviaDialect;
+
+impl Dialect for LiteralTriviaDialect {
+    fn classify_trivia(&self, raw: &str) -> TriviaKind {
+        if raw.trim().is_empty() {
+            TriviaKind::Blank
+        } else if raw.trim_start().starts_with("LIT ") {
+            TriviaKind::Literal
+        } else {
+            TriviaKind::Content
+        }
+    }
+
+    fn parse_parts(&self, _raw: &str) -> Option<ParsedLineParts> {
+        None
+    }
+}
+
 fn line_kinds(doc: &netform_ir::Document) -> Vec<(String, TriviaKind)> {
     fn walk(
         doc: &netform_ir::Document,
@@ -161,6 +180,33 @@ fn body_lines_do_not_close_an_enclosing_block() {
         }
         _ => panic!("expected the interface block to hold the whole region"),
     }
+}
+
+#[test]
+fn a_dialect_classified_literal_line_does_not_close_an_enclosing_block() {
+    let input = "outer\n  inner\n    child\nLIT free text\n    sibling\n";
+    let doc = parse_with_dialect(input, &LiteralTriviaDialect);
+
+    assert_eq!(doc.render(), input);
+    assert_eq!(doc.roots.len(), 1);
+
+    let Some(Node::Block(outer)) = doc.node(doc.roots[0]) else {
+        panic!("expected an `outer` block");
+    };
+    let Some(Node::Block(inner)) = doc.node(outer.children[0]) else {
+        panic!("expected an `inner` block");
+    };
+    assert_eq!(
+        inner
+            .children
+            .iter()
+            .map(|id| match doc.node(*id) {
+                Some(Node::Line(line)) => line.raw.as_str(),
+                _ => panic!("expected a leaf line"),
+            })
+            .collect::<Vec<_>>(),
+        vec!["    child", "LIT free text", "    sibling"],
+    );
 }
 
 #[test]
