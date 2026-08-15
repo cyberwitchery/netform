@@ -213,6 +213,29 @@ interfaces {
 }
 
 #[test]
+fn configuration_sharing_a_line_with_the_closing_marker_stays_comment_body() {
+    let cfg = "\
+/* note about the uplink
+   patched 2026-08-01 */ system {
+    host-name router-1;
+}
+";
+    let doc = parse_junos(cfg);
+    assert_eq!(doc.render(), cfg);
+
+    assert_eq!(
+        trivia_kinds(&doc, TriviaKind::Comment),
+        vec![
+            "/* note about the uplink",
+            "   patched 2026-08-01 */ system {",
+        ],
+    );
+    assert_eq!(doc.roots.len(), 4, "the file is flat, with no block opened");
+    assert!(key_hints(&doc).is_empty(), "{:?}", key_hints(&doc));
+    assert_eq!(finding_codes(&doc), vec!["orphan-indentation"]);
+}
+
+#[test]
 fn an_unterminated_comment_is_not_entered() {
     let cfg = "\
 /* site notes
