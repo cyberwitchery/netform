@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `--format markdown` diff lines now keep their `-`/`+` side marker once rendered, so an insert and a delete no longer look identical, and they stay nested under their own edit however many edits the report holds — past the ninth they used to break out and split the edit list
 - `--format markdown` now escapes the configuration text and labels it quotes
 - a whitespace-only change now renders as a code span rather than `**` markers
 - `--dialect auto` now recognizes Cisco IOS XE from its interface names — the speed-prefixed Ethernet family (`GigabitEthernet1/0/1`, `FastEthernet0/0`, `TenGigabitEthernet`, `TwentyFiveGigE`, `FortyGigabitEthernet`, `HundredGigE`, `TwoGigabitEthernet`, `FiveGigabitEthernet`, `AppGigabitEthernet`). IOS XE previously scored only on `ip access-list extended`, dotted-decimal masks and `network … mask …`, so a switching-only Catalyst configuration — `switchport` settings with no `ip address` anywhere — matched nothing at all and fell back to the generic profile, losing the IOS XE key hints that keep diff output stable across reorderings. the equivalent Arista config already detected, because EOS scores its own interface naming

@@ -52,7 +52,13 @@ pub fn format_markdown_report(
         out.push_str("No changes detected.\n");
     } else {
         for (idx, edit) in diff.edits.iter().enumerate() {
-            writeln!(out, "{}. {}", idx + 1, describe_edit(edit, max_lines_shown)).unwrap();
+            let ordinal = idx + 1;
+            writeln!(
+                out,
+                "{ordinal}. {}",
+                describe_edit(edit, ordinal, max_lines_shown)
+            )
+            .unwrap();
         }
     }
 
@@ -304,16 +310,33 @@ fn code_span(text: &str) -> String {
     }
 }
 
-/// renders lines for the markdown report.
-struct MarkdownRenderer;
+/// renders lines for the markdown report, nested under one numbered edit.
+struct MarkdownRenderer {
+    indent: usize,
+}
+
+impl MarkdownRenderer {
+    /// a list item's content column is the width of its marker: `1. ` is 3, `10. ` is 4.
+    fn for_ordinal(ordinal: usize) -> Self {
+        Self {
+            indent: ordinal.to_string().len() + 2,
+        }
+    }
+
+    /// open a nested list item for one diff line; a bare `-`/`+` here would be
+    /// eaten as the list marker, so the side marker rides in a code span.
+    fn bullet(&self, side: Side) -> String {
+        let marker = match side {
+            Side::Old => '-',
+            Side::New => '+',
+        };
+        format!("\n{:width$}- `{marker}`", "", width = self.indent)
+    }
+}
 
 impl LineRenderer for MarkdownRenderer {
     fn inline_line(&self, out: &mut String, side: Side, line: &DiffLine, spans: &[TokenSpan]) {
-        let marker = match side {
-            Side::Old => "-",
-            Side::New => "+",
-        };
-        write!(out, "\n   {marker} L{}: ", line.span.line).unwrap();
+        write!(out, "{} L{}: ", self.bullet(side), line.span.line).unwrap();
         for span in spans {
             let text = escape_markdown(span.text);
             match (span.changed, span.text.trim().is_empty()) {
@@ -327,13 +350,10 @@ impl LineRenderer for MarkdownRenderer {
     }
 
     fn plain_line(&self, out: &mut String, side: Side, line: &DiffLine) {
-        let marker = match side {
-            Side::Old => "-",
-            Side::New => "+",
-        };
         write!(
             out,
-            "\n   {marker} L{}: {}",
+            "{} L{}: {}",
+            self.bullet(side),
             line.span.line,
             escape_markdown(&line.text)
         )
@@ -341,11 +361,7 @@ impl LineRenderer for MarkdownRenderer {
     }
 
     fn truncation(&self, out: &mut String, side: Side, remaining: usize) {
-        let marker = match side {
-            Side::Old => "-",
-            Side::New => "+",
-        };
-        write!(out, "\n   {marker} ... and {remaining} more").unwrap();
+        write!(out, "{} ... and {remaining} more", self.bullet(side)).unwrap();
     }
 }
 
@@ -412,7 +428,8 @@ fn walk_replace<R: LineRenderer>(
     }
 }
 
-fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
+fn describe_edit(edit: &Edit, ordinal: usize, max_lines_shown: usize) -> String {
+    let renderer = MarkdownRenderer::for_ordinal(ordinal);
     let mut out = String::new();
     match edit {
         Edit::Insert { at_key, lines, .. } => {
@@ -423,13 +440,7 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 escape_markdown(&crate::util::key_label(*at_key)),
             )
             .unwrap();
-            walk_single(
-                &mut out,
-                &MarkdownRenderer,
-                Side::New,
-                lines,
-                max_lines_shown,
-            );
+            walk_single(&mut out, &renderer, Side::New, lines, max_lines_shown);
         }
         Edit::Delete { at_key, lines, .. } => {
             write!(
@@ -439,13 +450,7 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 escape_markdown(&crate::util::key_label(*at_key)),
             )
             .unwrap();
-            walk_single(
-                &mut out,
-                &MarkdownRenderer,
-                Side::Old,
-                lines,
-                max_lines_shown,
-            );
+            walk_single(&mut out, &renderer, Side::Old, lines, max_lines_shown);
         }
         Edit::Replace {
             old_at_key,
@@ -463,13 +468,7 @@ fn describe_edit(edit: &Edit, max_lines_shown: usize) -> String {
                 escape_markdown(&crate::util::key_label(*new_at_key)),
             )
             .unwrap();
-            walk_replace(
-                &mut out,
-                &MarkdownRenderer,
-                old_lines,
-                new_lines,
-                max_lines_shown,
-            );
+            walk_replace(&mut out, &renderer, old_lines, new_lines, max_lines_shown);
         }
     }
     out
@@ -561,6 +560,12 @@ mod tests {
         }
     }
 
+    fn numbered_inserts(count: usize) -> Vec<Edit> {
+        (1..=count)
+            .map(|n| insert_edit(&[&format!("edit-{n}")]))
+            .collect()
+    }
+
     fn make_finding(level: FindingLevel, code: &str, message: &str) -> Finding {
         Finding {
             code: code.to_string(),
@@ -601,7 +606,7 @@ mod tests {
 
         assert!(report.contains("- Inserts: 1 (1 lines)"));
         assert!(report.contains("1. Insert 1 line(s) at key 0x000000000000002a"));
-        assert!(report.contains("+ L1: permit any"));
+        assert!(report.contains("   - `+` L1: permit any"));
         assert!(!report.contains("No changes detected."));
     }
 
@@ -620,7 +625,7 @@ mod tests {
 
         assert!(report.contains("- Deletes: 1 (1 lines)"));
         assert!(report.contains("1. Delete 1 line(s) at key 0x0000000000000063"));
-        assert!(report.contains("- L1: deny all"));
+        assert!(report.contains("   - `-` L1: deny all"));
     }
 
     #[test]
@@ -641,8 +646,8 @@ mod tests {
         assert!(report.contains(
             "Replace 1 line(s) at key 0x000000000000000a with 1 line(s) at key 0x0000000000000014"
         ));
-        assert!(report.contains("- L1: **old** line"));
-        assert!(report.contains("+ L1: **new** line"));
+        assert!(report.contains("   - `-` L1: **old** line"));
+        assert!(report.contains("   - `+` L1: **new** line"));
     }
 
     #[test]
@@ -667,7 +672,7 @@ mod tests {
         let report = format_markdown_report(&diff, "a", "b", 2);
 
         // should show 2 lines then truncation message
-        assert!(report.contains("... and 3 more"));
+        assert!(report.contains("   - `+` ... and 3 more"));
     }
 
     #[test]
@@ -679,8 +684,8 @@ mod tests {
         let report = format_markdown_report(&diff, "a", "b", 5);
 
         assert!(!report.contains("... and"));
-        assert!(report.contains("+ L1: line1"));
-        assert!(report.contains("+ L2: line2"));
+        assert!(report.contains("   - `+` L1: line1"));
+        assert!(report.contains("   - `+` L2: line2"));
     }
 
     #[test]
@@ -914,8 +919,8 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 2);
 
-        assert!(report.contains("- ... and 2 more"));
-        assert!(report.contains("+ ... and 4 more"));
+        assert!(report.contains("   - `-` ... and 2 more"));
+        assert!(report.contains("   - `+` ... and 4 more"));
     }
 
     #[test]
@@ -935,9 +940,9 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains("+ L10: first"));
-        assert!(report.contains("+ L11: second"));
-        assert!(report.contains("+ L12: third"));
+        assert!(report.contains("   - `+` L10: first"));
+        assert!(report.contains("   - `+` L11: second"));
+        assert!(report.contains("   - `+` L12: third"));
     }
 
     #[test]
@@ -1024,7 +1029,7 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains(r"+ L1: banner motd \*\*\* \<b>halt\</b> \`now\` \*\*\*"));
+        assert!(report.contains(r"   - `+` L1: banner motd \*\*\* \<b>halt\</b> \`now\` \*\*\*"));
     }
 
     #[test]
@@ -1038,8 +1043,8 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains(r"- L1: set banner **\*old\*** \[x\]"));
-        assert!(report.contains(r"+ L1: set banner **\*new\*** \[x\]"));
+        assert!(report.contains(r"   - `-` L1: set banner **\*old\*** \[x\]"));
+        assert!(report.contains(r"   - `+` L1: set banner **\*new\*** \[x\]"));
     }
 
     #[test]
@@ -1050,8 +1055,8 @@ mod tests {
         };
         let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains("- L1: set mtu`  `1500"));
-        assert!(report.contains("+ L1: set mtu` `1500"));
+        assert!(report.contains("   - `-` L1: set mtu`  `1500"));
+        assert!(report.contains("   - `+` L1: set mtu` `1500"));
     }
 
     #[test]
@@ -1061,6 +1066,78 @@ mod tests {
 
         assert!(report.contains("- Left: ``a`b.cfg``"));
         assert!(report.contains("- Right: `` `c.cfg ``"));
+    }
+
+    #[test]
+    fn markdown_edit_lines_keep_side_markers() {
+        let diff = Diff {
+            edits: vec![insert_edit(&["permit any"]), delete_edit(&["deny all"])],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        assert!(report.ends_with(concat!(
+            "## Edits\n\n",
+            "1. Insert 1 line(s) at key 0x000000000000002a\n",
+            "   - `+` L1: permit any\n",
+            "2. Delete 1 line(s) at key 0x0000000000000063\n",
+            "   - `-` L1: deny all\n",
+        )));
+    }
+
+    #[test]
+    fn markdown_diff_line_indent_widens_with_the_ordinal() {
+        let diff = Diff {
+            edits: numbered_inserts(100),
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 10);
+
+        let key = "0x000000000000002a";
+        for (ordinal, indent) in [(9, "   "), (10, "    "), (99, "    "), (100, "     ")] {
+            let expected = format!(
+                "\n{ordinal}. Insert 1 line(s) at key {key}\n{indent}- `+` L1: edit-{ordinal}\n"
+            );
+            assert!(
+                report.contains(&expected),
+                "edit {ordinal} should nest at the width of its own marker: {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn markdown_no_diff_line_opens_with_a_bare_side_marker() {
+        let mut edits = numbered_inserts(100);
+        edits[9] = insert_edit(&["permit any", "permit tcp"]);
+        edits[98] = delete_edit(&["deny all"]);
+        edits[99] = replace_edit(&["set mtu 1500"], &["set mtu 9000"]);
+        let diff = Diff {
+            edits,
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a", "b", 1);
+
+        let edits = report.split_once("## Edits\n\n").unwrap().1;
+        let mut ordinal = String::new();
+        for line in edits.lines().filter(|l| !l.is_empty()) {
+            if let Some((n, _)) = line.split_once(". ")
+                && !n.is_empty()
+                && n.bytes().all(|b| b.is_ascii_digit())
+            {
+                ordinal = n.to_string();
+                continue;
+            }
+            let indent = " ".repeat(ordinal.len() + 2);
+            assert!(
+                line.starts_with(&format!("{indent}- `-` "))
+                    || line.starts_with(&format!("{indent}- `+` ")),
+                "edit {ordinal} does not hold this line: {line:?}"
+            );
+        }
+        assert!(edits.contains("\n    - `+` ... and 1 more\n"));
+        assert!(edits.contains("\n    - `-` L1: deny all\n"));
+        assert!(edits.contains("\n     - `-` L1: set mtu **1500**\n"));
+        assert!(edits.contains("\n     - `+` L1: set mtu **9000**\n"));
     }
 
     #[test]
