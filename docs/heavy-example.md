@@ -1,7 +1,7 @@
 # heavy example
 
 this walkthrough uses a realistic, noisy config pair and shows how to get:
-- human report (`report.md` style output to stdout)
+- human report (unified diff on stdout, or a markdown report with `--format markdown`)
 - machine diff (`diff.json`)
 - machine plan (`plan.json`)
 
@@ -150,13 +150,25 @@ direction note:
 
 ## sample report excerpt
 
+with `--format markdown` added to the run above:
+
 ```text
 # Config Diff Report
 
+- Left: `intended.cfg`
+- Right: `actual.cfg`
+
 ## Stats
-- Inserts: 0 (0 lines)
-- Deletes: 0 (0 lines)
-- Replaces: 3 (3 -> 3 lines)
+
+- Inserts: 1 (1 lines)
+- Deletes: 3 (3 lines)
+- Replaces: 1 (1 -> 1 lines)
+
+## Edits
+
+1. Replace 1 line(s) at key 0x8437847b03d981ca with 1 line(s) at key 0x8437847b03d981ca
+   - `-` L12: ip prefix-list PL-EDGE-OUT seq 20 permit **10.20.0.0/16** le 24
+   - `+` L12: ip prefix-list PL-EDGE-OUT seq 20 permit **10.30.0.0/16** le 24
 ```
 
 ## sample `diff.json` excerpt
@@ -165,9 +177,13 @@ direction note:
 {
   "has_changes": true,
   "edits": [
-    { "type": "Replace", "old_lines": [{ "text": "  no shutdown" }], "new_lines": [{ "text": "  shutdown" }] }
+    { "type": "Replace", "old_lines": [{ "text": "ip prefix-list PL-EDGE-OUT seq 20 permit 10.20.0.0/16 le 24" }], "new_lines": [{ "text": "ip prefix-list PL-EDGE-OUT seq 20 permit 10.30.0.0/16 le 24" }] },
+    { "type": "Insert", "lines": [{ "text": "  shutdown" }] },
+    { "type": "Delete", "lines": [{ "text": "  no shutdown" }] }
   ],
-  "findings": []
+  "findings": [
+    { "code": "ambiguous_key_match", "level": "warning", "span": { "line": 11 } }
+  ]
 }
 ```
 
@@ -179,8 +195,11 @@ direction note:
   "actions": [
     {
       "type": "apply_line_edits_under_context",
-      "context_path": [7],
-      "line_edits": [{ "kind": "replace", "text": "  shutdown" }]
+      "context_path": [19],
+      "line_edits": [
+        { "kind": "insert", "text": "  shutdown" },
+        { "kind": "delete", "text": "  no shutdown" }
+      ]
     }
   ],
   "findings": []
