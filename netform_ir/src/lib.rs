@@ -244,6 +244,18 @@ pub trait Dialect {
     fn literal_region(&self, _raw: &str) -> Option<LiteralTerminator> {
         None
     }
+
+    /// report whether a raw line opens a multi-line comment region, and what
+    /// closes it.
+    ///
+    /// lines after the opener up to and including the terminator become
+    /// [`TriviaKind::Comment`], so `--ignore-comments` still drops them while
+    /// nothing inside is tokenized, key-hinted, or able to open a literal
+    /// region.  a comment region wins over a literal region opened on the same
+    /// line.
+    fn comment_region(&self, _raw: &str) -> Option<LiteralTerminator> {
+        None
+    }
 }
 
 /// what closes a multi-line literal region opened by [`Dialect::literal_region`].
@@ -631,22 +643,22 @@ fn collect_lines<D: Dialect>(
     let raw_lines = split_raw_lines(input);
     *line_count = raw_lines.len();
 
-    let literal = mark_literal_regions(&raw_lines, dialect, parse_findings);
+    let regions = mark_regions(&raw_lines, dialect, parse_findings);
 
     raw_lines
         .into_iter()
-        .zip(literal)
-        .map(|(line, is_literal)| {
+        .zip(regions)
+        .map(|(line, region)| {
             let RawLine {
                 raw,
                 line_ending,
                 span,
             } = line;
 
-            let trivia = if is_literal {
-                TriviaKind::Literal
-            } else {
-                dialect.classify_trivia(raw)
+            let trivia = match region {
+                Some(RegionKind::Literal) => TriviaKind::Literal,
+                Some(RegionKind::Comment) => TriviaKind::Comment,
+                None => dialect.classify_trivia(raw),
             };
             let parsed = if trivia == TriviaKind::Content {
                 dialect.parse_parts(raw)
@@ -655,7 +667,7 @@ fn collect_lines<D: Dialect>(
             };
             let key_hint = dialect.key_hint(raw, parsed.as_ref(), trivia);
 
-            if !is_literal && has_mixed_leading_whitespace(raw) {
+            if region.is_none() && has_mixed_leading_whitespace(raw) {
                 parse_findings.push(ParseFinding {
                     code: "mixed-leading-whitespace".to_string(),
                     message: "line indentation mixes spaces and tabs; structure may be ambiguous"
@@ -672,7 +684,7 @@ fn collect_lines<D: Dialect>(
                 key_hint,
                 trivia,
                 indent: count_indent(raw),
-                in_region: is_literal,
+                in_region: region.is_some(),
             }
         })
         .collect()
@@ -710,34 +722,54 @@ fn split_raw_lines(input: &str) -> Vec<RawLine<'_>> {
     out
 }
 
-/// mark every line that falls inside a dialect literal region.
+/// what a dialect region makes of the lines inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegionKind {
+    Literal,
+    Comment,
+}
+
+/// mark every line that falls inside a dialect region with that region's kind.
 ///
 /// an opener whose terminator never appears is not entered; it gets an
-/// `unterminated-literal-region` finding instead.
-fn mark_literal_regions<D: Dialect>(
+/// `unterminated-literal-region` or `unterminated-comment-region` finding
+/// instead.
+fn mark_regions<D: Dialect>(
     lines: &[RawLine<'_>],
     dialect: &D,
     parse_findings: &mut Vec<ParseFinding>,
-) -> Vec<bool> {
-    let mut literal = vec![false; lines.len()];
+) -> Vec<Option<RegionKind>> {
+    let mut regions = vec![None; lines.len()];
     let mut idx = 0usize;
 
     while idx < lines.len() {
-        let Some(terminator) = dialect.literal_region(lines[idx].raw) else {
+        let opened = dialect
+            .comment_region(lines[idx].raw)
+            .map(|terminator| (RegionKind::Comment, terminator))
+            .or_else(|| {
+                dialect
+                    .literal_region(lines[idx].raw)
+                    .map(|terminator| (RegionKind::Literal, terminator))
+            });
+        let Some((kind, terminator)) = opened else {
             idx += 1;
             continue;
         };
 
         match (idx + 1..lines.len()).find(|&next| terminator.terminates(lines[next].raw)) {
             Some(end) => {
-                literal[idx + 1..=end].fill(true);
+                regions[idx + 1..=end].fill(Some(kind));
                 idx = end + 1;
             }
             None => {
+                let (code, noun) = match kind {
+                    RegionKind::Literal => ("unterminated-literal-region", "literal"),
+                    RegionKind::Comment => ("unterminated-comment-region", "comment"),
+                };
                 parse_findings.push(ParseFinding {
-                    code: "unterminated-literal-region".to_string(),
+                    code: code.to_string(),
                     message: format!(
-                        "literal region is never closed by `{}`; its body is parsed as configuration",
+                        "{noun} region is never closed by `{}`; its body is parsed as configuration",
                         terminator.pattern()
                     ),
                     span: lines[idx].span.clone(),
@@ -747,7 +779,7 @@ fn mark_literal_regions<D: Dialect>(
         }
     }
 
-    literal
+    regions
 }
 
 fn attach_node(doc: &mut Document, parent_stack: &[(usize, NodeId)], id: NodeId) {
