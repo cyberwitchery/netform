@@ -1,6 +1,6 @@
 # changelog
 
-## Unreleased
+## [0.9.0] - 2026-08-17
 
 - `--format markdown` diff lines now keep their `-`/`+` side marker once rendered, so an insert and a delete no longer look identical, and they stay nested under their own edit however many edits the report holds — past the ninth they used to break out and split the edit list
 - `--format markdown` now escapes the configuration text and labels it quotes

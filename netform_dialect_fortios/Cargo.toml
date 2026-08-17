@@ -1,6 +1,6 @@
 [package]
 name = "netform_dialect_fortios"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 license = "MIT"
 description = "Fortinet FortiOS dialect profile for netform lossless config parsing"
@@ -9,4 +9,4 @@ homepage = "https://github.com/cyberwitchery/netform"
 documentation = "https://docs.rs/netform_dialect_fortios"
 
 [dependencies]
-netform_ir = { version = "0.8.0", path = "../netform_ir" }
+netform_ir = { version = "0.9.0", path = "../netform_ir" }
