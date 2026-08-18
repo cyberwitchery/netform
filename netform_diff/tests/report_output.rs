@@ -1,6 +1,6 @@
 use netform_diff::{
-    DEFAULT_CONTEXT_LINES, NormalizeOptions, diff_documents, format_markdown_report,
-    format_unified_diff,
+    ColorChoice, DEFAULT_CONTEXT_LINES, NormalizeOptions, diff_documents, format_markdown_report,
+    format_unified_diff, format_unified_diff_with_color,
 };
 use netform_ir::parse_generic;
 
@@ -171,10 +171,13 @@ fn markdown_report_stats_are_correct_for_multiple_edits() {
 fn unified_diff_empty_for_no_changes() {
     let a = parse_generic("hostname router\n");
     let diff = diff_documents(&a, &a, NormalizeOptions::default()).unwrap();
-    // suppress ANSI colors for test
-    owo_colors::set_override(false);
-    let output = format_unified_diff(&diff, "a.cfg", "a.cfg", DEFAULT_CONTEXT_LINES);
-    owo_colors::set_override(true);
+    let output = format_unified_diff_with_color(
+        &diff,
+        "a.cfg",
+        "a.cfg",
+        DEFAULT_CONTEXT_LINES,
+        ColorChoice::Never,
+    );
 
     assert!(
         output.is_empty(),
@@ -217,4 +220,34 @@ fn json_output_is_stable_shape() {
     assert!(json.contains("\"stats\""));
     assert!(json.contains("\"old_at_key\""));
     assert!(json.contains("\"occurrence_key\""));
+}
+
+#[test]
+fn unified_diff_color_choice_governs_ansi_escapes() {
+    let a = parse_generic("interface Ethernet1\n  description old\n");
+    let b = parse_generic("interface Ethernet1\n  description new\n");
+    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
+
+    let colored = format_unified_diff_with_color(
+        &diff,
+        "a.cfg",
+        "b.cfg",
+        DEFAULT_CONTEXT_LINES,
+        ColorChoice::Always,
+    );
+    let uncolored = format_unified_diff_with_color(
+        &diff,
+        "a.cfg",
+        "b.cfg",
+        DEFAULT_CONTEXT_LINES,
+        ColorChoice::Never,
+    );
+
+    assert!(diff.has_changes);
+    assert!(colored.contains('\x1b'), "color on should emit escapes");
+    assert!(
+        !uncolored.contains('\x1b'),
+        "color off should emit no escapes: {uncolored:?}"
+    );
+    assert_eq!(strip_ansi(&colored), uncolored);
 }

@@ -1,5 +1,11 @@
 # changelog
 
+## Unreleased
+
+- `--color` and `--no-color` now control the ANSI escapes in `--format unified` output, and so does the TTY auto-detection when neither flag is given. `config-diff` used to color its unified diff unconditionally, so piping to a file or a pager produced raw escape sequences whichever flag was passed
+- color is also off when the `NO_COLOR` environment variable is set to a non-empty value; `--color` still forces it on
+- `netform_diff` gains `format_unified_diff_with_color` and `ColorChoice` for callers that want to choose. `format_unified_diff` keeps rendering with color
+
 ## [0.9.0] - 2026-08-17
 
 - `--format markdown` diff lines now keep their `-`/`+` side marker once rendered, so an insert and a delete no longer look identical, and they stay nested under their own edit however many edits the report holds — past the ninth they used to break out and split the edit list

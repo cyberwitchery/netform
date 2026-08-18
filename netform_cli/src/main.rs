@@ -10,8 +10,9 @@ use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
 use netform_diff::{
-    DEFAULT_CONTEXT_LINES, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
-    OrderPolicyOverride, build_plan, diff_documents, format_markdown_report, format_unified_diff,
+    ColorChoice, DEFAULT_CONTEXT_LINES, NormalizationStep, NormalizeOptions, OrderPolicy,
+    OrderPolicyConfig, OrderPolicyOverride, build_plan, diff_documents, format_markdown_report,
+    format_unified_diff_with_color,
 };
 use netform_ir::{DialectHint, Document, parse_generic};
 
@@ -65,11 +66,14 @@ struct Cli {
     #[arg(long, default_value_t = DEFAULT_CONTEXT_LINES)]
     context_lines: usize,
 
-    /// force colored output even when stdout is not a TTY.
+    /// force colored output even when stdout is not a TTY or `NO_COLOR`
+    /// is set.
     #[arg(long, conflicts_with = "no_color")]
     color: bool,
 
-    /// disable colored output.
+    /// disable colored output.  colors are off by default when stdout is
+    /// not a TTY, or when the `NO_COLOR` environment variable is set to a
+    /// non-empty value.
     #[arg(long)]
     no_color: bool,
 
@@ -228,14 +232,12 @@ fn main() {
         }
     };
 
-    let use_color = if cli.color {
-        true
-    } else if cli.no_color {
-        false
-    } else {
-        std::io::stdout().is_terminal()
-    };
-    owo_colors::set_override(use_color);
+    let color = resolve_color(
+        cli.color,
+        cli.no_color,
+        no_color_env(),
+        io::stdout().is_terminal(),
+    );
 
     if cli.plan_json {
         let plan = build_plan(&diff);
@@ -256,7 +258,9 @@ fn main() {
         }
     } else {
         let output = match cli.format {
-            CliFormat::Unified => format_unified_diff(&diff, &a_label, &b_label, cli.context_lines),
+            CliFormat::Unified => {
+                format_unified_diff_with_color(&diff, &a_label, &b_label, cli.context_lines, color)
+            }
             CliFormat::Markdown => {
                 format_markdown_report(&diff, &a_label, &b_label, cli.context_lines)
             }
@@ -266,6 +270,28 @@ fn main() {
 
     if !cli.no_exit_code && diff.has_changes {
         process::exit(1);
+    }
+}
+
+/// `NO_COLOR` disables color when set to any non-empty value (no-color.org).
+fn no_color_env() -> bool {
+    std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty())
+}
+
+fn resolve_color(
+    force_color: bool,
+    no_color: bool,
+    no_color_env: bool,
+    stdout_is_terminal: bool,
+) -> ColorChoice {
+    if force_color {
+        ColorChoice::Always
+    } else if no_color || no_color_env {
+        ColorChoice::Never
+    } else if stdout_is_terminal {
+        ColorChoice::Always
+    } else {
+        ColorChoice::Never
     }
 }
 
@@ -448,5 +474,37 @@ interfaces {
     #[test]
     fn parse_policy_override_bad_policy() {
         assert!(parse_policy_override("0:bogus").is_err());
+    }
+
+    #[test]
+    fn color_flags_beat_the_terminal_check() {
+        assert_eq!(
+            resolve_color(true, false, false, false),
+            ColorChoice::Always
+        );
+        assert_eq!(resolve_color(false, true, false, true), ColorChoice::Never);
+    }
+
+    #[test]
+    fn without_flags_the_terminal_check_decides() {
+        assert_eq!(
+            resolve_color(false, false, false, true),
+            ColorChoice::Always
+        );
+        assert_eq!(
+            resolve_color(false, false, false, false),
+            ColorChoice::Never
+        );
+    }
+
+    #[test]
+    fn no_color_env_disables_color_on_a_terminal() {
+        assert_eq!(resolve_color(false, false, true, true), ColorChoice::Never);
+    }
+
+    #[test]
+    fn forcing_color_beats_no_color_env() {
+        assert_eq!(resolve_color(true, false, true, true), ColorChoice::Always);
+        assert_eq!(resolve_color(true, false, true, false), ColorChoice::Always);
     }
 }
