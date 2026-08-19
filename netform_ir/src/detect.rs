@@ -18,7 +18,7 @@
 //! assert_eq!(detect_dialect(""), DialectHint::Generic);
 //! ```
 
-use crate::DialectHint;
+use crate::{DialectHint, ios_like_literal_region};
 
 /// score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
 /// `config <section>`, NX-OS `feature <name>`, Junos top-level stanza names).
@@ -58,9 +58,10 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     let mut eos: i32 = 0;
     let mut iosxe: i32 = 0;
 
-    for raw_line in input.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line == "!" {
+    let lines: Vec<&str> = input.lines().map(str::trim).collect();
+
+    for (&line, scorable) in lines.iter().zip(scorable_lines(&lines)) {
+        if !scorable {
             continue;
         }
 
@@ -189,6 +190,41 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     }
 
     DialectHint::Named(best_name.to_string())
+}
+
+/// marks the lines that carry configuration syntax; blank lines, comments and
+/// banner bodies are excluded.
+fn scorable_lines(lines: &[&str]) -> Vec<bool> {
+    let mut scorable: Vec<bool> = lines
+        .iter()
+        .map(|line| !line.is_empty() && !is_comment(line))
+        .collect();
+
+    for idx in 0..lines.len() {
+        if let Some(end) = banner_body_end(lines, idx) {
+            scorable[idx + 1..=end].fill(false);
+        }
+    }
+
+    scorable
+}
+
+/// returns `true` if `line` opens a comment in any supported dialect: `!` in
+/// the IOS family, `#` in Junos and FortiOS.
+fn is_comment(line: &str) -> bool {
+    line.starts_with('!') || line.starts_with('#')
+}
+
+/// returns the index of the line closing the banner opened at `idx`, so its
+/// body spans `idx + 1 ..= end`.  `None` when `idx` opens no banner or the
+/// delimiter never reappears.
+fn banner_body_end(lines: &[&str], idx: usize) -> Option<usize> {
+    let terminator = ios_like_literal_region(lines[idx])?;
+
+    lines[idx + 1..]
+        .iter()
+        .position(|line| terminator.terminates(line))
+        .map(|offset| idx + 1 + offset)
 }
 
 /// returns `true` if `name` is a well-known Junos top-level stanza name.
@@ -523,5 +559,92 @@ description uplink;
 no-readvertise;
 ";
         assert_eq!(detect_dialect(input), DialectHint::Named("junos".into()));
+    }
+
+    #[test]
+    fn detect_skips_bang_commented_junos_stanza() {
+        let input = "\
+version 17.9
+hostname sw1
+!
+! migrated from mx480, original Junos stanza kept for reference:
+! system {
+!     host-name sw1;
+!     services {
+!         ssh;
+!     }
+! }
+!
+interface GigabitEthernet1/0/1
+ ip address 192.0.2.1 255.255.255.0
+!
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_skips_hash_commented_junos_stanza() {
+        let input = "\
+#config-version=FGT60F-7.2.5-FW-build1517-230606:opmode=0:vdom=0
+# migrated from an SRX, previous stanza kept for reference:
+# security {
+#     policies {
+#         from-zone trust to-zone untrust {
+#             policy allow-web;
+#         }
+#     }
+# }
+config system global
+    set hostname \"FGT60F\"
+end
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("fortios".into()));
+    }
+
+    #[test]
+    fn detect_skips_undelimited_banner_body() {
+        let input = "\
+hostname sw1
+!
+banner motd
+This system is for authorized use only;
+Users have no expectation of privacy;
+All activity may be monitored, recorded and audited;
+Violators will be prosecuted to the full extent of the law;
+EOF
+!
+interface Ethernet1
+   ip address 10.0.0.1/31
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("eos".into()));
+    }
+
+    #[test]
+    fn detect_skips_delimited_banner_body() {
+        let input = "\
+hostname sw1
+!
+banner motd ^C
+This system is for authorized use only;
+Users have no expectation of privacy;
+All activity may be monitored and recorded;
+^C
+!
+interface GigabitEthernet1/0/1
+ ip address 192.0.2.1 255.255.255.0
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_scores_past_an_unterminated_banner() {
+        let input = "\
+hostname sw1
+banner motd ^C
+This system is for authorized use only;
+interface GigabitEthernet1/0/1
+ ip address 192.0.2.1 255.255.255.0
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
     }
 }

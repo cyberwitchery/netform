@@ -1,5 +1,9 @@
 # changelog
 
+## Unreleased
+
+- `--dialect auto` no longer scores comment lines or IOS-family banner text as configuration. a `!`- or `#`-prefixed comment, and the free prose inside a `banner motd` body, no longer vote on which vendor's grammar parses the file, so an IOS XE configuration carrying commented-out Junos lines from a migration, or an Arista EOS one whose login banner ends its clauses in semicolons, is detected as itself instead of falling back to the generic profile. as when reading banners, a banner whose delimiter never reappears is not treated as one, so a missing delimiter cannot silence the rest of the file
+
 ## [0.9.0] - 2026-08-17
 
 - `--format markdown` diff lines now keep their `-`/`+` side marker once rendered, so an insert and a delete no longer look identical, and they stay nested under their own edit however many edits the report holds — past the ninth they used to break out and split the edit list
