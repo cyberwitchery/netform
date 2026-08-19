@@ -193,16 +193,22 @@ pub fn detect_dialect(input: &str) -> DialectHint {
 }
 
 /// marks the lines that carry configuration syntax; blank lines, comments and
-/// banner bodies are excluded.
+/// banner bodies are excluded.  banners are walked with a cursor, as the parser
+/// walks them, so a line inside a body never opens a banner of its own.
 fn scorable_lines(lines: &[&str]) -> Vec<bool> {
     let mut scorable: Vec<bool> = lines
         .iter()
         .map(|line| !line.is_empty() && !is_comment(line))
         .collect();
 
-    for idx in 0..lines.len() {
-        if let Some(end) = banner_body_end(lines, idx) {
-            scorable[idx + 1..=end].fill(false);
+    let mut idx = 0usize;
+    while idx < lines.len() {
+        match banner_body_end(lines, idx) {
+            Some(end) => {
+                scorable[idx + 1..=end].fill(false);
+                idx = end + 1;
+            }
+            None => idx += 1,
         }
     }
 
@@ -646,5 +652,53 @@ interface GigabitEthernet1/0/1
  ip address 192.0.2.1 255.255.255.0
 ";
         assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn scorable_lines_does_not_reopen_a_banner_inside_a_banner_body() {
+        let lines = [
+            "banner motd ^C",
+            "banner set by netops on 2026-01-01",
+            "^C",
+            "interface GigabitEthernet1/0/1",
+            " standby 1 ip 192.0.2.254",
+        ];
+        assert_eq!(scorable_lines(&lines), [true, false, false, true, true]);
+    }
+
+    #[test]
+    fn detect_scores_below_a_banner_whose_body_mentions_banner() {
+        let input = "\
+hostname sw1
+!
+banner motd ^C
+WARNING: unauthorized access prohibited.
+banner set by netops on 2026-01-01
+^C
+!
+interface GigabitEthernet1/0/1
+ ip address 192.0.2.1 255.255.255.0
+ standby 1 ip 192.0.2.254
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_scores_below_an_undelimited_banner_whose_body_mentions_banner() {
+        let input = "\
+hostname leaf1
+!
+banner motd
+WARNING: unauthorized access prohibited.
+banner reviewed by legal
+EOF
+!
+interface Ethernet1
+   ip address 192.0.2.1/24
+!
+ip access-list standby-acl
+   10 permit ip any any
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("eos".into()));
     }
 }
