@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1470,4 +1470,96 @@ fn replay_fixtures_cli_runs_successfully() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("replayed"));
     assert!(stdout.contains("fixture"));
+}
+
+fn color_input_pair() -> (PathBuf, PathBuf) {
+    let left = temp_file_path("left-color");
+    let right = temp_file_path("right-color");
+    fs::write(&left, "hostname old\n").expect("write left");
+    fs::write(&right, "hostname new\n").expect("write right");
+    (left, right)
+}
+
+/// reads stdout raw: stripping ANSI here would discard the bytes under test.
+fn color_stdout(left: &Path, right: &Path, args: &[&str], env: &[(&str, &str)]) -> String {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_config-diff"));
+    cmd.arg("--no-exit-code").env_remove("NO_COLOR");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let output = cmd.arg(left).arg(right).output().expect("run config-diff");
+
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn color_flag_stdout(args: &[&str], env: &[(&str, &str)]) -> String {
+    let (left, right) = color_input_pair();
+    color_stdout(&left, &right, args, env)
+}
+
+#[test]
+fn config_diff_no_color_emits_no_ansi_escapes() {
+    let stdout = color_flag_stdout(&["--no-color"], &[]);
+
+    assert!(stdout.contains("--- "), "should still print the diff");
+    assert!(
+        !stdout.contains('\x1b'),
+        "--no-color should suppress ANSI escapes: {stdout:?}"
+    );
+}
+
+#[test]
+fn config_diff_color_forces_ansi_escapes_off_a_tty() {
+    let stdout = color_flag_stdout(&["--color"], &[]);
+
+    assert!(
+        stdout.contains("\x1b[1m--- "),
+        "--color should emit ANSI escapes on a pipe: {stdout:?}"
+    );
+}
+
+#[test]
+fn config_diff_defaults_to_plain_output_off_a_tty() {
+    let stdout = color_flag_stdout(&[], &[]);
+
+    assert!(stdout.contains("--- "), "should still print the diff");
+    assert!(
+        !stdout.contains('\x1b'),
+        "a piped stdout should get no ANSI escapes: {stdout:?}"
+    );
+}
+
+#[test]
+fn config_diff_color_off_matches_color_on_without_escapes() {
+    let (left, right) = color_input_pair();
+    let colored = color_stdout(&left, &right, &["--color"], &[]);
+    let uncolored = color_stdout(&left, &right, &["--no-color"], &[]);
+
+    assert!(colored.contains('\x1b'));
+    assert_eq!(strip_ansi(&colored), uncolored);
+}
+
+#[test]
+fn config_diff_color_flag_overrides_no_color_environment_variable() {
+    let stdout = color_flag_stdout(&["--color"], &[("NO_COLOR", "1")]);
+
+    assert!(
+        stdout.contains('\x1b'),
+        "--color should win over NO_COLOR: {stdout:?}"
+    );
+}
+
+#[test]
+fn config_diff_markdown_format_is_never_colored() {
+    let stdout = color_flag_stdout(&["--color", "--format", "markdown"], &[]);
+
+    assert!(stdout.contains("# Config Diff Report"));
+    assert!(
+        !stdout.contains('\x1b'),
+        "the markdown report carries no ANSI escapes: {stdout:?}"
+    );
 }
