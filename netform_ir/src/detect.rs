@@ -306,22 +306,25 @@ fn is_iosxe_ethernet_name(name: &str) -> bool {
 /// family, or a name in XR's four-part rack/slot/instance/port notation whose
 /// interface type no other supported dialect spells.
 fn is_iosxr_interface_name(name: &str) -> bool {
-    const XR_ONLY_PREFIXES: [&str; 5] = ["Bundle-Ether", "BVI", "MgmtEth", "PW-Ether", "tunnel-ip"];
+    const XR_ONLY_PREFIXES: [&str; 5] = ["bundle-ether", "bvi", "mgmteth", "pw-ether", "tunnel-ip"];
+
+    let lower = name.to_ascii_lowercase();
 
     if XR_ONLY_PREFIXES
         .iter()
-        .any(|prefix| name.starts_with(prefix))
+        .any(|prefix| lower.starts_with(prefix))
     {
         return true;
     }
 
-    has_four_part_slot(name) && !is_other_dialect_interface_name(name)
+    has_four_part_slot(name) && !is_other_dialect_interface_name(&lower)
 }
 
-/// returns `true` if `name` starts with an interface type another supported
-/// dialect spells — the union of the IOS XE, NX-OS and EOS type tables.
-fn is_other_dialect_interface_name(name: &str) -> bool {
-    const PREFIXES: [&str; 21] = [
+/// returns `true` if `lower` — an already-lowercased interface name — starts
+/// with an interface type another supported dialect spells: the IOS XE, NX-OS
+/// and EOS type tables, plus IOS XE spellings those tables do not yet carry.
+fn is_other_dialect_interface_name(lower: &str) -> bool {
+    const PREFIXES: [&str; 24] = [
         "appgigabitethernet",
         "bdi",
         "ethernet",
@@ -329,7 +332,9 @@ fn is_other_dialect_interface_name(name: &str) -> bool {
         "fastethernet",
         "fivegigabitethernet",
         "fortygigabitethernet",
+        "fourhundredgig",
         "gigabitethernet",
+        "hundredgigabitethernet",
         "hundredgige",
         "loopback",
         "management",
@@ -341,10 +346,10 @@ fn is_other_dialect_interface_name(name: &str) -> bool {
         "tunnel",
         "twentyfivegige",
         "twogigabitethernet",
+        "twohundredgig",
         "vlan",
         "vxlan",
     ];
-    let lower = name.to_ascii_lowercase();
     PREFIXES.iter().any(|prefix| lower.starts_with(prefix))
 }
 
@@ -746,7 +751,9 @@ interface TenGigabitEthernet1/1/1
             "fastethernet0/1/2/3",
             "fivegigabitethernet1/0/20/1",
             "fortygigabitethernet1/0/20/1",
+            "FourHundredGig1/0/31/1",
             "gigabitethernet0/0/0/0",
+            "HundredGigabitEthernet1/0/2/1",
             "hundredgige1/0/20/1",
             "Loopback1/2/3/4",
             "Management1/2/3/4",
@@ -758,6 +765,7 @@ interface TenGigabitEthernet1/1/1
             "Tunnel1/2/3/4",
             "twentyfivegige1/0/20/1",
             "twogigabitethernet1/0/20/1",
+            "TwoHundredGigE1/0/5/1",
             "Vlan1/2/3/4",
             "Vxlan1/2/3/4",
         ] {
@@ -766,6 +774,50 @@ interface TenGigabitEthernet1/1/1
                 detect_dialect(&input),
                 DialectHint::Generic,
                 "{name} scores a dialect on slot shape alone",
+            );
+        }
+    }
+
+    #[test]
+    fn detect_iosxe_keeps_c9500_32c_breakout_subports() {
+        for subports in [3, 4, 8, 12, 24] {
+            let mut input = String::from(C9500_32C_FIXTURE);
+
+            for index in 0..subports {
+                let port = 2 + index / 4;
+                let subport = 1 + index % 4;
+                input.push_str(&format!(
+                    "interface HundredGigabitEthernet1/0/{port}/{subport}\n switchport mode access\n"
+                ));
+            }
+
+            assert_eq!(
+                detect_dialect(&input),
+                DialectHint::Named("iosxe".into()),
+                "{subports} breakout subports move the Catalyst off iosxe",
+            );
+        }
+    }
+
+    #[test]
+    fn detect_iosxr_reads_its_own_families_in_either_case() {
+        for name in [
+            "Bundle-Ether1",
+            "bundle-ether1",
+            "BVI1",
+            "bvi1",
+            "MgmtEth0/RP0/CPU0/0",
+            "mgmteth0/RP0/CPU0/0",
+            "PW-Ether1",
+            "pw-ether1",
+            "Tunnel-IP0/0/0/0",
+            "tunnel-ip0/0/0/0",
+        ] {
+            let input = format!("interface {name}\n");
+            assert_eq!(
+                detect_dialect(&input),
+                DialectHint::Named("iosxr".into()),
+                "{name} loses IOS XR detection to its case",
             );
         }
     }
@@ -795,6 +847,31 @@ interface Ethernet1/2/3/5
             );
         }
     }
+
+    const C9500_32C_FIXTURE: &str = "\
+hostname c9500-32c-lab
+vrf definition MGMT
+ address-family ipv4
+ exit-address-family
+vlan 10
+ name users
+vlan 20
+ name servers
+ip access-list extended BLOCK-RFC1918
+ deny   ip 10.0.0.0 0.255.255.255 any
+ permit ip any any
+ip access-list extended MGMT-IN
+ permit tcp any any eq 22
+interface GigabitEthernet0/0
+ vrf forwarding MGMT
+ ip address 10.0.0.5 255.255.255.0
+interface TenGigabitEthernet1/0/47
+ switchport mode trunk
+router bgp 65001
+ bgp log-neighbor-changes
+ network 192.0.2.0 mask 255.255.255.0
+ neighbor 10.0.0.1 remote-as 65002
+";
 
     const IOSXE_FIXTURE: &str = "\
 interface GigabitEthernet0/0/0
