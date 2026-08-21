@@ -320,37 +320,51 @@ fn is_iosxr_interface_name(name: &str) -> bool {
     has_four_part_slot(name) && !is_other_dialect_interface_name(&lower)
 }
 
+/// interface type prefixes that a supported dialect other than IOS XR spells.
+///
+/// a superset of the IOS XE, NX-OS and EOS `*_INTERFACE_TYPES` tables: it also
+/// carries vendor spellings those tables do not yet parse
+/// (`hundredgigabitethernet`, `fourhundredgig`, `twohundredgig`), because a
+/// name IOS XE spells must not score IOS XR whether or not netform can key it.
+///
+/// the containment is an invariant, not a coincidence — every entry of every
+/// dialect table must start with one of these prefixes, or that dialect's
+/// four-part interface names silently begin scoring IOS XR. nothing in this
+/// crate can check that: the tables live in crates that depend on this one.
+/// `netform_cli`'s `detect_guard_coverage` suite sees all four and asserts it.
+const OTHER_DIALECT_INTERFACE_PREFIXES: &[&str] = &[
+    "appgigabitethernet",
+    "bdi",
+    "ethernet",
+    "fabric",
+    "fastethernet",
+    "fivegigabitethernet",
+    "fortygigabitethernet",
+    "fourhundredgig",
+    "gigabitethernet",
+    "hundredgigabitethernet",
+    "hundredgige",
+    "loopback",
+    "management",
+    "mgmt",
+    "nve",
+    "port-channel",
+    "serial",
+    "tengigabitethernet",
+    "tunnel",
+    "twentyfivegige",
+    "twogigabitethernet",
+    "twohundredgig",
+    "vlan",
+    "vxlan",
+];
+
 /// returns `true` if `lower` — an already-lowercased interface name — starts
-/// with an interface type another supported dialect spells: the IOS XE, NX-OS
-/// and EOS type tables, plus IOS XE spellings those tables do not yet carry.
+/// with an interface type another supported dialect spells.
 fn is_other_dialect_interface_name(lower: &str) -> bool {
-    const PREFIXES: [&str; 24] = [
-        "appgigabitethernet",
-        "bdi",
-        "ethernet",
-        "fabric",
-        "fastethernet",
-        "fivegigabitethernet",
-        "fortygigabitethernet",
-        "fourhundredgig",
-        "gigabitethernet",
-        "hundredgigabitethernet",
-        "hundredgige",
-        "loopback",
-        "management",
-        "mgmt",
-        "nve",
-        "port-channel",
-        "serial",
-        "tengigabitethernet",
-        "tunnel",
-        "twentyfivegige",
-        "twogigabitethernet",
-        "twohundredgig",
-        "vlan",
-        "vxlan",
-    ];
-    PREFIXES.iter().any(|prefix| lower.starts_with(prefix))
+    OTHER_DIALECT_INTERFACE_PREFIXES
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
 }
 
 /// returns `true` if `name` ends in four `/`-separated numeric components,

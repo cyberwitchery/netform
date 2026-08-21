@@ -30,7 +30,11 @@ pub fn parse_iosxe(input: &str) -> Document {
 /// IOS XE interface type prefixes in canonical lowercase form.
 ///
 /// longest-prefix-first (see `parse_interface`).
-const IOSXE_INTERFACE_TYPES: &[&str] = &[
+///
+/// public so `netform_cli`'s `detect_guard_coverage` suite can assert that no
+/// entry here is read as IOS XR on slot shape alone; adding a type without
+/// widening `netform_ir::detect`'s guard changes what `--dialect auto` reports.
+pub const IOSXE_INTERFACE_TYPES: &[&str] = &[
     "appgigabitethernet",
     "fortygigabitethernet",
     "fivegigabitethernet",
