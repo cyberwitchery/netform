@@ -345,6 +345,7 @@ fn unescaped_quote_count(raw: &str) -> usize {
 pub struct IosLikeDialect {
     name: &'static str,
     key_hint: fn(Option<&ParsedLineParts>) -> Option<String>,
+    block_terminator: Option<fn(&str) -> bool>,
 }
 
 impl IosLikeDialect {
@@ -354,11 +355,38 @@ impl IosLikeDialect {
     /// `key_hint` maps a parsed content line to its stable identity hint (or
     /// `None`); each IOS-family dialect crate passes its own so interface-type
     /// normalization and dialect-specific constructs stay local to that crate.
+    ///
+    /// the dialect reports no [`Dialect::block_terminator`]; add one with
+    /// [`IosLikeDialect::with_block_terminator`].
     pub const fn new(
         name: &'static str,
         key_hint: fn(Option<&ParsedLineParts>) -> Option<String>,
     ) -> Self {
-        Self { name, key_hint }
+        Self {
+            name,
+            key_hint,
+            block_terminator: None,
+        }
+    }
+
+    /// return this dialect with `is_terminator` answering
+    /// [`Dialect::block_terminator`].
+    ///
+    /// ```rust
+    /// use netform_ir::{IosLikeDialect, common_key_hint, parse_with_dialect, Node};
+    ///
+    /// let dialect = IosLikeDialect::new("xr", common_key_hint)
+    ///     .with_block_terminator(|raw| raw.trim() == "end-policy");
+    /// let doc = parse_with_dialect("route-policy PASS\n  pass\nend-policy\n", &dialect);
+    /// let Node::Block(block) = doc.node(doc.roots[0]).unwrap() else { unreachable!() };
+    /// assert_eq!(block.footer.as_ref().unwrap().raw, "end-policy");
+    /// ```
+    pub const fn with_block_terminator(self, is_terminator: fn(&str) -> bool) -> Self {
+        Self {
+            name: self.name,
+            key_hint: self.key_hint,
+            block_terminator: Some(is_terminator),
+        }
     }
 }
 
@@ -385,6 +413,13 @@ impl Dialect for IosLikeDialect {
             return None;
         }
         (self.key_hint)(parsed)
+    }
+
+    fn block_terminator(&self, raw: &str) -> bool {
+        match self.block_terminator {
+            Some(is_terminator) => is_terminator(raw),
+            None => false,
+        }
     }
 
     fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
@@ -1564,5 +1599,46 @@ mod tests {
         assert!(ends_inside_quoted_value("        set comment \"Grüße"));
         assert!(!ends_inside_quoted_value("        set comment \"Grüße\""));
         assert!(!ends_inside_quoted_value(r#"        set comment "\é""#));
+    }
+
+    #[test]
+    fn ios_like_dialect_reports_no_block_terminator_by_default() {
+        let dialect = IosLikeDialect::new("plain", common_key_hint);
+
+        for raw in ["end", "next", "end-policy", "end-set", "}", "exit"] {
+            assert!(!dialect.block_terminator(raw), "{raw} became a terminator");
+        }
+    }
+
+    #[test]
+    fn ios_like_dialect_without_terminator_keeps_closing_lines_as_siblings() {
+        let doc = parse_with_dialect(
+            "route-policy PASS\n  pass\nend-policy\n",
+            &IosLikeDialect::new("plain", common_key_hint),
+        );
+
+        assert_eq!(doc.roots.len(), 2);
+        let Some(Node::Block(block)) = doc.node(doc.roots[0]) else {
+            panic!("first root should be a block");
+        };
+        assert!(block.footer.is_none());
+    }
+
+    #[test]
+    fn ios_like_dialect_with_terminator_attaches_the_closing_line_as_a_footer() {
+        let dialect = IosLikeDialect::new("plain", common_key_hint)
+            .with_block_terminator(|raw| raw.trim() == "end-policy");
+        let cfg = "route-policy PASS\n  pass\nend-policy\n";
+        let doc = parse_with_dialect(cfg, &dialect);
+
+        assert_eq!(doc.roots.len(), 1);
+        let Some(Node::Block(block)) = doc.node(doc.roots[0]) else {
+            panic!("only root should be a block");
+        };
+        assert_eq!(
+            block.footer.as_ref().map(|f| f.raw.as_str()),
+            Some("end-policy")
+        );
+        assert_eq!(doc.render(), cfg);
     }
 }

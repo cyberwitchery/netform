@@ -1,0 +1,18 @@
+{
+  "name": "iosxr_route_policy_body_replace",
+  "dialect": "iosxr",
+  "intended": "route-policy CUSTOMER-IN\n  set community NO-EXPORT-SET\n  pass\nend-policy\nprefix-set CUSTOMER-PFX\n  10.0.0.0/8 le 24\nend-set\n",
+  "actual": "route-policy CUSTOMER-IN\n  set community CUSTOMER-SET\n  pass\nend-policy\nprefix-set CUSTOMER-PFX\n  10.0.0.0/8 le 24\nend-set\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "ordered",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": [
+      "Replace"
+    ],
+    "finding_codes": []
+  }
+}

@@ -16,7 +16,7 @@
 - `BlockNode`:
   - `header`: a `LineNode`
   - `children`: `NodeId` list
-  - `footer`: optional closing `LineNode` for delimiter-terminated dialects (FortiOS `end`/`next`, Junos `}`/`};`)
+  - `footer`: optional closing `LineNode` for delimiter-terminated dialects (FortiOS `end`/`next`, Junos `}`/`};`, IOS XR `end-policy`/`end-set`)
   - `kind_label`: optional label (reserved for future semantic tagging)
 
 ## parser behavior (v1)

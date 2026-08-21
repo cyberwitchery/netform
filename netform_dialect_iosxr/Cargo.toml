@@ -1,0 +1,12 @@
+[package]
+name = "netform_dialect_iosxr"
+version = "0.9.0"
+edition = "2024"
+license = "MIT"
+description = "Cisco IOS XR dialect profile for netform lossless config parsing"
+repository = "https://github.com/cyberwitchery/netform"
+homepage = "https://github.com/cyberwitchery/netform"
+documentation = "https://docs.rs/netform_dialect_iosxr"
+
+[dependencies]
+netform_ir = { version = "0.9.0", path = "../netform_ir" }

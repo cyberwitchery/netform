@@ -1,5 +1,12 @@
 # changelog
 
+## Unreleased
+
+- new `netform_dialect_iosxr` crate: a Cisco IOS XR parser profile (`parse_iosxr`, `IOSXR_DIALECT`), reachable from the cli as `--dialect iosxr`. it keys interfaces on XR's four-part rack/slot/instance/port notation and on the XR-only families (`Bundle-Ether`, `MgmtEth`, `TenGigE`, `tunnel-ip`, `BVI`, `PW-Ether`), and keys the Routing Policy Language constructs — `route-policy`, `prefix-set`, `as-path-set`, `community-set`, `extcommunity-set`, `rd-set` — plus the BGP `neighbor-group`/`af-group`/`session-group` templates, so `--order-policy keyed-stable` matches them across two revisions instead of reporting a reorder as drift
+- IOS XR blocks that close with a delimiter keep that delimiter: `end-policy` and `end-set` (and `end-class-map`, `end-policy-map`, `end-group`) attach to the block they close as its footer, the way FortiOS `end`/`next` and Junos `}` already do. a bare `end` is left alone, since it closes the configuration session rather than the block above it
+- `--dialect auto` now recognizes Cisco IOS XR. it scores on constructs no other supported vendor has — Routing Policy Language and its `*-set` families, the BGP group templates, `ipv4 address`/`ipv4 access-list`, the XR-only interface families, and four-part slot notation. the three-part slot naming IOS XE and NX-OS use is untouched, so `HundredGigE1/0/1` still reads as IOS XE while `HundredGigE0/0/0/0` reads as IOS XR
+- `netform_ir::IosLikeDialect` gains `with_block_terminator`, so an IOS-family profile can report delimiter-terminated blocks. profiles built with `IosLikeDialect::new` alone are unchanged and still report no terminators
+
 ## [0.9.0] - 2026-08-17
 
 - `--format markdown` diff lines now keep their `-`/`+` side marker once rendered, so an insert and a delete no longer look identical, and they stay nested under their own edit however many edits the report holds — past the ninth they used to break out and split the edit list

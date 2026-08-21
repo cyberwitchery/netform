@@ -7,6 +7,7 @@ use clap::{Parser, ValueEnum};
 use netform_dialect_eos::parse_eos;
 use netform_dialect_fortios::parse_fortios;
 use netform_dialect_iosxe::parse_iosxe;
+use netform_dialect_iosxr::parse_iosxr;
 use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
 use netform_diff::{
@@ -52,6 +53,8 @@ struct Cli {
     #[arg(long, value_parser = parse_policy_override)]
     policy_override: Vec<OrderPolicyOverride>,
 
+    /// parser profile: `auto` detects it from the file contents and falls
+    /// back to `generic` when the two files disagree.
     #[arg(long, value_enum, default_value_t = CliDialect::Auto)]
     dialect: CliDialect,
 
@@ -101,6 +104,7 @@ enum CliDialect {
     Eos,
     Fortios,
     Iosxe,
+    Iosxr,
     Junos,
     Nxos,
 }
@@ -112,6 +116,7 @@ impl CliDialect {
                 "eos" => CliDialect::Eos,
                 "fortios" => CliDialect::Fortios,
                 "iosxe" => CliDialect::Iosxe,
+                "iosxr" => CliDialect::Iosxr,
                 "junos" => CliDialect::Junos,
                 "nxos" => CliDialect::Nxos,
                 _ => CliDialect::Generic,
@@ -301,7 +306,7 @@ fn read_input(path: &Path) -> (String, String) {
 /// parse input with automatic dialect detection and full dialect dispatch.
 ///
 /// runs dialect detection on the input and dispatches to the appropriate
-/// dialect-specific parser (Junos, FortiOS, EOS, IOS XE, NX-OS) so that
+/// dialect-specific parser (Junos, FortiOS, EOS, IOS XE, IOS XR, NX-OS) so that
 /// trivia classification, tokenization, and key hints are dialect-aware.
 /// falls back to the generic parser when no dialect is detected with
 /// sufficient confidence.
@@ -321,6 +326,7 @@ fn parse_config(input: &str, dialect: CliDialect) -> Document {
         CliDialect::Eos => parse_eos(input),
         CliDialect::Fortios => parse_fortios(input),
         CliDialect::Iosxe => parse_iosxe(input),
+        CliDialect::Iosxr => parse_iosxr(input),
         CliDialect::Junos => parse_junos(input),
         CliDialect::Nxos => parse_nxos(input),
     }

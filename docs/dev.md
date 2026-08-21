@@ -64,6 +64,7 @@ open locally:
 - `target/doc/netform_dialect_eos/index.html`
 - `target/doc/netform_dialect_fortios/index.html`
 - `target/doc/netform_dialect_iosxe/index.html`
+- `target/doc/netform_dialect_iosxr/index.html`
 - `target/doc/netform_dialect_junos/index.html`
 - `target/doc/netform_dialect_nxos/index.html`
 
