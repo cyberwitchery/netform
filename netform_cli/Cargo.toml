@@ -14,7 +14,6 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
-owo-colors = { version = "4", features = ["supports-colors"] }
 netform_dialect_eos = { version = "0.9.0", path = "../netform_dialect_eos" }
 netform_dialect_iosxe = { version = "0.9.0", path = "../netform_dialect_iosxe" }
 netform_dialect_iosxr = { version = "0.9.0", path = "../netform_dialect_iosxr" }

@@ -35,15 +35,15 @@ pub fn parse_iosxr(input: &str) -> Document {
 ///
 /// longest-prefix-first (see `netform_ir::parse_interface`).
 const IOSXR_INTERFACE_TYPES: &[&str] = &[
-    "hundredgige",
-    "bundle-ether",
     "gigabitethernet",
+    "bundle-ether",
+    "hundredgige",
     "fortygige",
     "tunnel-ip",
-    "pw-ether",
     "loopback",
-    "tengige",
+    "pw-ether",
     "mgmteth",
+    "tengige",
     "bvi",
     "nve",
 ];
@@ -52,7 +52,7 @@ const IOSXR_INTERFACE_TYPES: &[&str] = &[
 const IOSXR_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
     interface_types: IOSXR_INTERFACE_TYPES,
     vrf_keyword: "vrf",
-    extra_router_protos: &["isis", "eigrp"],
+    extra_router_protos: &["isis"],
 };
 
 /// report whether `raw` closes an IOS XR block.

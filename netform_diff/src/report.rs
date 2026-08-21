@@ -1,13 +1,54 @@
 use std::borrow::Cow;
 use std::fmt::Write;
 
-use owo_colors::OwoColorize;
+use owo_colors::{OwoColorize, Style};
 
 use crate::inline::TokenSpan;
 use crate::model::{Diff, DiffLine, Edit};
 
 /// default maximum number of lines shown per side of an edit before truncating.
 pub const DEFAULT_CONTEXT_LINES: usize = 10;
+
+/// whether a rendered report carries ANSI escape sequences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorChoice {
+    /// style the report with ANSI escapes.
+    Always,
+    /// emit plain text.
+    Never,
+}
+
+/// the ANSI style of each role in the unified-diff report; a plain [`Style`]
+/// writes no escapes, so color-off needs no second code path.
+#[derive(Clone, Copy, Default)]
+struct Palette {
+    header: Style,
+    hunk: Style,
+    del: Style,
+    del_changed: Style,
+    ins: Style,
+    ins_changed: Style,
+    truncation: Style,
+    finding: Style,
+}
+
+impl Palette {
+    fn new(color: ColorChoice) -> Self {
+        match color {
+            ColorChoice::Always => Self {
+                header: Style::new().bold(),
+                hunk: Style::new().cyan(),
+                del: Style::new().red(),
+                del_changed: Style::new().red().bold().underline(),
+                ins: Style::new().green(),
+                ins_changed: Style::new().green().bold().underline(),
+                truncation: Style::new().dimmed(),
+                finding: Style::new().yellow(),
+            },
+            ColorChoice::Never => Self::default(),
+        }
+    }
+}
 
 /// format a markdown-oriented human report from a diff result.
 ///
@@ -88,27 +129,64 @@ pub fn format_markdown_report(
 
 /// format a colored unified-diff-style report from a diff result.
 ///
-/// uses ANSI colors when enabled via `owo_colors`:
-/// - `---`/`+++` file headers: bold
-/// - `@@` hunk headers: cyan
-/// - `-` deletion lines: red
-/// - `+` insertion lines: green
-///
-/// call `owo_colors::set_override(false)` before invoking this function
-/// to suppress ANSI escapes (e.g. when stdout is not a TTY).
+/// renders with ANSI escapes; call [`format_unified_diff_with_color`] to
+/// choose.
 pub fn format_unified_diff(
     diff: &Diff,
     left_label: &str,
     right_label: &str,
     max_lines_shown: usize,
 ) -> String {
+    format_unified_diff_with_color(
+        diff,
+        left_label,
+        right_label,
+        max_lines_shown,
+        ColorChoice::Always,
+    )
+}
+
+/// format a unified-diff-style report, choosing whether it carries ANSI escapes.
+///
+/// `color` alone decides: nothing here consults the terminal or the
+/// environment, and [`ColorChoice::Never`] output is byte-for-byte the
+/// [`ColorChoice::Always`] output with every escape removed.
+///
+/// the styled roles are:
+/// - `---`/`+++` file headers: bold
+/// - `@@` hunk headers: cyan
+/// - `-` deletion lines: red
+/// - `+` insertion lines: green
+/// - the tokens that differ within a replaced line: also bold and underlined
+/// - `... and N more` truncation markers: dimmed
+/// - findings: yellow
+pub fn format_unified_diff_with_color(
+    diff: &Diff,
+    left_label: &str,
+    right_label: &str,
+    max_lines_shown: usize,
+    color: ColorChoice,
+) -> String {
     let mut out = String::new();
     if diff.edits.is_empty() {
         return out;
     }
 
-    writeln!(out, "{}", format_args!("--- {left_label}").bold()).unwrap();
-    writeln!(out, "{}", format_args!("+++ {right_label}").bold()).unwrap();
+    let palette = Palette::new(color);
+    let renderer = ColoredRenderer { palette };
+
+    writeln!(
+        out,
+        "{}",
+        format_args!("--- {left_label}").style(palette.header)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "{}",
+        format_args!("+++ {right_label}").style(palette.header)
+    )
+    .unwrap();
 
     for edit in &diff.edits {
         match edit {
@@ -121,16 +199,10 @@ pub fn format_unified_diff(
                         lines.len(),
                         crate::util::key_label(*at_key),
                     )
-                    .cyan()
+                    .style(palette.hunk)
                 )
                 .unwrap();
-                walk_single(
-                    &mut out,
-                    &ColoredRenderer,
-                    Side::New,
-                    lines,
-                    max_lines_shown,
-                );
+                walk_single(&mut out, &renderer, Side::New, lines, max_lines_shown);
             }
             Edit::Delete { at_key, lines, .. } => {
                 writeln!(
@@ -141,16 +213,10 @@ pub fn format_unified_diff(
                         lines.len(),
                         crate::util::key_label(*at_key),
                     )
-                    .cyan()
+                    .style(palette.hunk)
                 )
                 .unwrap();
-                walk_single(
-                    &mut out,
-                    &ColoredRenderer,
-                    Side::Old,
-                    lines,
-                    max_lines_shown,
-                );
+                walk_single(&mut out, &renderer, Side::Old, lines, max_lines_shown);
             }
             Edit::Replace {
                 old_at_key,
@@ -169,16 +235,10 @@ pub fn format_unified_diff(
                         new_lines.len(),
                         crate::util::key_label(*new_at_key),
                     )
-                    .cyan()
+                    .style(palette.hunk)
                 )
                 .unwrap();
-                walk_replace(
-                    &mut out,
-                    &ColoredRenderer,
-                    old_lines,
-                    new_lines,
-                    max_lines_shown,
-                );
+                walk_replace(&mut out, &renderer, old_lines, new_lines, max_lines_shown);
             }
         }
     }
@@ -189,7 +249,8 @@ pub fn format_unified_diff(
             writeln!(
                 out,
                 "{}",
-                format_args!("{} [{}]: {}", finding.level, finding.code, finding.message).yellow()
+                format_args!("{} [{}]: {}", finding.level, finding.code, finding.message)
+                    .style(palette.finding)
             )
             .unwrap();
         }
@@ -222,51 +283,47 @@ trait LineRenderer {
 }
 
 /// renders lines for the colored unified-diff report.
-struct ColoredRenderer;
+struct ColoredRenderer {
+    palette: Palette,
+}
+
+impl ColoredRenderer {
+    /// the marker and the unchanged/changed styles one side draws with.
+    fn side_styles(&self, side: Side) -> (char, Style, Style) {
+        match side {
+            Side::Old => ('-', self.palette.del, self.palette.del_changed),
+            Side::New => ('+', self.palette.ins, self.palette.ins_changed),
+        }
+    }
+}
 
 impl LineRenderer for ColoredRenderer {
     fn inline_line(&self, out: &mut String, side: Side, _line: &DiffLine, spans: &[TokenSpan]) {
-        match side {
-            Side::Old => {
-                write!(out, "{}", "- ".red()).unwrap();
-                for span in spans {
-                    if span.changed {
-                        write!(out, "{}", span.text.red().bold().underline()).unwrap();
-                    } else {
-                        write!(out, "{}", span.text.red()).unwrap();
-                    }
-                }
-            }
-            Side::New => {
-                write!(out, "{}", "+ ".green()).unwrap();
-                for span in spans {
-                    if span.changed {
-                        write!(out, "{}", span.text.green().bold().underline()).unwrap();
-                    } else {
-                        write!(out, "{}", span.text.green()).unwrap();
-                    }
-                }
-            }
+        let (marker, plain, changed) = self.side_styles(side);
+        write!(out, "{}", format_args!("{marker} ").style(plain)).unwrap();
+        for span in spans {
+            let style = if span.changed { changed } else { plain };
+            write!(out, "{}", span.text.style(style)).unwrap();
         }
         writeln!(out).unwrap();
     }
 
     fn plain_line(&self, out: &mut String, side: Side, line: &DiffLine) {
-        match side {
-            Side::Old => writeln!(out, "{}", format_args!("- {}", line.text).red()).unwrap(),
-            Side::New => writeln!(out, "{}", format_args!("+ {}", line.text).green()).unwrap(),
-        }
-    }
-
-    fn truncation(&self, out: &mut String, side: Side, remaining: usize) {
-        let marker = match side {
-            Side::Old => "-",
-            Side::New => "+",
-        };
+        let (marker, plain, _) = self.side_styles(side);
         writeln!(
             out,
             "{}",
-            format_args!("{marker} ... and {remaining} more").dimmed()
+            format_args!("{marker} {}", line.text).style(plain)
+        )
+        .unwrap();
+    }
+
+    fn truncation(&self, out: &mut String, side: Side, remaining: usize) {
+        let (marker, _, _) = self.side_styles(side);
+        writeln!(
+            out,
+            "{}",
+            format_args!("{marker} ... and {remaining} more").style(self.palette.truncation)
         )
         .unwrap();
     }
@@ -479,6 +536,16 @@ mod tests {
     use super::*;
     use crate::model::{DiffStats, Finding, FindingLevel};
     use netform_ir::{Path, Span};
+
+    fn plain(diff: &Diff, left_label: &str, right_label: &str, max_lines_shown: usize) -> String {
+        format_unified_diff_with_color(
+            diff,
+            left_label,
+            right_label,
+            max_lines_shown,
+            ColorChoice::Never,
+        )
+    }
 
     fn strip_ansi(s: &str) -> String {
         let mut out = String::new();
@@ -733,18 +800,17 @@ mod tests {
     #[test]
     fn unified_empty_diff_returns_empty_string() {
         let diff = empty_diff();
-        let result = format_unified_diff(&diff, "a", "b", 10);
+        let result = plain(&diff, "a", "b", 10);
         assert!(result.is_empty());
     }
 
     #[test]
     fn unified_insert_edit() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![insert_edit(&["permit any"])],
             ..Default::default()
         };
-        let result = format_unified_diff(&diff, "left.cfg", "right.cfg", 10);
+        let result = plain(&diff, "left.cfg", "right.cfg", 10);
 
         assert!(result.contains("--- left.cfg"));
         assert!(result.contains("+++ right.cfg"));
@@ -754,12 +820,11 @@ mod tests {
 
     #[test]
     fn unified_delete_edit() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![delete_edit(&["deny all"])],
             ..Default::default()
         };
-        let result = format_unified_diff(&diff, "a", "b", 10);
+        let result = plain(&diff, "a", "b", 10);
 
         assert!(result.contains("@@ delete 1 line(s) at key 0x0000000000000063 @@"));
         assert!(result.contains("- deny all"));
@@ -767,47 +832,42 @@ mod tests {
 
     #[test]
     fn unified_replace_edit() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![replace_edit(&["old"], &["new"])],
             ..Default::default()
         };
-        let result = format_unified_diff(&diff, "a", "b", 10);
+        let result = plain(&diff, "a", "b", 10);
 
-        let plain = strip_ansi(&result);
-        assert!(plain.contains("@@ replace 1 line(s) at key"));
-        assert!(plain.contains("- old"));
-        assert!(plain.contains("+ new"));
+        assert!(result.contains("@@ replace 1 line(s) at key"));
+        assert!(result.contains("- old"));
+        assert!(result.contains("+ new"));
     }
 
     #[test]
     fn unified_truncation() {
-        owo_colors::set_override(false);
         let lines: Vec<&str> = (0..5).map(|_| "line").collect();
         let diff = Diff {
             edits: vec![insert_edit(&lines)],
             ..Default::default()
         };
-        let result = format_unified_diff(&diff, "a", "b", 2);
+        let result = plain(&diff, "a", "b", 2);
 
         assert!(result.contains("... and 3 more"));
     }
 
     #[test]
     fn unified_no_truncation_within_limit() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![insert_edit(&["a", "b"])],
             ..Default::default()
         };
-        let result = format_unified_diff(&diff, "a", "b", 5);
+        let result = plain(&diff, "a", "b", 5);
 
         assert!(!result.contains("... and"));
     }
 
     #[test]
     fn unified_findings_appended() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![insert_edit(&["x"])],
             findings: vec![make_finding(
@@ -817,19 +877,18 @@ mod tests {
             )],
             ..Default::default()
         };
-        let result = format_unified_diff(&diff, "a", "b", 10);
+        let result = plain(&diff, "a", "b", 10);
 
         assert!(result.contains("warning [test_code]: something happened"));
     }
 
     #[test]
     fn unified_no_findings_when_empty() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![insert_edit(&["x"])],
             ..Default::default()
         };
-        let result = format_unified_diff(&diff, "a", "b", 10);
+        let result = plain(&diff, "a", "b", 10);
 
         // should not have the extra newline that precedes findings
         let lines: Vec<&str> = result.lines().collect();
@@ -839,13 +898,12 @@ mod tests {
 
     #[test]
     fn unified_max_lines_exactly_at_boundary() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![insert_edit(&["a", "b", "c"])],
             ..Default::default()
         };
         // max_lines_shown == lines.len(): all shown, no truncation
-        let result = format_unified_diff(&diff, "a", "b", 3);
+        let result = plain(&diff, "a", "b", 3);
         assert!(!result.contains("... and"));
         assert!(result.contains("+ a"));
         assert!(result.contains("+ b"));
@@ -854,32 +912,29 @@ mod tests {
 
     #[test]
     fn unified_max_lines_one_over_boundary() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![insert_edit(&["a", "b", "c"])],
             ..Default::default()
         };
         // max_lines_shown == lines.len() - 1: should truncate with "and 1 more"
-        let result = format_unified_diff(&diff, "a", "b", 2);
+        let result = plain(&diff, "a", "b", 2);
         assert!(result.contains("... and 1 more"));
     }
 
     #[test]
     fn unified_delete_truncation() {
-        owo_colors::set_override(false);
         let lines: Vec<&str> = (0..5).map(|_| "gone").collect();
         let diff = Diff {
             edits: vec![delete_edit(&lines)],
             ..Default::default()
         };
-        let result = strip_ansi(&format_unified_diff(&diff, "a", "b", 2));
+        let result = plain(&diff, "a", "b", 2);
         assert!(result.contains("- gone"));
         assert!(result.contains("- ... and 3 more"));
     }
 
     #[test]
     fn unified_replace_old_longer_shows_unpaired_and_truncates() {
-        owo_colors::set_override(false);
         // paired line shares the "set mtu" prefix (unchanged inline spans); the
         // surplus old lines render as plain lines, then the old side truncates.
         let old = ["set mtu 1500", "extra one", "extra two", "extra three"];
@@ -888,7 +943,7 @@ mod tests {
             edits: vec![replace_edit(&old, &new)],
             ..Default::default()
         };
-        let result = strip_ansi(&format_unified_diff(&diff, "a", "b", 2));
+        let result = plain(&diff, "a", "b", 2);
         assert!(result.contains("- set mtu 1500"));
         assert!(result.contains("+ set mtu 9000"));
         assert!(result.contains("- extra one"));
@@ -897,14 +952,13 @@ mod tests {
 
     #[test]
     fn unified_replace_new_longer_shows_unpaired_additions() {
-        owo_colors::set_override(false);
         let old = ["base"];
         let new = ["base", "added one", "added two"];
         let diff = Diff {
             edits: vec![replace_edit(&old, &new)],
             ..Default::default()
         };
-        let result = strip_ansi(&format_unified_diff(&diff, "a", "b", 10));
+        let result = plain(&diff, "a", "b", 10);
         assert!(result.contains("+ added one"));
         assert!(result.contains("+ added two"));
     }
@@ -1142,7 +1196,6 @@ mod tests {
 
     #[test]
     fn unified_leaves_config_text_and_labels_unescaped() {
-        owo_colors::set_override(false);
         let diff = Diff {
             edits: vec![
                 insert_edit(&["banner motd *** <b>halt</b> ***"]),
@@ -1150,11 +1203,85 @@ mod tests {
             ],
             ..Default::default()
         };
-        let result = strip_ansi(&format_unified_diff(&diff, "a`b.cfg", "*c.cfg", 10));
+        let result = plain(&diff, "a`b.cfg", "*c.cfg", 10);
 
         assert!(result.contains("--- a`b.cfg"));
         assert!(result.contains("+++ *c.cfg"));
         assert!(result.contains("+ banner motd *** <b>halt</b> ***"));
         assert!(result.contains("- set mtu  1500"));
+    }
+
+    /// a diff that reaches every styled role, including both truncation markers.
+    fn every_role_diff() -> Diff {
+        Diff {
+            edits: vec![
+                insert_edit(&["permit any", "permit all", "permit some"]),
+                delete_edit(&["deny all", "deny some", "deny any"]),
+                replace_edit(&["set mtu 1500"], &["set mtu 9000"]),
+            ],
+            findings: vec![Finding {
+                code: "unterminated-literal-region".to_string(),
+                level: FindingLevel::Warning,
+                message: "banner has no closing delimiter".to_string(),
+                path: None,
+                span: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn unified_color_off_is_color_on_minus_the_escapes() {
+        let diff = every_role_diff();
+        let colored = format_unified_diff_with_color(&diff, "a", "b", 2, ColorChoice::Always);
+        let uncolored = plain(&diff, "a", "b", 2);
+
+        assert!(colored.contains('\x1b'), "color on should emit escapes");
+        assert!(
+            !uncolored.contains('\x1b'),
+            "color off should emit no escapes: {uncolored:?}"
+        );
+        assert_eq!(strip_ansi(&colored), uncolored);
+    }
+
+    #[test]
+    fn unified_color_on_styles_every_role() {
+        let diff = every_role_diff();
+        let colored = format_unified_diff_with_color(&diff, "a", "b", 2, ColorChoice::Always);
+
+        for (role, escape) in [
+            ("bold file header", "\x1b[1m--- a\x1b[0m"),
+            ("cyan hunk header", "\x1b[36m@@ insert"),
+            ("red deletion", "\x1b[31m- deny all\x1b[0m"),
+            ("green insertion", "\x1b[32m+ permit any\x1b[0m"),
+            ("underlined changed deletion", "\x1b[31;1;4m1500\x1b[0m"),
+            ("underlined changed insertion", "\x1b[32;1;4m9000\x1b[0m"),
+            ("dimmed old truncation", "\x1b[2m- ... and 1 more\x1b[0m"),
+            ("dimmed new truncation", "\x1b[2m+ ... and 1 more\x1b[0m"),
+            ("yellow finding", "\x1b[33mwarning ["),
+        ] {
+            assert!(
+                colored.contains(escape),
+                "{role} should render as {escape:?}: {colored:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unified_empty_diff_is_empty_under_either_color_choice() {
+        let diff = empty_diff();
+        assert!(
+            format_unified_diff_with_color(&diff, "a", "b", 10, ColorChoice::Always).is_empty()
+        );
+        assert!(plain(&diff, "a", "b", 10).is_empty());
+    }
+
+    #[test]
+    fn format_unified_diff_keeps_rendering_with_color() {
+        let diff = every_role_diff();
+        assert_eq!(
+            format_unified_diff(&diff, "a", "b", 2),
+            format_unified_diff_with_color(&diff, "a", "b", 2, ColorChoice::Always)
+        );
     }
 }

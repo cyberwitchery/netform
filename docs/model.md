@@ -26,6 +26,7 @@
 - non-blank dedent closes blocks
 - a dialect may mark a line as a block terminator (via `Dialect::block_terminator`); a terminator that closes a block is attached to that block as its `footer` instead of being kept as a sibling
 - a dialect may open a multi-line literal region (via `Dialect::literal_region`) for free text such as IOS-family banners and FortiOS or Junos multi-line quoted values; its lines are `Literal`, are never tokenized or key-hinted, and neither open nor close blocks
+- a dialect may likewise open a multi-line comment region (via `Dialect::comment_region`) for constructs such as Junos `/* ... */`; its lines are `Comment`, so `--ignore-comments` still drops them, and a comment region wins over a literal region opened on the same line
 - unknown patterns are preserved as regular `Line` nodes
 - no line is dropped
 

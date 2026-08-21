@@ -37,14 +37,14 @@ add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-netform_ir = "0.7.0"
-netform_diff = "0.7.0"
-netform_dialect_eos = "0.7.0"
-netform_dialect_iosxe = "0.7.0"
+netform_ir = "0.9.0"
+netform_diff = "0.9.0"
+netform_dialect_eos = "0.9.0"
+netform_dialect_iosxe = "0.9.0"
 netform_dialect_iosxr = "0.9.0"
-netform_dialect_junos = "0.7.0"
-netform_dialect_nxos = "0.7.0"
-netform_dialect_fortios = "0.7.0"
+netform_dialect_junos = "0.9.0"
+netform_dialect_nxos = "0.9.0"
+netform_dialect_fortios = "0.9.0"
 ```
 
 install the cli binary so you can run `config-diff` directly:
@@ -106,7 +106,7 @@ options:
 - `--normalize-leading-whitespace`: normalize indentation in comparison view
 - `--json`: print machine-readable `Diff` json instead of a report
 - `--plan-json`: print machine-readable `Plan` json instead of a report
-- `--color` / `--no-color`: force or disable colored output
+- `--color` / `--no-color`: force or disable colored output.  without either flag, colors are on only when stdout is a TTY; a non-empty `NO_COLOR` environment variable disables them, and `--color` overrides it
 - `--no-exit-code`: exit 0 even when configs differ (by default, config-diff exits 1 on drift, like `diff(1)`; exit 2 means an I/O or serialization error)
 
 examples:

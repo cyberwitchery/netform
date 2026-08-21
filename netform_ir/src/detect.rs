@@ -18,7 +18,7 @@
 //! assert_eq!(detect_dialect(""), DialectHint::Generic);
 //! ```
 
-use crate::DialectHint;
+use crate::{DialectHint, ios_like_literal_region};
 
 /// score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
 /// `config <section>`, NX-OS `feature <name>`, Junos top-level stanza names).
@@ -60,9 +60,10 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     let mut iosxe: i32 = 0;
     let mut iosxr: i32 = 0;
 
-    for raw_line in input.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line == "!" {
+    let lines: Vec<&str> = input.lines().map(str::trim).collect();
+
+    for (&line, scorable) in lines.iter().zip(scorable_lines(&lines)) {
+        if !scorable {
             continue;
         }
 
@@ -115,10 +116,10 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         // slot/port interfaces: Ethernet1/1, port-channel1, etc.
         if line.starts_with("interface ") {
             let iface = line.trim_start_matches("interface ");
-            if is_iosxr_interface_name(iface) {
-                iosxr += STRONG_SIGNAL;
-            } else if is_iosxe_ethernet_name(iface) {
+            if is_iosxe_ethernet_name(iface) {
                 iosxe += MODERATE_SIGNAL;
+            } else if is_iosxr_interface_name(iface) {
+                iosxr += STRONG_SIGNAL;
             } else if iface.starts_with("Ethernet") && iface.contains('/') {
                 // NX-OS uses plain Ethernet with slot/port (Ethernet1/1).
                 nxos += STRONG_SIGNAL;
@@ -221,6 +222,47 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     DialectHint::Named(best_name.to_string())
 }
 
+/// marks the lines that carry configuration syntax; blank lines, comments and
+/// banner bodies are excluded.  banners are walked with a cursor, as the parser
+/// walks them, so a line inside a body never opens a banner of its own.
+fn scorable_lines(lines: &[&str]) -> Vec<bool> {
+    let mut scorable: Vec<bool> = lines
+        .iter()
+        .map(|line| !line.is_empty() && !is_comment(line))
+        .collect();
+
+    let mut idx = 0usize;
+    while idx < lines.len() {
+        match banner_body_end(lines, idx) {
+            Some(end) => {
+                scorable[idx + 1..=end].fill(false);
+                idx = end + 1;
+            }
+            None => idx += 1,
+        }
+    }
+
+    scorable
+}
+
+/// returns `true` if `line` opens a comment in any supported dialect: `!` in
+/// the IOS family, `#` in Junos and FortiOS.
+fn is_comment(line: &str) -> bool {
+    line.starts_with('!') || line.starts_with('#')
+}
+
+/// returns the index of the line closing the banner opened at `idx`, so its
+/// body spans `idx + 1 ..= end`.  `None` when `idx` opens no banner or the
+/// delimiter never reappears.
+fn banner_body_end(lines: &[&str], idx: usize) -> Option<usize> {
+    let terminator = ios_like_literal_region(lines[idx])?;
+
+    lines[idx + 1..]
+        .iter()
+        .position(|line| terminator.terminates(line))
+        .map(|offset| idx + 1 + offset)
+}
+
 /// returns `true` if `name` is a well-known Junos top-level stanza name.
 fn is_junos_stanza_name(name: &str) -> bool {
     matches!(
@@ -262,6 +304,8 @@ fn is_iosxe_ethernet_name(name: &str) -> bool {
 
 /// returns `true` if `name` is a Cisco IOS XR interface name: an XR-only
 /// family, or any name in XR's four-part rack/slot/instance/port notation.
+/// callers must test [`is_iosxe_ethernet_name`] first — IOS XE spells
+/// breakout subports four-part too.
 fn is_iosxr_interface_name(name: &str) -> bool {
     const XR_ONLY_PREFIXES: [&str; 5] = ["Bundle-Ether", "BVI", "MgmtEth", "PW-Ether", "tunnel-ip"];
 
@@ -628,10 +672,20 @@ end-policy
     #[test]
     fn detect_iosxr_from_four_part_slot_interfaces() {
         let input = "\
-interface GigabitEthernet0/0/0/0
-interface GigabitEthernet0/0/0/1.100
+interface TenGigE0/0/0/0
+interface FortyGigE0/0/0/1.100
 ";
         assert_eq!(detect_dialect(input), DialectHint::Named("iosxr".into()));
+    }
+
+    #[test]
+    fn detect_iosxe_keeps_its_four_part_breakout_subports() {
+        let input = "\
+interface TwentyFiveGigE1/0/20/1
+interface HundredGigE1/0/21/1
+interface FortyGigabitEthernet1/0/22/1
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
     }
 
     #[test]
@@ -675,6 +729,12 @@ interface TenGigabitEthernet1/1/1
 interface GigabitEthernet0/0/0
   description uplink-core-a
   ip address 192.0.2.2 255.255.255.252
+interface HundredGigE1/0/20/1
+  description breakout-leaf-1
+interface HundredGigE1/0/20/2
+  description breakout-leaf-2
+interface HundredGigE1/0/20/3
+  description breakout-leaf-3
 router bgp 65000
   address-family ipv4 unicast
     network 10.10.1.0 mask 255.255.255.0
@@ -718,4 +778,139 @@ config firewall address
     next
 end
 ";
+
+    #[test]
+    fn detect_skips_bang_commented_junos_stanza() {
+        let input = "\
+version 17.9
+hostname sw1
+!
+! migrated from mx480, original Junos stanza kept for reference:
+! system {
+!     host-name sw1;
+!     services {
+!         ssh;
+!     }
+! }
+!
+interface GigabitEthernet1/0/1
+ ip address 192.0.2.1 255.255.255.0
+!
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_skips_hash_commented_junos_stanza() {
+        let input = "\
+#config-version=FGT60F-7.2.5-FW-build1517-230606:opmode=0:vdom=0
+# migrated from an SRX, previous stanza kept for reference:
+# security {
+#     policies {
+#         from-zone trust to-zone untrust {
+#             policy allow-web;
+#         }
+#     }
+# }
+config system global
+    set hostname \"FGT60F\"
+end
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("fortios".into()));
+    }
+
+    #[test]
+    fn detect_skips_undelimited_banner_body() {
+        let input = "\
+hostname sw1
+!
+banner motd
+This system is for authorized use only;
+Users have no expectation of privacy;
+All activity may be monitored, recorded and audited;
+Violators will be prosecuted to the full extent of the law;
+EOF
+!
+interface Ethernet1
+   ip address 10.0.0.1/31
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("eos".into()));
+    }
+
+    #[test]
+    fn detect_skips_delimited_banner_body() {
+        let input = "\
+hostname sw1
+!
+banner motd ^C
+This system is for authorized use only;
+Users have no expectation of privacy;
+All activity may be monitored and recorded;
+^C
+!
+interface GigabitEthernet1/0/1
+ ip address 192.0.2.1 255.255.255.0
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_scores_past_an_unterminated_banner() {
+        let input = "\
+hostname sw1
+banner motd ^C
+This system is for authorized use only;
+interface GigabitEthernet1/0/1
+ ip address 192.0.2.1 255.255.255.0
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn scorable_lines_does_not_reopen_a_banner_inside_a_banner_body() {
+        let lines = [
+            "banner motd ^C",
+            "banner set by netops on 2026-01-01",
+            "^C",
+            "interface GigabitEthernet1/0/1",
+            " standby 1 ip 192.0.2.254",
+        ];
+        assert_eq!(scorable_lines(&lines), [true, false, false, true, true]);
+    }
+
+    #[test]
+    fn detect_scores_below_a_banner_whose_body_mentions_banner() {
+        let input = "\
+hostname sw1
+!
+banner motd ^C
+WARNING: unauthorized access prohibited.
+banner set by netops on 2026-01-01
+^C
+!
+interface GigabitEthernet1/0/1
+ ip address 192.0.2.1 255.255.255.0
+ standby 1 ip 192.0.2.254
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_scores_below_an_undelimited_banner_whose_body_mentions_banner() {
+        let input = "\
+hostname leaf1
+!
+banner motd
+WARNING: unauthorized access prohibited.
+banner reviewed by legal
+EOF
+!
+interface Ethernet1
+   ip address 192.0.2.1/24
+!
+ip access-list standby-acl
+   10 permit ip any any
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("eos".into()));
+    }
 }
