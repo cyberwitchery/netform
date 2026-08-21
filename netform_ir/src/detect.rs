@@ -303,9 +303,8 @@ fn is_iosxe_ethernet_name(name: &str) -> bool {
 }
 
 /// returns `true` if `name` is a Cisco IOS XR interface name: an XR-only
-/// family, or any name in XR's four-part rack/slot/instance/port notation.
-/// callers must test [`is_iosxe_ethernet_name`] first — IOS XE spells
-/// breakout subports four-part too.
+/// family, or a name in XR's four-part rack/slot/instance/port notation whose
+/// interface type no other supported dialect spells.
 fn is_iosxr_interface_name(name: &str) -> bool {
     const XR_ONLY_PREFIXES: [&str; 5] = ["Bundle-Ether", "BVI", "MgmtEth", "PW-Ether", "tunnel-ip"];
 
@@ -316,7 +315,37 @@ fn is_iosxr_interface_name(name: &str) -> bool {
         return true;
     }
 
-    has_four_part_slot(name)
+    has_four_part_slot(name) && !is_other_dialect_interface_name(name)
+}
+
+/// returns `true` if `name` starts with an interface type another supported
+/// dialect spells — the union of the IOS XE, NX-OS and EOS type tables.
+fn is_other_dialect_interface_name(name: &str) -> bool {
+    const PREFIXES: [&str; 21] = [
+        "appgigabitethernet",
+        "bdi",
+        "ethernet",
+        "fabric",
+        "fastethernet",
+        "fivegigabitethernet",
+        "fortygigabitethernet",
+        "gigabitethernet",
+        "hundredgige",
+        "loopback",
+        "management",
+        "mgmt",
+        "nve",
+        "port-channel",
+        "serial",
+        "tengigabitethernet",
+        "tunnel",
+        "twentyfivegige",
+        "twogigabitethernet",
+        "vlan",
+        "vxlan",
+    ];
+    let lower = name.to_ascii_lowercase();
+    PREFIXES.iter().any(|prefix| lower.starts_with(prefix))
 }
 
 /// returns `true` if `name` ends in four `/`-separated numeric components,
@@ -706,6 +735,48 @@ interface HundredGigE1/0/1
 interface TenGigabitEthernet1/1/1
 ";
         assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_iosxr_ignores_four_part_names_other_dialects_spell() {
+        for name in [
+            "appgigabitethernet1/0/20/1",
+            "BDI1/2/3/4",
+            "fabric1/2/3/4",
+            "fastethernet0/1/2/3",
+            "fivegigabitethernet1/0/20/1",
+            "fortygigabitethernet1/0/20/1",
+            "gigabitethernet0/0/0/0",
+            "hundredgige1/0/20/1",
+            "Loopback1/2/3/4",
+            "Management1/2/3/4",
+            "mgmt1/2/3/4",
+            "nve1/2/3/4",
+            "Port-channel1/2/3/4",
+            "Serial0/1/2/3",
+            "tengigabitethernet1/0/20/1",
+            "Tunnel1/2/3/4",
+            "twentyfivegige1/0/20/1",
+            "twogigabitethernet1/0/20/1",
+            "Vlan1/2/3/4",
+            "Vxlan1/2/3/4",
+        ] {
+            let input = format!("interface {name}\n");
+            assert_eq!(
+                detect_dialect(&input),
+                DialectHint::Generic,
+                "{name} scores a dialect on slot shape alone",
+            );
+        }
+    }
+
+    #[test]
+    fn detect_nxos_keeps_its_ethernet_names_however_deep() {
+        let input = "\
+interface Ethernet1/2/3/4
+interface Ethernet1/2/3/5
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("nxos".into()));
     }
 
     #[test]
