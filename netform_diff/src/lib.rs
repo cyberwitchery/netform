@@ -38,7 +38,10 @@ pub use model::{
     PlanLineEditKind, derive_content_key, derive_occurrence_key, finding_code,
 };
 pub use plan::build_plan;
-pub use report::{DEFAULT_CONTEXT_LINES, format_markdown_report, format_unified_diff};
+pub use report::{
+    ColorChoice, DEFAULT_CONTEXT_LINES, format_markdown_report, format_unified_diff,
+    format_unified_diff_with_color,
+};
 
 use netform_ir::Document;
 
