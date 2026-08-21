@@ -48,6 +48,7 @@ const MARGIN_FACTOR: i32 = 2;
 /// - `DialectHint::Named("eos")` — Arista EOS
 /// - `DialectHint::Named("fortios")` — Fortinet FortiOS
 /// - `DialectHint::Named("iosxe")` — Cisco IOS XE
+/// - `DialectHint::Named("iosxr")` — Cisco IOS XR
 /// - `DialectHint::Named("junos")` — Juniper Junos
 /// - `DialectHint::Named("nxos")` — Cisco NX-OS
 /// - `DialectHint::Generic` — no dialect detected with sufficient confidence
@@ -57,6 +58,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     let mut nxos: i32 = 0;
     let mut eos: i32 = 0;
     let mut iosxe: i32 = 0;
+    let mut iosxr: i32 = 0;
 
     let lines: Vec<&str> = input.lines().map(str::trim).collect();
 
@@ -116,6 +118,8 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             let iface = line.trim_start_matches("interface ");
             if is_iosxe_ethernet_name(iface) {
                 iosxe += MODERATE_SIGNAL;
+            } else if is_iosxr_interface_name(iface) {
+                iosxr += STRONG_SIGNAL;
             } else if iface.starts_with("Ethernet") && iface.contains('/') {
                 // NX-OS uses plain Ethernet with slot/port (Ethernet1/1).
                 nxos += STRONG_SIGNAL;
@@ -156,6 +160,31 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             iosxe += WEAK_SIGNAL;
         }
 
+        // Routing Policy Language and its `*-set` families are XR-only.
+        if line.starts_with("route-policy ")
+            || line.starts_with("prefix-set ")
+            || line.starts_with("as-path-set ")
+            || line.starts_with("community-set ")
+            || line.starts_with("extcommunity-set ")
+            || line.starts_with("rd-set ")
+        {
+            iosxr += STRONG_SIGNAL;
+        }
+        if line == "end-policy" || line == "end-set" {
+            iosxr += MODERATE_SIGNAL;
+        }
+        // XR templates BGP peers instead of repeating the settings per neighbor.
+        if line.starts_with("neighbor-group ")
+            || line.starts_with("af-group ")
+            || line.starts_with("session-group ")
+        {
+            iosxr += STRONG_SIGNAL;
+        }
+        // XR addresses interfaces under `ipv4`, the rest of the family under `ip`.
+        if line.starts_with("ipv4 address ") || line.starts_with("ipv4 access-list ") {
+            iosxr += MODERATE_SIGNAL;
+        }
+
         if line.starts_with("ip access-list ") && !line.contains("extended") {
             eos += MODERATE_SIGNAL;
         }
@@ -174,6 +203,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         ("nxos", nxos),
         ("eos", eos),
         ("iosxe", iosxe),
+        ("iosxr", iosxr),
     ];
 
     let mut sorted = candidates;
@@ -270,6 +300,71 @@ fn is_iosxe_ethernet_name(name: &str) -> bool {
         "TwoGigabitEthernet",
     ];
     PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+}
+
+/// returns `true` if `name` is a Cisco IOS XR interface name: an XR-only
+/// family, or a name in XR's four-part rack/slot/instance/port notation whose
+/// interface type no other supported dialect spells.
+fn is_iosxr_interface_name(name: &str) -> bool {
+    const XR_ONLY_PREFIXES: [&str; 5] = ["bundle-ether", "bvi", "mgmteth", "pw-ether", "tunnel-ip"];
+
+    let lower = name.to_ascii_lowercase();
+
+    if XR_ONLY_PREFIXES
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+    {
+        return true;
+    }
+
+    has_four_part_slot(name) && !is_other_dialect_interface_name(&lower)
+}
+
+/// returns `true` if `lower` — an already-lowercased interface name — starts
+/// with an interface type another supported dialect spells: the IOS XE, NX-OS
+/// and EOS type tables, plus IOS XE spellings those tables do not yet carry.
+fn is_other_dialect_interface_name(lower: &str) -> bool {
+    const PREFIXES: [&str; 24] = [
+        "appgigabitethernet",
+        "bdi",
+        "ethernet",
+        "fabric",
+        "fastethernet",
+        "fivegigabitethernet",
+        "fortygigabitethernet",
+        "fourhundredgig",
+        "gigabitethernet",
+        "hundredgigabitethernet",
+        "hundredgige",
+        "loopback",
+        "management",
+        "mgmt",
+        "nve",
+        "port-channel",
+        "serial",
+        "tengigabitethernet",
+        "tunnel",
+        "twentyfivegige",
+        "twogigabitethernet",
+        "twohundredgig",
+        "vlan",
+        "vxlan",
+    ];
+    PREFIXES.iter().any(|prefix| lower.starts_with(prefix))
+}
+
+/// returns `true` if `name` ends in four `/`-separated numeric components,
+/// ignoring any `.subinterface` suffix.
+fn has_four_part_slot(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or(name);
+    let slots: Vec<&str> = base.split('/').collect();
+
+    slots.len() == 4
+        && slots[1..].iter().all(|slot| slot.parse::<u32>().is_ok())
+        && slots[0]
+            .trim_start_matches(|c: char| !c.is_ascii_digit())
+            .parse::<u32>()
+            .is_ok()
 }
 
 /// returns `true` if `s` looks like a dotted-decimal subnet or wildcard mask
@@ -566,6 +661,271 @@ no-readvertise;
 ";
         assert_eq!(detect_dialect(input), DialectHint::Named("junos".into()));
     }
+
+    const IOSXR: &str = "\
+hostname xr-pe-01
+!
+interface Bundle-Ether10
+ ipv4 address 192.0.2.1 255.255.255.252
+!
+interface TenGigE0/0/0/0
+ bundle id 10 mode active
+!
+prefix-set CUSTOMER-PFX
+  10.0.0.0/8 le 24
+end-set
+!
+route-policy CUSTOMER-IN
+  if destination in CUSTOMER-PFX then
+    pass
+  endif
+end-policy
+!
+router bgp 65001
+ neighbor-group CUSTOMER-V4
+  remote-as 65002
+!
+end
+";
+
+    #[test]
+    fn detect_iosxr() {
+        assert_eq!(detect_dialect(IOSXR), DialectHint::Named("iosxr".into()));
+    }
+
+    #[test]
+    fn detect_iosxr_from_routing_policy_language_alone() {
+        let input = "\
+route-policy PASS-ALL
+  pass
+end-policy
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxr".into()));
+    }
+
+    #[test]
+    fn detect_iosxr_from_four_part_slot_interfaces() {
+        let input = "\
+interface TenGigE0/0/0/0
+interface FortyGigE0/0/0/1.100
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxr".into()));
+    }
+
+    #[test]
+    fn detect_iosxe_keeps_its_four_part_breakout_subports() {
+        let input = "\
+interface TwentyFiveGigE1/0/20/1
+interface HundredGigE1/0/21/1
+interface FortyGigabitEthernet1/0/22/1
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_iosxr_from_xr_only_interface_families() {
+        let input = "\
+interface MgmtEth0/RP0/CPU0/0
+interface tunnel-ip1
+interface BVI100
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxr".into()));
+    }
+
+    #[test]
+    fn detect_iosxe_keeps_its_three_part_slot_interfaces() {
+        let input = "\
+interface GigabitEthernet0/0/0
+interface HundredGigE1/0/1
+interface TenGigabitEthernet1/1/1
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn detect_iosxr_ignores_four_part_names_other_dialects_spell() {
+        for name in [
+            "appgigabitethernet1/0/20/1",
+            "BDI1/2/3/4",
+            "fabric1/2/3/4",
+            "fastethernet0/1/2/3",
+            "fivegigabitethernet1/0/20/1",
+            "fortygigabitethernet1/0/20/1",
+            "FourHundredGig1/0/31/1",
+            "gigabitethernet0/0/0/0",
+            "HundredGigabitEthernet1/0/2/1",
+            "hundredgige1/0/20/1",
+            "Loopback1/2/3/4",
+            "Management1/2/3/4",
+            "mgmt1/2/3/4",
+            "nve1/2/3/4",
+            "Port-channel1/2/3/4",
+            "Serial0/1/2/3",
+            "tengigabitethernet1/0/20/1",
+            "Tunnel1/2/3/4",
+            "twentyfivegige1/0/20/1",
+            "twogigabitethernet1/0/20/1",
+            "TwoHundredGigE1/0/5/1",
+            "Vlan1/2/3/4",
+            "Vxlan1/2/3/4",
+        ] {
+            let input = format!("interface {name}\n");
+            assert_eq!(
+                detect_dialect(&input),
+                DialectHint::Generic,
+                "{name} scores a dialect on slot shape alone",
+            );
+        }
+    }
+
+    #[test]
+    fn detect_iosxe_keeps_c9500_32c_breakout_subports() {
+        for subports in [3, 4, 8, 12, 24] {
+            let mut input = String::from(C9500_32C_FIXTURE);
+
+            for index in 0..subports {
+                let port = 2 + index / 4;
+                let subport = 1 + index % 4;
+                input.push_str(&format!(
+                    "interface HundredGigabitEthernet1/0/{port}/{subport}\n switchport mode access\n"
+                ));
+            }
+
+            assert_eq!(
+                detect_dialect(&input),
+                DialectHint::Named("iosxe".into()),
+                "{subports} breakout subports move the Catalyst off iosxe",
+            );
+        }
+    }
+
+    #[test]
+    fn detect_iosxr_reads_its_own_families_in_either_case() {
+        for name in [
+            "Bundle-Ether1",
+            "bundle-ether1",
+            "BVI1",
+            "bvi1",
+            "MgmtEth0/RP0/CPU0/0",
+            "mgmteth0/RP0/CPU0/0",
+            "PW-Ether1",
+            "pw-ether1",
+            "Tunnel-IP0/0/0/0",
+            "tunnel-ip0/0/0/0",
+        ] {
+            let input = format!("interface {name}\n");
+            assert_eq!(
+                detect_dialect(&input),
+                DialectHint::Named("iosxr".into()),
+                "{name} loses IOS XR detection to its case",
+            );
+        }
+    }
+
+    #[test]
+    fn detect_nxos_keeps_its_ethernet_names_however_deep() {
+        let input = "\
+interface Ethernet1/2/3/4
+interface Ethernet1/2/3/5
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("nxos".into()));
+    }
+
+    #[test]
+    fn iosxr_signals_leave_the_other_dialects_where_they_were() {
+        for (input, expected) in [
+            (IOSXE_FIXTURE, "iosxe"),
+            (NXOS_FIXTURE, "nxos"),
+            (EOS_FIXTURE, "eos"),
+            (JUNOS_FIXTURE, "junos"),
+            (FORTIOS_FIXTURE, "fortios"),
+        ] {
+            assert_eq!(
+                detect_dialect(input),
+                DialectHint::Named(expected.into()),
+                "{expected} fixture no longer detects as itself",
+            );
+        }
+    }
+
+    const C9500_32C_FIXTURE: &str = "\
+hostname c9500-32c-lab
+vrf definition MGMT
+ address-family ipv4
+ exit-address-family
+vlan 10
+ name users
+vlan 20
+ name servers
+ip access-list extended BLOCK-RFC1918
+ deny   ip 10.0.0.0 0.255.255.255 any
+ permit ip any any
+ip access-list extended MGMT-IN
+ permit tcp any any eq 22
+interface GigabitEthernet0/0
+ vrf forwarding MGMT
+ ip address 10.0.0.5 255.255.255.0
+interface TenGigabitEthernet1/0/47
+ switchport mode trunk
+router bgp 65001
+ bgp log-neighbor-changes
+ network 192.0.2.0 mask 255.255.255.0
+ neighbor 10.0.0.1 remote-as 65002
+";
+
+    const IOSXE_FIXTURE: &str = "\
+interface GigabitEthernet0/0/0
+  description uplink-core-a
+  ip address 192.0.2.2 255.255.255.252
+interface HundredGigE1/0/20/1
+  description breakout-leaf-1
+interface HundredGigE1/0/20/2
+  description breakout-leaf-2
+interface HundredGigE1/0/20/3
+  description breakout-leaf-3
+router bgp 65000
+  address-family ipv4 unicast
+    network 10.10.1.0 mask 255.255.255.0
+ip access-list extended ACL-EDGE-IN
+  permit tcp 10.10.1.0 0.0.0.255 any eq 443
+";
+
+    const NXOS_FIXTURE: &str = "\
+feature bgp
+feature interface-vlan
+vlan 10
+  name SERVERS
+interface Ethernet1/1
+  ip address 192.0.2.2/31
+vpc domain 10
+";
+
+    const EOS_FIXTURE: &str = "\
+interface Ethernet1
+   ip address 192.0.2.2/31
+interface Management1
+ip access-list ACL-EDGE-IN
+   10 permit tcp 10.10.1.0/24 any eq https
+";
+
+    const JUNOS_FIXTURE: &str = "\
+interfaces {
+    ge-0/0/0 {
+        mtu 9216;
+    }
+}
+";
+
+    const FORTIOS_FIXTURE: &str = "\
+config system global
+    set hostname \"FortiGate-01\"
+end
+config firewall address
+    edit \"web-server\"
+        set type ipmask
+    next
+end
+";
 
     #[test]
     fn detect_skips_bang_commented_junos_stanza() {

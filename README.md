@@ -9,6 +9,7 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 - `netform_cli`: `config-diff` and replay binaries.
 - `netform_dialect_eos`: eos profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_iosxe`: iosxe profile for comment/token handling and dialect-aware parsing.
+- `netform_dialect_iosxr`: iosxr profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_junos`: junos profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_nxos`: nxos profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_fortios`: fortios profile for comment/token handling and dialect-aware parsing.
@@ -40,6 +41,7 @@ netform_ir = "0.9.0"
 netform_diff = "0.9.0"
 netform_dialect_eos = "0.9.0"
 netform_dialect_iosxe = "0.9.0"
+netform_dialect_iosxr = "0.9.0"
 netform_dialect_junos = "0.9.0"
 netform_dialect_nxos = "0.9.0"
 netform_dialect_fortios = "0.9.0"
@@ -92,7 +94,7 @@ config-diff [OPTIONS] <FILE_A> <FILE_B>
 
 options:
 
-- `--dialect <auto|generic|eos|fortios|iosxe|junos|nxos>`: parser profile (default: `auto`, detected from content; falls back to `generic` and warns when the two files disagree)
+- `--dialect <auto|generic|eos|fortios|iosxe|iosxr|junos|nxos>`: parser profile (default: `auto`, detected from content; falls back to `generic` and warns when the two files disagree)
 - `--format <unified|markdown>`: human-readable report format (default: `unified`)
 - `--context-lines <n>`: lines shown per side of each edit before truncating (default: 10)
 - `--order-policy <ordered|unordered|keyed-stable>`: sibling ordering semantics (default: `ordered`)
@@ -113,6 +115,7 @@ examples:
 cargo run -p netform_cli --bin config-diff -- ./before.cfg ./after.cfg
 cargo run -p netform_cli --bin config-diff -- --dialect eos ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --dialect iosxe ./intended.conf ./actual.conf
+cargo run -p netform_cli --bin config-diff -- --dialect iosxr ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --dialect junos ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --dialect nxos ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --dialect fortios ./intended.conf ./actual.conf

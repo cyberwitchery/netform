@@ -4,6 +4,7 @@ use std::path::Path;
 use netform_dialect_eos::parse_eos;
 use netform_dialect_fortios::parse_fortios;
 use netform_dialect_iosxe::parse_iosxe;
+use netform_dialect_iosxr::parse_iosxr;
 use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
 use netform_diff::{NormalizeOptions, OrderPolicyConfig, diff_documents};
@@ -37,6 +38,7 @@ enum FixtureDialect {
     Eos,
     Fortios,
     Iosxe,
+    Iosxr,
     Junos,
     Nxos,
 }
@@ -124,6 +126,7 @@ fn parse_config(input: &str, dialect: FixtureDialect) -> Document {
         FixtureDialect::Eos => parse_eos(input),
         FixtureDialect::Fortios => parse_fortios(input),
         FixtureDialect::Iosxe => parse_iosxe(input),
+        FixtureDialect::Iosxr => parse_iosxr(input),
         FixtureDialect::Junos => parse_junos(input),
         FixtureDialect::Nxos => parse_nxos(input),
     }

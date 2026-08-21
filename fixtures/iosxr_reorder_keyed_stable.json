@@ -1,0 +1,16 @@
+{
+  "name": "iosxr_reorder_keyed_stable",
+  "dialect": "iosxr",
+  "intended": "interface Bundle-Ether10\n description core-uplink\n ipv4 address 192.0.2.1 255.255.255.252\ninterface TenGigE0/0/0/0\n bundle id 10 mode active\ninterface Loopback0\n ipv4 address 10.255.255.1 255.255.255.255\n",
+  "actual": "interface Loopback0\n ipv4 address 10.255.255.1 255.255.255.255\ninterface TenGigE0/0/0/0\n bundle id 10 mode active\ninterface Bundle-Ether10\n description core-uplink\n ipv4 address 192.0.2.1 255.255.255.252\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": []
+  }
+}

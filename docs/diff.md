@@ -76,6 +76,6 @@ the `config-diff` binary is provided by `netform_cli`.
 `config-diff a.cfg b.cfg` prints a unified diff report (`--format markdown` for markdown).
 `config-diff --json a.cfg b.cfg` prints `diff.json`.
 `config-diff --plan-json a.cfg b.cfg` prints `plan.json`.
-`config-diff --dialect auto|generic|eos|fortios|iosxe|junos|nxos ...` selects the parser profile (default: auto-detected).
+`config-diff --dialect auto|generic|eos|fortios|iosxe|iosxr|junos|nxos ...` selects the parser profile (default: auto-detected).
 `config-diff --order-policy ordered|unordered|keyed-stable ...` controls line ordering semantics.
 `config-diff --ignore-comments --ignore-blank-lines --normalize-whitespace ...` enables normalization steps.

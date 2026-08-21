@@ -1563,3 +1563,122 @@ fn config_diff_markdown_format_is_never_colored() {
         "the markdown report carries no ANSI escapes: {stdout:?}"
     );
 }
+
+#[test]
+fn config_diff_iosxr_dialect_produces_diff() {
+    let left = temp_file_path("left-iosxr");
+    let right = temp_file_path("right-iosxr");
+    fs::write(
+        &left,
+        "interface Bundle-Ether10\n description old-uplink\n ipv4 address 192.0.2.1 255.255.255.252\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "interface Bundle-Ether10\n description new-uplink\n ipv4 address 192.0.2.1 255.255.255.252\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("iosxr")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect iosxr");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid iosxr json");
+    assert_eq!(diff_json["has_changes"], true);
+}
+
+#[test]
+fn config_diff_iosxr_keyed_stable_matches_reordered_route_policies() {
+    let left = temp_file_path("left-iosxr-rpl");
+    let right = temp_file_path("right-iosxr-rpl");
+    let customer = "route-policy CUSTOMER-IN\n  pass\nend-policy\n";
+    let transit = "prefix-set TRANSIT-PFX\n  10.0.0.0/8 le 24\nend-set\n";
+    fs::write(&left, format!("{customer}{transit}")).expect("write left");
+    fs::write(&right, format!("{transit}{customer}")).expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("iosxr")
+        .arg("--order-policy")
+        .arg("keyed-stable")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect iosxr --order-policy keyed-stable");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "reordered route-policy and prefix-set blocks should match on their keys: {}",
+        strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_detects_iosxr() {
+    let xr = temp_file_path("iosxr-auto");
+    let nxos = temp_file_path("nxos-auto");
+    fs::write(
+        &xr,
+        "interface TenGigE0/0/0/0\n ipv4 address 192.0.2.1 255.255.255.252\nroute-policy PASS-ALL\n  pass\nend-policy\n",
+    )
+    .expect("write iosxr file");
+    fs::write(
+        &nxos,
+        "feature bgp\nfeature interface-vlan\ninterface Ethernet1/1\n  ip address 192.0.2.2/31\n",
+    )
+    .expect("write nxos file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg(&xr)
+        .arg(&nxos)
+        .output()
+        .expect("run config-diff with auto dialect");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("iosxr vs nxos"),
+        "auto detection should name iosxr, got: {stderr}",
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_dispatches_to_the_iosxr_parser() {
+    let left = temp_file_path("left-iosxr-auto");
+    let right = temp_file_path("right-iosxr-auto");
+    fs::write(
+        &left,
+        "route-policy CUSTOMER-IN\n  set community NO-EXPORT-SET\n  pass\nend-policy\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "route-policy CUSTOMER-IN\n  set community CUSTOMER-SET\n  pass\nend-policy\n",
+    )
+    .expect("write right");
+
+    let run = |dialect: Option<&str>| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_config-diff"));
+        cmd.arg("--no-exit-code").arg("--json");
+        if let Some(dialect) = dialect {
+            cmd.arg("--dialect").arg(dialect);
+        }
+        let output = cmd
+            .arg(&left)
+            .arg(&right)
+            .output()
+            .expect("run config-diff");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    assert_eq!(run(None), run(Some("iosxr")));
+}
