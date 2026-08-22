@@ -288,6 +288,7 @@ dependencies = [
  "netform_dialect_iosxr",
  "netform_dialect_junos",
  "netform_dialect_nxos",
+ "netform_dialect_vrp",
  "netform_diff",
  "netform_ir",
  "serde",
@@ -331,6 +332,13 @@ dependencies = [
 
 [[package]]
 name = "netform_dialect_nxos"
+version = "0.9.0"
+dependencies = [
+ "netform_ir",
+]
+
+[[package]]
+name = "netform_dialect_vrp"
 version = "0.9.0"
 dependencies = [
  "netform_ir",

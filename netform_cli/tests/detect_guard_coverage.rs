@@ -14,6 +14,7 @@
 use netform_dialect_eos::EOS_INTERFACE_TYPES;
 use netform_dialect_iosxe::IOSXE_INTERFACE_TYPES;
 use netform_dialect_nxos::NXOS_INTERFACE_TYPES;
+use netform_dialect_vrp::VRP_INTERFACE_TYPES;
 use netform_ir::DialectHint;
 use netform_ir::detect::detect_dialect;
 
@@ -55,6 +56,25 @@ fn the_guard_does_not_cost_the_dialects_their_own_interface_names() {
                 detect_dialect(&input),
                 DialectHint::Named("iosxr".into()),
                 "{table} carries `{ty}`, and a bare `interface {ty}1` reads as IOS XR",
+            );
+        }
+    }
+}
+
+/// VRP is absent from `TABLES`: covering it at four-part depth would widen the
+/// guard past `Pos0/1/0/0` and `Null0`, which IOS XR spells too, so its own
+/// bare and three-part depths are pinned here instead.
+#[test]
+fn no_vrp_interface_type_scores_iosxr_at_the_depths_vrp_writes() {
+    let iosxr = DialectHint::Named("iosxr".into());
+
+    for ty in VRP_INTERFACE_TYPES {
+        for suffix in ["1", "0/0/1", "0/0/1.100"] {
+            let input = format!("interface {ty}{suffix}\n");
+            assert_ne!(
+                detect_dialect(&input),
+                iosxr,
+                "VRP_INTERFACE_TYPES carries `{ty}`, and `interface {ty}{suffix}` reads as IOS XR",
             );
         }
     }

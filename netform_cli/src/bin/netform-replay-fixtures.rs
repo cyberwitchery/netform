@@ -7,6 +7,7 @@ use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_iosxr::parse_iosxr;
 use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
+use netform_dialect_vrp::parse_vrp;
 use netform_diff::{NormalizeOptions, OrderPolicyConfig, diff_documents};
 use netform_ir::{Document, parse_generic};
 use serde::Deserialize;
@@ -41,6 +42,7 @@ enum FixtureDialect {
     Iosxr,
     Junos,
     Nxos,
+    Vrp,
 }
 
 fn edit_type_name(edit: &netform_diff::Edit) -> &'static str {
@@ -129,5 +131,6 @@ fn parse_config(input: &str, dialect: FixtureDialect) -> Document {
         FixtureDialect::Iosxr => parse_iosxr(input),
         FixtureDialect::Junos => parse_junos(input),
         FixtureDialect::Nxos => parse_nxos(input),
+        FixtureDialect::Vrp => parse_vrp(input),
     }
 }

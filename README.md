@@ -12,6 +12,7 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 - `netform_dialect_iosxr`: iosxr profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_junos`: junos profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_nxos`: nxos profile for comment/token handling and dialect-aware parsing.
+- `netform_dialect_vrp`: vrp profile for comment/token handling and dialect-aware parsing.
 - `netform_dialect_fortios`: fortios profile for comment/token handling and dialect-aware parsing.
 
 ## features
@@ -44,6 +45,7 @@ netform_dialect_iosxe = "0.9.0"
 netform_dialect_iosxr = "0.9.0"
 netform_dialect_junos = "0.9.0"
 netform_dialect_nxos = "0.9.0"
+netform_dialect_vrp = "0.9.0"
 netform_dialect_fortios = "0.9.0"
 ```
 
@@ -94,7 +96,7 @@ config-diff [OPTIONS] <FILE_A> <FILE_B>
 
 options:
 
-- `--dialect <auto|generic|eos|fortios|iosxe|iosxr|junos|nxos>`: parser profile (default: `auto`, detected from content; falls back to `generic` and warns when the two files disagree)
+- `--dialect <auto|generic|eos|fortios|iosxe|iosxr|junos|nxos|vrp>`: parser profile (default: `auto`, detected from content; falls back to `generic` and warns when the two files disagree)
 - `--format <unified|markdown>`: human-readable report format (default: `unified`)
 - `--context-lines <n>`: lines shown per side of each edit before truncating (default: 10)
 - `--order-policy <ordered|unordered|keyed-stable>`: sibling ordering semantics (default: `ordered`)
@@ -119,6 +121,7 @@ cargo run -p netform_cli --bin config-diff -- --dialect iosxr ./intended.conf ./
 cargo run -p netform_cli --bin config-diff -- --dialect junos ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --dialect nxos ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --dialect fortios ./intended.conf ./actual.conf
+cargo run -p netform_cli --bin config-diff -- --dialect vrp ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --order-policy keyed-stable ./intended.conf ./actual.conf
 cargo run -p netform_cli --bin config-diff -- --json ./before.cfg ./after.cfg
 cargo run -p netform_cli --bin config-diff -- --plan-json ./before.cfg ./after.cfg

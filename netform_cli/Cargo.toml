@@ -17,6 +17,7 @@ clap = { version = "4.6", features = ["derive"] }
 netform_dialect_eos = { version = "0.9.0", path = "../netform_dialect_eos" }
 netform_dialect_iosxe = { version = "0.9.0", path = "../netform_dialect_iosxe" }
 netform_dialect_iosxr = { version = "0.9.0", path = "../netform_dialect_iosxr" }
+netform_dialect_vrp = { version = "0.9.0", path = "../netform_dialect_vrp" }
 netform_dialect_junos = { version = "0.9.0", path = "../netform_dialect_junos" }
 netform_dialect_nxos = { version = "0.9.0", path = "../netform_dialect_nxos" }
 netform_dialect_fortios = { version = "0.9.0", path = "../netform_dialect_fortios" }

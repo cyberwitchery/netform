@@ -1,0 +1,16 @@
+{
+  "name": "vrp_reorder_keyed_stable",
+  "dialect": "vrp",
+  "intended": "interface Vlanif10\n ip address 10.0.10.1 255.255.255.0\ninterface Eth-Trunk1\n port link-type trunk\ninterface GigabitEthernet0/0/1\n port default vlan 10\n",
+  "actual": "interface GigabitEthernet0/0/1\n port default vlan 10\ninterface Vlanif10\n ip address 10.0.10.1 255.255.255.0\ninterface Eth-Trunk1\n port link-type trunk\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": false,
+    "edit_types": [],
+    "finding_codes": []
+  }
+}

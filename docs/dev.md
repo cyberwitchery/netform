@@ -67,6 +67,7 @@ open locally:
 - `target/doc/netform_dialect_iosxr/index.html`
 - `target/doc/netform_dialect_junos/index.html`
 - `target/doc/netform_dialect_nxos/index.html`
+- `target/doc/netform_dialect_vrp/index.html`
 
 ## ci
 

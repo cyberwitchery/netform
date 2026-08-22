@@ -16,6 +16,7 @@ how to use this repo:
 - parse junos-oriented text with `netform_dialect_junos::parse_junos`
 - parse nxos-oriented text with `netform_dialect_nxos::parse_nxos`
 - parse fortios-oriented text with `netform_dialect_fortios::parse_fortios`
+- parse vrp-oriented text with `netform_dialect_vrp::parse_vrp`
 - render with `Document::render()` to preserve exact line text and endings
 - compare two documents with `netform_diff::diff_documents`
 - emit unified, markdown, or json reports using `netform_cli`'s `config-diff` (dialect auto-detected, or forced with `--dialect`)

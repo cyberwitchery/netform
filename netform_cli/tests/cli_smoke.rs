@@ -1682,3 +1682,160 @@ fn config_diff_auto_dialect_dispatches_to_the_iosxr_parser() {
 
     assert_eq!(run(None), run(Some("iosxr")));
 }
+
+#[test]
+fn config_diff_vrp_dialect_produces_diff() {
+    let left = temp_file_path("left-vrp");
+    let right = temp_file_path("right-vrp");
+    fs::write(
+        &left,
+        "interface Eth-Trunk1\n port link-type trunk\n port trunk allow-pass vlan 10 20\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "interface Eth-Trunk1\n port link-type trunk\n port trunk allow-pass vlan 10 20 30\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("vrp")
+        .arg("--json")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect vrp");
+
+    assert!(output.status.success());
+    let diff_json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid vrp json");
+    assert_eq!(diff_json["has_changes"], true);
+}
+
+#[test]
+fn config_diff_vrp_keyed_stable_matches_reordered_vpn_instances() {
+    let left = temp_file_path("left-vrp-vpn");
+    let right = temp_file_path("right-vrp-vpn");
+    let blue = "ip vpn-instance BLUE\n ipv4-family\n  route-distinguisher 65000:100\n";
+    let red = "ip vpn-instance RED\n ipv4-family\n  route-distinguisher 65000:200\n";
+    fs::write(&left, format!("{blue}{red}")).expect("write left");
+    fs::write(&right, format!("{red}{blue}")).expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--dialect")
+        .arg("vrp")
+        .arg("--order-policy")
+        .arg("keyed-stable")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect vrp --order-policy keyed-stable");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "reordered vpn-instance blocks should match on their keys: {}",
+        strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+    );
+}
+
+#[test]
+fn config_diff_vrp_keyed_stable_matches_a_classifier_across_its_operator() {
+    let left = temp_file_path("left-vrp-classifier");
+    let right = temp_file_path("right-vrp-classifier");
+    fs::write(
+        &left,
+        "traffic classifier CLASS-USERS operator or\n if-match acl 3000\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "traffic classifier CLASS-USERS operator and\n if-match acl 3000\n",
+    )
+    .expect("write right");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg("--dialect")
+        .arg("vrp")
+        .arg("--order-policy")
+        .arg("keyed-stable")
+        .arg(&left)
+        .arg(&right)
+        .output()
+        .expect("run config-diff --dialect vrp --order-policy keyed-stable");
+
+    let report = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    assert!(
+        report.contains("replace 1 line(s)"),
+        "the classifier should match on its key and report one replaced line, got: {report}",
+    );
+    assert!(
+        !report.contains("if-match acl 3000"),
+        "the unchanged body should not be torn down with the header, got: {report}",
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_detects_vrp() {
+    let vrp = temp_file_path("vrp-auto");
+    let nxos = temp_file_path("nxos-auto-vrp");
+    fs::write(
+        &vrp,
+        "sysname CE-ACCESS-01\nvlan batch 10 20\ninterface GigabitEthernet0/0/1\n port link-type access\n port default vlan 10\n",
+    )
+    .expect("write vrp file");
+    fs::write(
+        &nxos,
+        "feature bgp\nfeature interface-vlan\ninterface Ethernet1/1\n  ip address 192.0.2.2/31\n",
+    )
+    .expect("write nxos file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
+        .arg(&vrp)
+        .arg(&nxos)
+        .output()
+        .expect("run config-diff with auto dialect");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("vrp vs nxos"),
+        "auto detection should name vrp, got: {stderr}",
+    );
+}
+
+#[test]
+fn config_diff_auto_dialect_dispatches_to_the_vrp_parser() {
+    let left = temp_file_path("left-vrp-auto");
+    let right = temp_file_path("right-vrp-auto");
+    let head = "sysname CE-ACCESS-01\nvlan batch 10 20\nip vpn-instance BLUE\n ipv4-family\n";
+    fs::write(
+        &left,
+        format!("{head}interface Vlanif10\n ip address 10.0.10.1 255.255.255.0\n"),
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        format!("{head}interface Vlanif10\n ip address 10.0.10.2 255.255.255.0\n"),
+    )
+    .expect("write right");
+
+    let run = |dialect: Option<&str>| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_config-diff"));
+        cmd.arg("--no-exit-code").arg("--json");
+        if let Some(dialect) = dialect {
+            cmd.arg("--dialect").arg(dialect);
+        }
+        let output = cmd
+            .arg(&left)
+            .arg(&right)
+            .output()
+            .expect("run config-diff");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    assert_eq!(run(None), run(Some("vrp")));
+}

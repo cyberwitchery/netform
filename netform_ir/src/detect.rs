@@ -51,6 +51,7 @@ const MARGIN_FACTOR: i32 = 2;
 /// - `DialectHint::Named("iosxr")` — Cisco IOS XR
 /// - `DialectHint::Named("junos")` — Juniper Junos
 /// - `DialectHint::Named("nxos")` — Cisco NX-OS
+/// - `DialectHint::Named("vrp")` — Huawei VRP
 /// - `DialectHint::Generic` — no dialect detected with sufficient confidence
 pub fn detect_dialect(input: &str) -> DialectHint {
     let mut fortios: i32 = 0;
@@ -59,6 +60,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     let mut eos: i32 = 0;
     let mut iosxe: i32 = 0;
     let mut iosxr: i32 = 0;
+    let mut vrp: i32 = 0;
 
     let lines: Vec<&str> = input.lines().map(str::trim).collect();
 
@@ -126,6 +128,8 @@ pub fn detect_dialect(input: &str) -> DialectHint {
             } else if iface.starts_with("Ethernet") || iface.starts_with("Management") {
                 // no slot → could be EOS.
                 eos += MODERATE_SIGNAL;
+            } else if is_vrp_interface_name(iface) {
+                vrp += STRONG_SIGNAL;
             }
         }
         if line.starts_with("vpc ") {
@@ -195,6 +199,8 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         {
             eos += WEAK_SIGNAL;
         }
+
+        vrp += vrp_signal_score(line);
     }
 
     let candidates = [
@@ -204,6 +210,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         ("eos", eos),
         ("iosxe", iosxe),
         ("iosxr", iosxr),
+        ("vrp", vrp),
     ];
 
     let mut sorted = candidates;
@@ -379,6 +386,63 @@ fn has_four_part_slot(name: &str) -> bool {
             .trim_start_matches(|c: char| !c.is_ascii_digit())
             .parse::<u32>()
             .is_ok()
+}
+
+/// score the Huawei VRP signals `line` carries, excluding the interface names
+/// [`is_vrp_interface_name`] scores from the shared `interface` chain.
+fn vrp_signal_score(line: &str) -> i32 {
+    let mut score = 0;
+
+    if line.starts_with("undo ") {
+        score += WEAK_SIGNAL;
+    }
+    if line.starts_with("sysname ") {
+        score += STRONG_SIGNAL;
+    }
+    if line.starts_with("vlan batch ") {
+        score += STRONG_SIGNAL;
+    }
+    if line.starts_with("ip vpn-instance ") {
+        score += STRONG_SIGNAL;
+    }
+    if line.starts_with("user-interface ") {
+        score += STRONG_SIGNAL;
+    }
+    if line.starts_with("ipv4-family") || line.starts_with("ipv6-family") {
+        score += MODERATE_SIGNAL;
+    }
+    if line.starts_with("port link-type ") || line.starts_with("port default vlan ") {
+        score += MODERATE_SIGNAL;
+    }
+    // VRP's `neighbor <ip> remote-as <asn>`.
+    if line.starts_with("peer ") && line.contains(" as-number ") {
+        score += MODERATE_SIGNAL;
+    }
+
+    score
+}
+
+/// returns `true` if `name` is an interface type only Huawei VRP spells.
+///
+/// the shared families VRP also parses (`GigabitEthernet`, `LoopBack`,
+/// `Tunnel`, `Pos`, `Null`, `Virtual-Template`) are deliberately absent.
+fn is_vrp_interface_name(name: &str) -> bool {
+    const VRP_ONLY_PREFIXES: [&str; 8] = [
+        "vlanif",
+        "eth-trunk",
+        "ip-trunk",
+        "xgigabitethernet",
+        "meth",
+        "25ge",
+        "40ge",
+        "100ge",
+    ];
+
+    let lower = name.to_ascii_lowercase();
+
+    VRP_ONLY_PREFIXES
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
 }
 
 /// returns `true` if `s` looks like a dotted-decimal subnet or wildcard mask
@@ -939,6 +1003,192 @@ config firewall address
         set type ipmask
     next
 end
+";
+
+    #[test]
+    fn detect_vrp() {
+        assert_eq!(
+            detect_dialect(VRP_FIXTURE),
+            DialectHint::Named("vrp".into())
+        );
+    }
+
+    #[test]
+    fn detect_vrp_wins_over_the_iosxe_names_it_shares() {
+        let input = "\
+sysname CE-ACCESS-01
+vlan batch 10 20
+interface GigabitEthernet0/0/1
+ port link-type access
+ port default vlan 10
+ ip address 10.0.10.1 255.255.255.0
+";
+        assert_eq!(detect_dialect(input), DialectHint::Named("vrp".into()));
+    }
+
+    #[test]
+    fn detect_vrp_from_its_own_interface_families() {
+        for iface in [
+            "Vlanif10",
+            "Eth-Trunk1",
+            "Ip-Trunk1",
+            "XGigabitEthernet0/0/1",
+            "MEth0/0/1",
+            "25GE1/0/1",
+            "40GE1/0/1",
+            "100GE1/0/1",
+        ] {
+            let input = format!("interface {iface}\n description edge\n");
+            assert_eq!(
+                detect_dialect(&input),
+                DialectHint::Named("vrp".into()),
+                "`interface {iface}` should read as VRP",
+            );
+        }
+    }
+
+    #[test]
+    fn detect_vrp_reads_its_own_families_in_either_case() {
+        for iface in ["vlanif10", "eth-trunk1", "100ge1/0/1"] {
+            let input = format!("interface {iface}\n description edge\n");
+            assert_eq!(
+                detect_dialect(&input),
+                DialectHint::Named("vrp".into()),
+                "`interface {iface}` should read as VRP in lowercase too",
+            );
+        }
+    }
+
+    #[test]
+    fn detect_vrp_ignores_the_hash_separators() {
+        let input = "#\n#\n#\n#\n#\n";
+        assert_eq!(detect_dialect(input), DialectHint::Generic);
+    }
+
+    #[test]
+    fn detect_generic_when_eos_and_vrp_interfaces_mix() {
+        let input = "\
+ip access-list ACL-EDGE-IN
+   10 permit tcp 10.10.1.0/24 any eq https
+interface Management1
+interface Vlanif10
+ description edge
+";
+        assert_eq!(detect_dialect(input), DialectHint::Generic);
+    }
+
+    #[test]
+    fn vrp_scores_the_constructs_the_ios_family_spells_otherwise() {
+        for line in [
+            "undo portswitch",
+            "sysname CE-ACCESS-01",
+            "vlan batch 10 20",
+            "ip vpn-instance BLUE",
+            "user-interface vty 0 4",
+            "ipv4-family unicast",
+            "ipv6-family vpn-instance BLUE",
+            "port link-type access",
+            "port default vlan 10",
+            "peer 10.0.0.2 as-number 65001",
+        ] {
+            assert!(vrp_signal_score(line) > 0, "`{line}` scores no VRP signal");
+        }
+    }
+
+    #[test]
+    fn the_ios_family_spellings_score_no_vrp_signal() {
+        for line in [
+            "no switchport",
+            "hostname c9500-lab",
+            "vlan 10",
+            "vrf definition BLUE",
+            "line vty 0 4",
+            "address-family ipv4 unicast",
+            "switchport mode access",
+            "switchport access vlan 10",
+            "neighbor 10.0.0.2 remote-as 65001",
+        ] {
+            assert_eq!(vrp_signal_score(line), 0, "`{line}` scores a VRP signal");
+        }
+    }
+
+    #[test]
+    fn vrp_signals_leave_the_other_dialects_where_they_were() {
+        for (name, input) in [
+            ("iosxe", IOSXE_FIXTURE),
+            ("nxos", NXOS_FIXTURE),
+            ("eos", EOS_FIXTURE),
+            ("junos", JUNOS_FIXTURE),
+            ("fortios", FORTIOS_FIXTURE),
+            ("iosxr", IOSXR_FIXTURE),
+            ("iosxe", C9500_32C_FIXTURE),
+        ] {
+            assert_eq!(
+                detect_dialect(input),
+                DialectHint::Named(name.into()),
+                "{name} fixture no longer detects as itself",
+            );
+
+            let lines: Vec<&str> = input.lines().map(str::trim).collect();
+            for (&line, scorable) in lines.iter().zip(scorable_lines(&lines)) {
+                if !scorable {
+                    continue;
+                }
+                assert_eq!(
+                    vrp_signal_score(line),
+                    0,
+                    "`{line}` in the {name} fixture scores VRP",
+                );
+                if let Some(iface) = line.strip_prefix("interface ") {
+                    assert!(
+                        !is_vrp_interface_name(iface),
+                        "`{line}` in the {name} fixture reads as a VRP interface",
+                    );
+                }
+            }
+        }
+    }
+
+    const IOSXR_FIXTURE: &str = "\
+interface Bundle-Ether10
+ ipv4 address 192.0.2.1 255.255.255.252
+interface TenGigE0/0/0/0
+ bundle id 10 mode active
+route-policy PASS-ALL
+  pass
+end-policy
+prefix-set CUSTOMER-PFX
+  10.0.0.0/8 le 24
+end-set
+";
+
+    const VRP_FIXTURE: &str = "\
+#
+sysname CE-ACCESS-01
+#
+vlan batch 10 20
+#
+ip vpn-instance BLUE
+ ipv4-family
+  route-distinguisher 65000:100
+#
+interface Vlanif10
+ ip address 10.0.10.1 255.255.255.0
+#
+interface Eth-Trunk1
+ port link-type trunk
+#
+interface GigabitEthernet0/0/2
+ undo portswitch
+ ip binding vpn-instance BLUE
+#
+bgp 65000
+ peer 10.0.0.2 as-number 65001
+#
+user-interface vty 0 4
+ authentication-mode aaa
+#
+return
 ";
 
     #[test]

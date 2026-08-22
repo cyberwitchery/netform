@@ -10,6 +10,7 @@ use netform_dialect_iosxe::parse_iosxe;
 use netform_dialect_iosxr::parse_iosxr;
 use netform_dialect_junos::parse_junos;
 use netform_dialect_nxos::parse_nxos;
+use netform_dialect_vrp::parse_vrp;
 use netform_diff::{
     ColorChoice, DEFAULT_CONTEXT_LINES, NormalizationStep, NormalizeOptions, OrderPolicy,
     OrderPolicyConfig, OrderPolicyOverride, build_plan, diff_documents, format_markdown_report,
@@ -111,6 +112,7 @@ enum CliDialect {
     Iosxr,
     Junos,
     Nxos,
+    Vrp,
 }
 
 impl CliDialect {
@@ -123,6 +125,7 @@ impl CliDialect {
                 "iosxr" => CliDialect::Iosxr,
                 "junos" => CliDialect::Junos,
                 "nxos" => CliDialect::Nxos,
+                "vrp" => CliDialect::Vrp,
                 _ => CliDialect::Generic,
             },
             _ => CliDialect::Generic,
@@ -355,6 +358,7 @@ fn parse_config(input: &str, dialect: CliDialect) -> Document {
         CliDialect::Iosxr => parse_iosxr(input),
         CliDialect::Junos => parse_junos(input),
         CliDialect::Nxos => parse_nxos(input),
+        CliDialect::Vrp => parse_vrp(input),
     }
 }
 

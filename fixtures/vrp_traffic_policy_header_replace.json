@@ -1,0 +1,18 @@
+{
+  "name": "vrp_traffic_policy_header_replace",
+  "dialect": "vrp",
+  "intended": "acl number 3000\n rule 5 permit ip source 10.0.10.0 0.0.0.255\ntraffic classifier CLASS-USERS operator or\n if-match acl 3000\n",
+  "actual": "acl number 3000\n rule 5 permit ip source 10.0.10.0 0.0.0.255\ntraffic classifier CLASS-USERS operator and\n if-match acl 3000\n",
+  "normalization_steps": [],
+  "order_policy": {
+    "default": "keyed-stable",
+    "overrides": []
+  },
+  "expected": {
+    "has_changes": true,
+    "edit_types": [
+      "Replace"
+    ],
+    "finding_codes": []
+  }
+}
