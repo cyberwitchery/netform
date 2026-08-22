@@ -346,6 +346,7 @@ pub struct IosLikeDialect {
     name: &'static str,
     key_hint: fn(Option<&ParsedLineParts>) -> Option<String>,
     block_terminator: Option<fn(&str) -> bool>,
+    literal_region: Option<fn(&str) -> Option<LiteralTerminator>>,
 }
 
 impl IosLikeDialect {
@@ -366,6 +367,7 @@ impl IosLikeDialect {
             name,
             key_hint,
             block_terminator: None,
+            literal_region: None,
         }
     }
 
@@ -386,6 +388,31 @@ impl IosLikeDialect {
             name: self.name,
             key_hint: self.key_hint,
             block_terminator: Some(is_terminator),
+            literal_region: self.literal_region,
+        }
+    }
+
+    /// return this dialect with `opens_region` answering
+    /// [`Dialect::literal_region`] in place of [`ios_like_literal_region`].
+    ///
+    /// ```rust
+    /// use netform_ir::{IosLikeDialect, TriviaKind, common_key_hint, parse_with_dialect, Node};
+    ///
+    /// let dialect = IosLikeDialect::new("vrp", common_key_hint)
+    ///     .with_literal_region(netform_ir::vrp_literal_region);
+    /// let doc = parse_with_dialect("header login information %\n#not a comment\n%\n", &dialect);
+    /// let Node::Line(body) = doc.node(doc.roots[1]).unwrap() else { unreachable!() };
+    /// assert_eq!(body.trivia, TriviaKind::Literal);
+    /// ```
+    pub const fn with_literal_region(
+        self,
+        opens_region: fn(&str) -> Option<LiteralTerminator>,
+    ) -> Self {
+        Self {
+            name: self.name,
+            key_hint: self.key_hint,
+            block_terminator: self.block_terminator,
+            literal_region: Some(opens_region),
         }
     }
 }
@@ -423,7 +450,10 @@ impl Dialect for IosLikeDialect {
     }
 
     fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
-        ios_like_literal_region(raw)
+        match self.literal_region {
+            Some(opens_region) => opens_region(raw),
+            None => ios_like_literal_region(raw),
+        }
     }
 }
 
@@ -447,15 +477,53 @@ impl Dialect for IosLikeDialect {
 /// assert!(!region.terminates("Authorized use only"));
 /// ```
 pub fn ios_like_literal_region(raw: &str) -> Option<LiteralTerminator> {
-    let after_head = raw.trim_start().strip_prefix("banner")?;
-    if !after_head.starts_with([' ', '\t']) {
+    let after_head = strip_keyword(raw, "banner")?;
+    let (_banner_type, after_type) = split_first_token(after_head)?;
+    if split_first_token(after_type).is_none() {
+        return Some(LiteralTerminator::ExactLine("EOF".to_string()));
+    }
+
+    delimited_literal_region(after_type)
+}
+
+/// recognize a Huawei VRP `header <login|shell> information <delimiter>` line
+/// and report what closes the free-text body that follows it.
+///
+/// returns `None` for a header carrying its whole body on the line
+/// (`header login information "Welcome"`) and for `header login file <path>`,
+/// which opens no body.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_ir::{LiteralTerminator, vrp_literal_region};
+///
+/// let region = vrp_literal_region("header login information %").unwrap();
+/// assert!(region.terminates("%"));
+/// assert!(!region.terminates("Authorized use only"));
+/// assert_eq!(vrp_literal_region("header login file flash:/login.txt"), None);
+/// ```
+pub fn vrp_literal_region(raw: &str) -> Option<LiteralTerminator> {
+    let after_head = strip_keyword(raw, "header")?;
+    let (kind, after_kind) = split_first_token(after_head)?;
+    if kind != "login" && kind != "shell" {
         return None;
     }
 
-    let (_banner_type, after_type) = split_first_token(after_head)?;
-    let Some((delimiter, tail)) = split_first_token(after_type) else {
-        return Some(LiteralTerminator::ExactLine("EOF".to_string()));
-    };
+    delimited_literal_region(strip_keyword(after_kind, "information")?)
+}
+
+/// strip leading whitespace and `keyword` off `raw`, matching only when
+/// whitespace follows the keyword.
+fn strip_keyword<'a>(raw: &'a str, keyword: &str) -> Option<&'a str> {
+    let after = raw.trim_start().strip_prefix(keyword)?;
+    after.starts_with([' ', '\t']).then_some(after)
+}
+
+/// derive the terminator for a free-text body introduced by the delimiter
+/// token at the head of `after_opener`.
+fn delimited_literal_region(after_opener: &str) -> Option<LiteralTerminator> {
+    let (delimiter, tail) = split_first_token(after_opener)?;
 
     if tail.contains(delimiter) {
         return None;
@@ -1371,6 +1439,39 @@ mod tests {
     #[test]
     fn common_key_hint_ntp_no_match() {
         assert_eq!(common_hint("ntp source-interface mgmt0"), None);
+    }
+
+    #[test]
+    fn vrp_literal_region_accepts_both_header_kinds() {
+        assert_eq!(
+            vrp_literal_region("header login information %"),
+            Some(LiteralTerminator::Contains("%".into())),
+        );
+        assert_eq!(
+            vrp_literal_region("header shell information #"),
+            Some(LiteralTerminator::Contains("#".into())),
+        );
+    }
+
+    #[test]
+    fn vrp_literal_region_declines_non_body_header_forms() {
+        assert_eq!(
+            vrp_literal_region("header login file flash:/login.txt"),
+            None
+        );
+        assert_eq!(vrp_literal_region("header login information \"Hi\""), None);
+        assert_eq!(vrp_literal_region("header login information"), None);
+        assert_eq!(vrp_literal_region("header wall information %"), None);
+        assert_eq!(
+            vrp_literal_region("header-compress login information %"),
+            None
+        );
+        assert_eq!(vrp_literal_region("banner motd ^C"), None);
+    }
+
+    #[test]
+    fn ios_like_literal_region_declines_the_vrp_header_spelling() {
+        assert_eq!(ios_like_literal_region("header login information %"), None);
     }
 
     #[test]

@@ -18,7 +18,7 @@
 //! assert_eq!(detect_dialect(""), DialectHint::Generic);
 //! ```
 
-use crate::{DialectHint, ios_like_literal_region};
+use crate::{DialectHint, ios_like_literal_region, vrp_literal_region};
 
 /// score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
 /// `config <section>`, NX-OS `feature <name>`, Junos top-level stanza names).
@@ -258,11 +258,13 @@ fn is_comment(line: &str) -> bool {
     line.starts_with('!') || line.starts_with('#')
 }
 
-/// returns the index of the line closing the banner opened at `idx`, so its
-/// body spans `idx + 1 ..= end`.  `None` when `idx` opens no banner or the
-/// delimiter never reappears.
+/// returns the index of the line closing the free-text body opened at `idx`,
+/// so that body spans `idx + 1 ..= end`.  `None` when `idx` opens no body or
+/// the delimiter never reappears.  both the IOS-family `banner` and the VRP
+/// `header` spelling are recognized.
 fn banner_body_end(lines: &[&str], idx: usize) -> Option<usize> {
-    let terminator = ios_like_literal_region(lines[idx])?;
+    let terminator =
+        ios_like_literal_region(lines[idx]).or_else(|| vrp_literal_region(lines[idx]))?;
 
     lines[idx + 1..]
         .iter()
@@ -1305,6 +1307,26 @@ interface GigabitEthernet1/0/1
  standby 1 ip 192.0.2.254
 ";
         assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
+    }
+
+    #[test]
+    fn a_vrp_header_body_is_not_scorable() {
+        let lines = [
+            "#",
+            "sysname CE-1",
+            "#",
+            "header login information %",
+            "interface GigabitEthernet1/0/1",
+            "#12345 pending",
+            "%",
+            "#",
+            "vlan batch 10 20",
+        ];
+
+        assert_eq!(
+            scorable_lines(&lines),
+            [false, true, false, true, false, false, false, false, true],
+        );
     }
 
     #[test]

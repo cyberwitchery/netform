@@ -18,12 +18,13 @@
 
 use netform_ir::{
     Document, IosKeyHintConfig, IosLikeDialect, ParsedLineParts, common_key_hint,
-    ios_family_key_hint, parse_with_dialect,
+    ios_family_key_hint, parse_with_dialect, vrp_literal_region,
 };
 
 /// pre-built Huawei VRP dialect profile: IOS-like parsing with VRP-specific
 /// key hints.
-pub const VRP_DIALECT: IosLikeDialect = IosLikeDialect::new("vrp", vrp_key_hint);
+pub const VRP_DIALECT: IosLikeDialect =
+    IosLikeDialect::new("vrp", vrp_key_hint).with_literal_region(vrp_literal_region);
 
 /// parse text using the Huawei VRP dialect ([`VRP_DIALECT`]).
 pub fn parse_vrp(input: &str) -> Document {
@@ -109,6 +110,8 @@ fn vrp_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             _ => None,
         },
         "user-interface" => match args {
+            // keyword-plus-value, not type-plus-range: the count is not the identity.
+            [kind, ..] if kind == "maximum-vty" => Some("user-interface:maximum-vty".into()),
             [kind, from, to, ..] => Some(format!("user-interface:{kind}:{from}:{to}")),
             [kind, one] => Some(format!("user-interface:{kind}:{one}")),
             [kind] => Some(format!("user-interface:{kind}")),

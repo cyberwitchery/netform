@@ -62,8 +62,8 @@ fn the_guard_does_not_cost_the_dialects_their_own_interface_names() {
 }
 
 /// VRP is absent from `TABLES`: covering it at four-part depth would widen the
-/// guard past `Pos0/1/0/0` and `Null0`, which IOS XR spells too, so its own
-/// bare and three-part depths are pinned here instead.
+/// guard past `Pos0/1/0/0`, which IOS XR spells too, so its own bare and
+/// three-part depths are pinned here instead.
 #[test]
 fn no_vrp_interface_type_scores_iosxr_at_the_depths_vrp_writes() {
     let iosxr = DialectHint::Named("iosxr".into());

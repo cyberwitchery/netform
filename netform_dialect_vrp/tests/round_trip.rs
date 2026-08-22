@@ -116,6 +116,81 @@ fn parse_vrp_round_trips_a_hash_delimited_banner() {
     assert_eq!(parse_vrp(cfg).render(), cfg);
 }
 
+#[test]
+fn header_login_information_body_lines_are_literal_not_configuration() {
+    let doc = parse_vrp(
+        "header login information %\nTicket queue:\n#12345 pending\nsysname NOT-A-COMMAND\n%\nsysname CE-1\n",
+    );
+
+    assert_eq!(
+        root_trivia(&doc),
+        vec![
+            ("header login information %", TriviaKind::Content),
+            ("Ticket queue:", TriviaKind::Literal),
+            ("#12345 pending", TriviaKind::Literal),
+            ("sysname NOT-A-COMMAND", TriviaKind::Literal),
+            ("%", TriviaKind::Literal),
+            ("sysname CE-1", TriviaKind::Content),
+        ],
+    );
+}
+
+#[test]
+fn header_shell_information_opens_a_literal_body_too() {
+    let doc = parse_vrp("header shell information $\n#in the body\n$\n");
+
+    assert_eq!(
+        root_trivia(&doc),
+        vec![
+            ("header shell information $", TriviaKind::Content),
+            ("#in the body", TriviaKind::Literal),
+            ("$", TriviaKind::Literal),
+        ],
+    );
+}
+
+#[test]
+fn a_self_contained_header_opens_no_literal_body() {
+    let doc = parse_vrp("header login information \"Welcome\"\n#\nsysname CE-1\n");
+
+    assert_eq!(
+        root_trivia(&doc),
+        vec![
+            ("header login information \"Welcome\"", TriviaKind::Content),
+            ("#", TriviaKind::Comment),
+            ("sysname CE-1", TriviaKind::Content),
+        ],
+    );
+}
+
+#[test]
+fn header_login_file_references_a_file_and_opens_no_body() {
+    let doc = parse_vrp("header login file flash:/login.txt\n#\nsysname CE-1\n");
+
+    assert_eq!(
+        root_trivia(&doc),
+        vec![
+            ("header login file flash:/login.txt", TriviaKind::Content),
+            ("#", TriviaKind::Comment),
+            ("sysname CE-1", TriviaKind::Content),
+        ],
+    );
+}
+
+#[test]
+fn vrp_does_not_recognize_the_ios_banner_spelling() {
+    let doc = parse_vrp("banner motd ^C\n#\nsysname CE-1\n");
+
+    assert_eq!(
+        root_trivia(&doc),
+        vec![
+            ("banner motd ^C", TriviaKind::Content),
+            ("#", TriviaKind::Comment),
+            ("sysname CE-1", TriviaKind::Content),
+        ],
+    );
+}
+
 fn root_trivia(doc: &netform_ir::Document) -> Vec<(&str, TriviaKind)> {
     doc.roots
         .iter()

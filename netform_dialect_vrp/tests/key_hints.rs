@@ -231,3 +231,23 @@ fn key_hint_leaves_undo_lines_to_their_text() {
 fn key_hint_router_id_is_the_only_router_head_vrp_writes() {
     assert_eq!(hint("router id 10.255.255.1"), Some("router:id".into()));
 }
+
+#[test]
+fn key_hint_maximum_vty_keys_on_the_keyword_not_the_count() {
+    assert_eq!(
+        hint("user-interface maximum-vty 15"),
+        hint("user-interface maximum-vty 20"),
+    );
+    assert_eq!(
+        hint("user-interface maximum-vty 15"),
+        Some("user-interface:maximum-vty".into()),
+    );
+    assert_eq!(
+        hint("user-interface vty 0 4"),
+        Some("user-interface:vty:0:4".into()),
+    );
+    assert_eq!(
+        hint("user-interface con 0"),
+        Some("user-interface:con:0".into())
+    );
+}
