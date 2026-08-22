@@ -1715,15 +1715,22 @@ fn config_diff_vrp_dialect_produces_diff() {
 }
 
 #[test]
-fn config_diff_vrp_keyed_stable_matches_reordered_vpn_instances() {
-    let left = temp_file_path("left-vrp-vpn");
-    let right = temp_file_path("right-vrp-vpn");
-    let blue = "ip vpn-instance BLUE\n ipv4-family\n  route-distinguisher 65000:100\n";
-    let red = "ip vpn-instance RED\n ipv4-family\n  route-distinguisher 65000:200\n";
-    fs::write(&left, format!("{blue}{red}")).expect("write left");
-    fs::write(&right, format!("{red}{blue}")).expect("write right");
+fn config_diff_vrp_keyed_stable_matches_a_bgp_peer_across_its_as_number() {
+    let left = temp_file_path("left-vrp-peer");
+    let right = temp_file_path("right-vrp-peer");
+    fs::write(
+        &left,
+        "bgp 65000\n peer 10.0.0.2 as-number 65001\n peer 10.0.0.2 description core-a\n",
+    )
+    .expect("write left");
+    fs::write(
+        &right,
+        "bgp 65000\n peer 10.0.0.2 as-number 65002\n peer 10.0.0.2 description core-a\n",
+    )
+    .expect("write right");
 
     let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+        .arg("--no-exit-code")
         .arg("--dialect")
         .arg("vrp")
         .arg("--order-policy")
@@ -1733,11 +1740,14 @@ fn config_diff_vrp_keyed_stable_matches_reordered_vpn_instances() {
         .output()
         .expect("run config-diff --dialect vrp --order-policy keyed-stable");
 
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "reordered vpn-instance blocks should match on their keys: {}",
-        strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+    let report = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    assert!(
+        report.contains("replace 1 line(s)"),
+        "the peer should match on its address and attribute and report one replaced line, got: {report}",
+    );
+    assert!(
+        !report.contains("delete"),
+        "a changed as-number should not tear the peer down, got: {report}",
     );
 }
 

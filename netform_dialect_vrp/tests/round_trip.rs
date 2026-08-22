@@ -111,9 +111,20 @@ fn parse_vrp_round_trips_crlf_and_a_missing_final_newline() {
 }
 
 #[test]
-fn parse_vrp_round_trips_a_hash_delimited_banner() {
+fn a_hash_delimited_banner_round_trips_and_its_body_is_literal() {
     let cfg = "header login information #\nwelcome to CE-ACCESS-01\n#\nsysname CE-ACCESS-01\n";
-    assert_eq!(parse_vrp(cfg).render(), cfg);
+    let doc = parse_vrp(cfg);
+
+    assert_eq!(doc.render(), cfg);
+    assert_eq!(
+        root_trivia(&doc),
+        vec![
+            ("header login information #", TriviaKind::Content),
+            ("welcome to CE-ACCESS-01", TriviaKind::Literal),
+            ("#", TriviaKind::Literal),
+            ("sysname CE-ACCESS-01", TriviaKind::Content),
+        ],
+    );
 }
 
 #[test]
@@ -151,12 +162,16 @@ fn header_shell_information_opens_a_literal_body_too() {
 
 #[test]
 fn a_self_contained_header_opens_no_literal_body() {
-    let doc = parse_vrp("header login information \"Welcome\"\n#\nsysname CE-1\n");
+    let doc = parse_vrp(
+        "header login information \"Welcome\"\nsysname NOT-A-COMMAND\ndescription \"Welcome\"\n#\nsysname CE-1\n",
+    );
 
     assert_eq!(
         root_trivia(&doc),
         vec![
             ("header login information \"Welcome\"", TriviaKind::Content),
+            ("sysname NOT-A-COMMAND", TriviaKind::Content),
+            ("description \"Welcome\"", TriviaKind::Content),
             ("#", TriviaKind::Comment),
             ("sysname CE-1", TriviaKind::Content),
         ],
@@ -165,12 +180,16 @@ fn a_self_contained_header_opens_no_literal_body() {
 
 #[test]
 fn header_login_file_references_a_file_and_opens_no_body() {
-    let doc = parse_vrp("header login file flash:/login.txt\n#\nsysname CE-1\n");
+    let doc = parse_vrp(
+        "header login file flash:/login.txt\nsysname NOT-A-COMMAND\nheader shell file flash:/shell.txt\n#\nsysname CE-1\n",
+    );
 
     assert_eq!(
         root_trivia(&doc),
         vec![
             ("header login file flash:/login.txt", TriviaKind::Content),
+            ("sysname NOT-A-COMMAND", TriviaKind::Content),
+            ("header shell file flash:/shell.txt", TriviaKind::Content),
             ("#", TriviaKind::Comment),
             ("sysname CE-1", TriviaKind::Content),
         ],
@@ -179,12 +198,14 @@ fn header_login_file_references_a_file_and_opens_no_body() {
 
 #[test]
 fn vrp_does_not_recognize_the_ios_banner_spelling() {
-    let doc = parse_vrp("banner motd ^C\n#\nsysname CE-1\n");
+    let doc = parse_vrp("banner motd ^C\nsysname NOT-A-COMMAND\n^C\n#\nsysname CE-1\n");
 
     assert_eq!(
         root_trivia(&doc),
         vec![
             ("banner motd ^C", TriviaKind::Content),
+            ("sysname NOT-A-COMMAND", TriviaKind::Content),
+            ("^C", TriviaKind::Content),
             ("#", TriviaKind::Comment),
             ("sysname CE-1", TriviaKind::Content),
         ],
