@@ -1,8 +1,8 @@
 //! Arista EOS-oriented dialect profile for `netform_ir`.
 //!
-//! this crate provides [`parse_eos`] and the reusable [`EOS_DIALECT`] profile,
-//! which customize key-hint derivation for EOS-specific constructs while reusing
-//! the shared IOS-like trivia classification and line tokenization.
+//! this crate is the published face of the `eos` entry in
+//! [`netform_dialects::REGISTRY`]; the interface-type table, VRF keyword and
+//! key-hint rules it exposes live there as data.
 //!
 //! # Example
 //!
@@ -14,75 +14,26 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::{
-    Document, IosKeyHintConfig, IosLikeDialect, ParsedLineParts, common_key_hint,
-    ios_family_key_hint, parse_with_dialect,
-};
+#[cfg(test)]
+use netform_dialects::eos::key_hint as eos_key_hint;
+use netform_ir::{Document, IosLikeDialect};
 
-/// pre-built EOS dialect profile: IOS-like parsing with EOS-specific key hints.
-pub const EOS_DIALECT: IosLikeDialect = IosLikeDialect::new("eos", eos_key_hint);
+/// pre-built Arista EOS dialect profile.
+pub const EOS_DIALECT: IosLikeDialect = netform_dialects::eos::DIALECT;
 
-/// parse text using the EOS dialect ([`EOS_DIALECT`]).
+/// parse text using the Arista EOS dialect ([`EOS_DIALECT`]).
 pub fn parse_eos(input: &str) -> Document {
-    parse_with_dialect(input, &EOS_DIALECT)
+    netform_dialects::eos::parse(input)
 }
 
-/// EOS interface type prefixes in canonical lowercase form.
+/// Arista EOS interface type prefixes in canonical lowercase form.
 ///
-/// longest-prefix-first (see `parse_interface`).
+/// longest-prefix-first (see `netform_ir::parse_interface`).
 ///
 /// public so `netform_cli`'s `detect_guard_coverage` suite can assert that no
 /// entry here is read as IOS XR on slot shape alone; adding a type without
 /// widening `netform_ir::detect`'s guard changes what `--dialect auto` reports.
-pub const EOS_INTERFACE_TYPES: &[&str] = &[
-    "port-channel",
-    "management",
-    "ethernet",
-    "loopback",
-    "vxlan",
-    "vlan",
-];
-
-/// EOS-specific configuration for [`ios_family_key_hint`].
-const EOS_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
-    interface_types: EOS_INTERFACE_TYPES,
-    vrf_keyword: "instance",
-    extra_router_protos: &["eigrp", "isis"],
-};
-
-/// derive a stable identity key for EOS configuration lines.
-///
-/// delegates `interface`, `vrf`, `router`, and `ip` to
-/// [`ios_family_key_hint`], handles EOS-specific constructs (`mlag`,
-/// `management`, `daemon`, `event-handler`, `peer-filter`), then falls back to
-/// [`common_key_hint`] for the remaining shared arms.
-fn eos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
-    if let Some(hint) = ios_family_key_hint(parsed, &EOS_KEY_HINT_CONFIG) {
-        return Some(hint);
-    }
-
-    let parsed_ref = parsed?;
-    let head = parsed_ref.head.as_str();
-    let args = parsed_ref.args.as_slice();
-
-    match head {
-        "mlag" => match args {
-            [sub, ..] if sub == "configuration" => Some("mlag".into()),
-            _ => None,
-        },
-        "management" => match args {
-            [sub, kind, ..] if sub == "api" => Some(format!("management-api:{kind}")),
-            [sub, kind, ..] if sub == "ssh" || sub == "telnet" || sub == "console" => {
-                Some(format!("management:{sub}:{kind}"))
-            }
-            _ => None,
-        },
-        "daemon" => args.first().map(|name| format!("daemon:{name}")),
-        "event-handler" => args.first().map(|name| format!("event-handler:{name}")),
-        "peer-filter" => args.first().map(|name| format!("peer-filter:{name}")),
-        _ => common_key_hint(parsed),
-    }
-}
+pub const EOS_INTERFACE_TYPES: &[&str] = netform_dialects::eos::RULES.interface_types;
 
 #[cfg(test)]
 mod tests {

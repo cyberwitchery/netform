@@ -61,6 +61,7 @@ open locally:
 - `target/doc/netform_ir/index.html`
 - `target/doc/netform_diff/index.html`
 - `target/doc/netform_cli/index.html`
+- `target/doc/netform_dialects/index.html`
 - `target/doc/netform_dialect_eos/index.html`
 - `target/doc/netform_dialect_fortios/index.html`
 - `target/doc/netform_dialect_iosxe/index.html`

@@ -1,0 +1,14 @@
+[package]
+name = "netform_dialects"
+version = "0.9.0"
+edition = "2024"
+license = "MIT"
+description = "Registry of network configuration dialects for netform"
+repository = "https://github.com/cyberwitchery/netform"
+homepage = "https://github.com/cyberwitchery/netform"
+documentation = "https://docs.rs/netform_dialects"
+
+[dependencies]
+netform_ir = { version = "0.9.0", path = "../netform_ir" }
+netform_dialect_fortios = { version = "0.9.0", path = "../netform_dialect_fortios" }
+netform_dialect_junos = { version = "0.9.0", path = "../netform_dialect_junos" }
