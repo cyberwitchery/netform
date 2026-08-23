@@ -171,6 +171,8 @@ mod tests {
     use super::*;
     use netform_ir::DialectHint;
     use netform_ir::detect::detect_dialect;
+    use netform_ir::parse_ios_like_parts;
+    use rules::KeyRuleAction;
 
     #[test]
     fn registry_names_are_unique_and_sorted() {
@@ -236,5 +238,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn shared_arms_win_over_a_vendor_rule_on_the_same_head() {
+        const RULES: IosRules = IosRules {
+            interface_types: &["ethernet"],
+            vrf_keyword: "instance",
+            extra_router_protos: &[],
+            key_rules: &[KeyRule {
+                head: "interface",
+                guards: &[],
+                action: KeyRuleAction::key("iface", &[0]),
+            }],
+        };
+
+        let parsed = parse_ios_like_parts("interface Ethernet1");
+        assert_eq!(
+            rule_key_hint(RULES.key_rules, parsed.as_ref()),
+            Some("iface:Ethernet1".into()),
+        );
+        assert_eq!(
+            RULES.key_hint(parsed.as_ref()),
+            Some("interface:ethernet:1".into()),
+        );
     }
 }

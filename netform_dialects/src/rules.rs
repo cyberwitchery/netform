@@ -247,4 +247,20 @@ mod tests {
     fn a_non_content_line_yields_no_hint() {
         assert_eq!(rule_key_hint(RULES, None), None);
     }
+
+    #[test]
+    fn a_claimed_shared_head_does_not_fall_through() {
+        const CLAIMS_NTP: &[KeyRule] = &[KeyRule {
+            head: "ntp",
+            guards: &[ArgGuard::new(0, &["authentication"])],
+            action: KeyRuleAction::key("ntp-authentication", &[1]),
+        }];
+
+        let parsed = parse_ios_like_parts("ntp server 1.2.3.4");
+        assert_eq!(
+            common_key_hint(parsed.as_ref()),
+            Some("ntp:server:1.2.3.4".into()),
+        );
+        assert_eq!(rule_key_hint(CLAIMS_NTP, parsed.as_ref()), None);
+    }
 }
