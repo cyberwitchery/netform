@@ -1,8 +1,8 @@
 //! Cisco IOS XE-oriented dialect profile for `netform_ir`.
 //!
-//! this crate provides [`parse_iosxe`] and the reusable [`IOSXE_DIALECT`]
-//! profile, which customize key-hint derivation for IOS XE-specific constructs
-//! while reusing the shared IOS-like trivia classification and line tokenization.
+//! this crate is the published face of the `iosxe` entry in
+//! [`netform_dialects::REGISTRY`]; the interface-type table, VRF keyword and
+//! key-hint rules it exposes live there as data.
 //!
 //! # Example
 //!
@@ -14,93 +14,26 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::{
-    Document, IosKeyHintConfig, IosLikeDialect, ParsedLineParts, common_key_hint,
-    ios_family_key_hint, parse_with_dialect,
-};
+#[cfg(test)]
+use netform_dialects::iosxe::key_hint as iosxe_key_hint;
+use netform_ir::{Document, IosLikeDialect};
 
-/// pre-built IOS XE dialect profile: IOS-like parsing with IOS XE-specific key hints.
-pub const IOSXE_DIALECT: IosLikeDialect = IosLikeDialect::new("iosxe", iosxe_key_hint);
+/// pre-built Cisco IOS XE dialect profile.
+pub const IOSXE_DIALECT: IosLikeDialect = netform_dialects::iosxe::DIALECT;
 
-/// parse text using the IOS XE dialect ([`IOSXE_DIALECT`]).
+/// parse text using the Cisco IOS XE dialect ([`IOSXE_DIALECT`]).
 pub fn parse_iosxe(input: &str) -> Document {
-    parse_with_dialect(input, &IOSXE_DIALECT)
+    netform_dialects::iosxe::parse(input)
 }
 
-/// IOS XE interface type prefixes in canonical lowercase form.
+/// Cisco IOS XE interface type prefixes in canonical lowercase form.
 ///
-/// longest-prefix-first (see `parse_interface`).
+/// longest-prefix-first (see `netform_ir::parse_interface`).
 ///
 /// public so `netform_cli`'s `detect_guard_coverage` suite can assert that no
 /// entry here is read as IOS XR on slot shape alone; adding a type without
 /// widening `netform_ir::detect`'s guard changes what `--dialect auto` reports.
-pub const IOSXE_INTERFACE_TYPES: &[&str] = &[
-    "appgigabitethernet",
-    "fortygigabitethernet",
-    "fivegigabitethernet",
-    "twogigabitethernet",
-    "tengigabitethernet",
-    "twentyfivegige",
-    "gigabitethernet",
-    "fastethernet",
-    "hundredgige",
-    "port-channel",
-    "loopback",
-    "tunnel",
-    "serial",
-    "vlan",
-    "bdi",
-];
-
-/// IOS XE-specific configuration for [`ios_family_key_hint`].
-const IOSXE_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
-    interface_types: IOSXE_INTERFACE_TYPES,
-    vrf_keyword: "definition",
-    extra_router_protos: &["eigrp", "isis"],
-};
-
-/// derive a stable identity key for IOS XE configuration lines.
-///
-/// delegates `interface`, `vrf`, `router`, and `ip` to
-/// [`ios_family_key_hint`], handles IOS XE-specific constructs (`crypto pki`,
-/// `redundancy`, `parameter-map`, `track`, `zone`, `zone-pair`), then falls
-/// back to [`common_key_hint`] for the remaining shared arms.
-fn iosxe_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
-    if let Some(hint) = ios_family_key_hint(parsed, &IOSXE_KEY_HINT_CONFIG) {
-        return Some(hint);
-    }
-
-    let parsed_ref = parsed?;
-    let head = parsed_ref.head.as_str();
-    let args = parsed_ref.args.as_slice();
-
-    match head {
-        "crypto" => match args {
-            [kind, sub1, sub2, name, ..]
-                if kind == "pki" && sub1 == "certificate" && sub2 == "chain" =>
-            {
-                Some(format!("crypto:pki:certificate-chain:{name}"))
-            }
-            [kind, sub, name, ..] if kind == "pki" => Some(format!("crypto:pki:{sub}:{name}")),
-            _ => common_key_hint(parsed),
-        },
-        "redundancy" => Some("redundancy".into()),
-        "parameter-map" => match args {
-            [sub, kind, name, ..] if sub == "type" => Some(format!("parameter-map:{kind}:{name}")),
-            _ => None,
-        },
-        "track" => args.first().map(|num| format!("track:{num}")),
-        "zone" => match args {
-            [sub, name, ..] if sub == "security" => Some(format!("zone-security:{name}")),
-            _ => None,
-        },
-        "zone-pair" => match args {
-            [sub, name, ..] if sub == "security" => Some(format!("zone-pair:{name}")),
-            _ => None,
-        },
-        _ => common_key_hint(parsed),
-    }
-}
+pub const IOSXE_INTERFACE_TYPES: &[&str] = netform_dialects::iosxe::RULES.interface_types;
 
 #[cfg(test)]
 mod tests {

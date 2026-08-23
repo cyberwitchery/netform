@@ -1,8 +1,8 @@
 //! Cisco NX-OS-oriented dialect profile for `netform_ir`.
 //!
-//! this crate provides [`parse_nxos`] and the reusable [`NXOS_DIALECT`] profile,
-//! which customize key-hint derivation for NX-OS-specific constructs while
-//! reusing the shared IOS-like trivia classification and line tokenization.
+//! this crate is the published face of the `nxos` entry in
+//! [`netform_dialects::REGISTRY`]; the interface-type table, VRF keyword and
+//! key-hint rules it exposes live there as data.
 //!
 //! # Example
 //!
@@ -14,76 +14,26 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::{
-    Document, IosKeyHintConfig, IosLikeDialect, ParsedLineParts, common_key_hint,
-    ios_family_key_hint, parse_with_dialect,
-};
+#[cfg(test)]
+use netform_dialects::nxos::key_hint as nxos_key_hint;
+use netform_ir::{Document, IosLikeDialect};
 
-/// pre-built NX-OS dialect profile: IOS-like parsing with NX-OS-specific key hints.
-pub const NXOS_DIALECT: IosLikeDialect = IosLikeDialect::new("nxos", nxos_key_hint);
+/// pre-built Cisco NX-OS dialect profile.
+pub const NXOS_DIALECT: IosLikeDialect = netform_dialects::nxos::DIALECT;
 
-/// parse text using the NX-OS dialect ([`NXOS_DIALECT`]).
+/// parse text using the Cisco NX-OS dialect ([`NXOS_DIALECT`]).
 pub fn parse_nxos(input: &str) -> Document {
-    parse_with_dialect(input, &NXOS_DIALECT)
+    netform_dialects::nxos::parse(input)
 }
 
-/// NX-OS interface type prefixes in canonical lowercase form.
+/// Cisco NX-OS interface type prefixes in canonical lowercase form.
 ///
-/// longest-prefix-first (see `parse_interface`).
+/// longest-prefix-first (see `netform_ir::parse_interface`).
 ///
 /// public so `netform_cli`'s `detect_guard_coverage` suite can assert that no
 /// entry here is read as IOS XR on slot shape alone; adding a type without
 /// widening `netform_ir::detect`'s guard changes what `--dialect auto` reports.
-pub const NXOS_INTERFACE_TYPES: &[&str] = &[
-    "port-channel",
-    "ethernet",
-    "loopback",
-    "fabric",
-    "tunnel",
-    "vlan",
-    "mgmt",
-    "nve",
-];
-
-/// NX-OS-specific configuration for [`ios_family_key_hint`].
-const NXOS_KEY_HINT_CONFIG: IosKeyHintConfig = IosKeyHintConfig {
-    interface_types: NXOS_INTERFACE_TYPES,
-    vrf_keyword: "context",
-    extra_router_protos: &["eigrp", "isis"],
-};
-
-/// derive a stable identity key for NX-OS configuration lines.
-///
-/// delegates `interface`, `vrf`, `router`, and `ip` to
-/// [`ios_family_key_hint`], handles NX-OS-specific constructs (`feature`,
-/// `vpc`, `role`, `system`), then falls back to [`common_key_hint`] for the
-/// remaining shared arms.
-fn nxos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
-    if let Some(hint) = ios_family_key_hint(parsed, &NXOS_KEY_HINT_CONFIG) {
-        return Some(hint);
-    }
-
-    let parsed_ref = parsed?;
-    let head = parsed_ref.head.as_str();
-    let args = parsed_ref.args.as_slice();
-
-    match head {
-        "feature" => args.first().map(|name| format!("feature:{name}")),
-        "vpc" => match args {
-            [sub, id, ..] if sub == "domain" => Some(format!("vpc-domain:{id}")),
-            _ => None,
-        },
-        "role" => match args {
-            [sub, name, ..] if sub == "name" => Some(format!("role:{name}")),
-            _ => None,
-        },
-        "system" => match args {
-            [sub, ..] => Some(format!("system:{sub}")),
-            _ => None,
-        },
-        _ => common_key_hint(parsed),
-    }
-}
+pub const NXOS_INTERFACE_TYPES: &[&str] = netform_dialects::nxos::RULES.interface_types;
 
 #[cfg(test)]
 mod tests {

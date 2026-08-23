@@ -3,13 +3,9 @@ use std::io::{self, IsTerminal, Read as _};
 use std::path::{Path, PathBuf};
 use std::process;
 
+use clap::builder::TypedValueParser as _;
 use clap::{Parser, ValueEnum};
-use netform_dialect_eos::parse_eos;
-use netform_dialect_fortios::parse_fortios;
-use netform_dialect_iosxe::parse_iosxe;
-use netform_dialect_iosxr::parse_iosxr;
-use netform_dialect_junos::parse_junos;
-use netform_dialect_nxos::parse_nxos;
+use netform_dialects::DialectEntry;
 use netform_diff::{
     ColorChoice, DEFAULT_CONTEXT_LINES, NormalizationStep, NormalizeOptions, OrderPolicy,
     OrderPolicyConfig, OrderPolicyOverride, build_plan, diff_documents, format_markdown_report,
@@ -56,7 +52,7 @@ struct Cli {
 
     /// parser profile: `auto` detects it from the file contents and falls
     /// back to `generic` when the two files disagree.
-    #[arg(long, value_enum, default_value_t = CliDialect::Auto)]
+    #[arg(long, default_value = "auto", value_parser = dialect_value_parser())]
     dialect: CliDialect,
 
     /// output format for the human-readable report.
@@ -101,33 +97,37 @@ enum CliOrderPolicy {
     KeyedStable,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CliDialect {
     Auto,
     Generic,
-    Eos,
-    Fortios,
-    Iosxe,
-    Iosxr,
-    Junos,
-    Nxos,
+    Vendor(&'static DialectEntry),
 }
 
 impl CliDialect {
+    fn from_name(name: &str) -> Self {
+        match name {
+            "auto" => CliDialect::Auto,
+            "generic" => CliDialect::Generic,
+            _ => netform_dialects::find(name).map_or(CliDialect::Generic, CliDialect::Vendor),
+        }
+    }
+
     fn from_hint(hint: &DialectHint) -> Self {
         match hint {
-            DialectHint::Named(name) => match name.as_str() {
-                "eos" => CliDialect::Eos,
-                "fortios" => CliDialect::Fortios,
-                "iosxe" => CliDialect::Iosxe,
-                "iosxr" => CliDialect::Iosxr,
-                "junos" => CliDialect::Junos,
-                "nxos" => CliDialect::Nxos,
-                _ => CliDialect::Generic,
-            },
+            DialectHint::Named(name) => CliDialect::from_name(name),
             _ => CliDialect::Generic,
         }
     }
+}
+
+/// accept `auto`, `generic`, and every vendor in `netform_dialects::REGISTRY`.
+fn dialect_value_parser() -> impl clap::builder::TypedValueParser<Value = CliDialect> {
+    let choices: Vec<&'static str> = ["auto", "generic"]
+        .into_iter()
+        .chain(netform_dialects::names())
+        .collect();
+    clap::builder::PossibleValuesParser::new(choices).map(|name| CliDialect::from_name(&name))
 }
 
 fn parse_policy_override(s: &str) -> Result<OrderPolicyOverride, String> {
@@ -349,12 +349,7 @@ fn parse_config(input: &str, dialect: CliDialect) -> Document {
     match resolved {
         CliDialect::Auto => unreachable!(),
         CliDialect::Generic => parse_generic(input),
-        CliDialect::Eos => parse_eos(input),
-        CliDialect::Fortios => parse_fortios(input),
-        CliDialect::Iosxe => parse_iosxe(input),
-        CliDialect::Iosxr => parse_iosxr(input),
-        CliDialect::Junos => parse_junos(input),
-        CliDialect::Nxos => parse_nxos(input),
+        CliDialect::Vendor(entry) => (entry.parse)(input),
     }
 }
 

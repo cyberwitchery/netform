@@ -9,4 +9,5 @@ homepage = "https://github.com/cyberwitchery/netform"
 documentation = "https://docs.rs/netform_dialect_iosxe"
 
 [dependencies]
+netform_dialects = { version = "0.9.0", path = "../netform_dialects" }
 netform_ir = { version = "0.9.0", path = "../netform_ir" }

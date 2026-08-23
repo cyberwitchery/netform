@@ -20,6 +20,7 @@ netform_dialect_iosxr = { version = "0.9.0", path = "../netform_dialect_iosxr" }
 netform_dialect_junos = { version = "0.9.0", path = "../netform_dialect_junos" }
 netform_dialect_nxos = { version = "0.9.0", path = "../netform_dialect_nxos" }
 netform_dialect_fortios = { version = "0.9.0", path = "../netform_dialect_fortios" }
+netform_dialects = { version = "0.9.0", path = "../netform_dialects" }
 netform_diff = { version = "0.9.0", path = "../netform_diff" }
 netform_ir = { version = "0.9.0", path = "../netform_ir" }
 serde = { version = "1.0", features = ["derive"] }
