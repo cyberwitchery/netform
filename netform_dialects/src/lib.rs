@@ -2,28 +2,40 @@
 //!
 //! a vendor is an entry in [`REGISTRY`], not a crate.  most vendors are
 //! described entirely as data — an interface-type table, a VRF keyword, a set
-//! of router protocols and a list of [`rules::KeyRule`]s — and the IOS-like
-//! parser is driven from that.  vendors whose grammar needs real code (Junos'
-//! brace blocks, FortiOS' `config`/`edit` terminators) keep their own parser
-//! and appear here through [`DialectEntry::parse`], so the registry stays the
-//! single list of vendors either way.
+//! of router protocols, a list of [`rules::KeyRule`]s and the
+//! [`netform_ir::detect::Signal`]s that identify its configuration text — and
+//! the IOS-like parser and [`detect_dialect`] are driven from that.  vendors
+//! whose grammar needs real code (Junos' brace blocks, FortiOS'
+//! `config`/`edit` terminators) keep their own parser and appear here through
+//! [`DialectEntry::parse`], so the registry stays the single list of vendors
+//! either way.
 //!
 //! # Example
 //!
 //! ```rust
+//! use netform_ir::DialectHint;
+//!
 //! let eos = netform_dialects::find("eos").expect("eos is registered");
 //! let doc = (eos.parse)("interface Ethernet1\n   description Uplink\n");
 //! assert_eq!(doc.render(), "interface Ethernet1\n   description Uplink\n");
+//!
+//! assert_eq!(
+//!     netform_dialects::detect_dialect(eos.sample),
+//!     DialectHint::Named("eos".into()),
+//! );
 //! ```
 
 pub mod rules;
 
 pub mod eos;
+pub mod fortios;
 pub mod iosxe;
 pub mod iosxr;
+pub mod junos;
 pub mod nxos;
 
-use netform_ir::{Document, IosKeyHintConfig, ParsedLineParts, ios_family_key_hint};
+use netform_ir::detect::{Signal, SignalTable};
+use netform_ir::{DialectHint, Document, IosKeyHintConfig, ParsedLineParts, ios_family_key_hint};
 use rules::{KeyRule, rule_key_hint};
 
 /// the data an IOS-family vendor needs to derive key hints.
@@ -71,6 +83,8 @@ pub struct DialectEntry {
     pub parse: fn(&str) -> Document,
     /// the vendor's key-hint data, or `None` for a vendor whose parser is code.
     pub rules: Option<&'static IosRules>,
+    /// the patterns [`detect_dialect`] scores this vendor on.
+    pub signals: &'static [Signal],
     /// a short configuration excerpt this vendor's detection signals should
     /// claim, and no other vendor's should.
     pub sample: &'static str,
@@ -90,71 +104,45 @@ pub const REGISTRY: &[DialectEntry] = &[
         name: "eos",
         parse: eos::parse,
         rules: Some(&eos::RULES),
+        signals: eos::SIGNALS,
         sample: eos::SAMPLE,
     },
     DialectEntry {
         name: "fortios",
-        parse: netform_dialect_fortios::parse_fortios,
+        parse: fortios::parse,
         rules: None,
-        sample: FORTIOS_SAMPLE,
+        signals: fortios::SIGNALS,
+        sample: fortios::SAMPLE,
     },
     DialectEntry {
         name: "iosxe",
         parse: iosxe::parse,
         rules: Some(&iosxe::RULES),
+        signals: iosxe::SIGNALS,
         sample: iosxe::SAMPLE,
     },
     DialectEntry {
         name: "iosxr",
         parse: iosxr::parse,
         rules: Some(&iosxr::RULES),
+        signals: iosxr::SIGNALS,
         sample: iosxr::SAMPLE,
     },
     DialectEntry {
         name: "junos",
-        parse: netform_dialect_junos::parse_junos,
+        parse: junos::parse,
         rules: None,
-        sample: JUNOS_SAMPLE,
+        signals: junos::SIGNALS,
+        sample: junos::SAMPLE,
     },
     DialectEntry {
         name: "nxos",
         parse: nxos::parse,
         rules: Some(&nxos::RULES),
+        signals: nxos::SIGNALS,
         sample: nxos::SAMPLE,
     },
 ];
-
-const FORTIOS_SAMPLE: &str = "\
-config system global
-    set hostname \"fw-edge-01\"
-    set timezone 26
-end
-config firewall address
-    edit \"LAN\"
-        set subnet 10.0.0.0 255.255.255.0
-    next
-end
-";
-
-const JUNOS_SAMPLE: &str = "\
-interfaces {
-    ge-0/0/0 {
-        description uplink-core-a;
-        unit 0 {
-            family inet {
-                address 192.0.2.2/30;
-            }
-        }
-    }
-}
-protocols {
-    bgp {
-        group underlay {
-            peer-as 65001;
-        }
-    }
-}
-";
 
 /// look up a vendor by the name `--dialect` spells.
 pub fn find(name: &str) -> Option<&'static DialectEntry> {
@@ -166,11 +154,26 @@ pub fn names() -> impl Iterator<Item = &'static str> {
     REGISTRY.iter().map(|entry| entry.name)
 }
 
+/// detect which registered vendor wrote `input`.
+///
+/// scores every entry in [`REGISTRY`] on its own signals and returns the
+/// winner, or [`DialectHint::Generic`] when none of them is a confident enough
+/// match.  see [`netform_ir::detect`] for the scoring rules.
+pub fn detect_dialect(input: &str) -> DialectHint {
+    let tables: Vec<SignalTable> = REGISTRY
+        .iter()
+        .map(|entry| SignalTable {
+            name: entry.name,
+            signals: entry.signals,
+        })
+        .collect();
+
+    netform_ir::detect::detect_dialect(input, &tables)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::DialectHint;
-    use netform_ir::detect::detect_dialect;
     use netform_ir::parse_ios_like_parts;
     use rules::KeyRuleAction;
 

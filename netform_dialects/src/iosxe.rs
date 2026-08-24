@@ -2,6 +2,7 @@
 
 use crate::IosRules;
 use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
+use netform_ir::detect::{MODERATE_SIGNAL, NameShape, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
 use netform_ir::{Document, IosLikeDialect, ParsedLineParts, parse_with_dialect};
 
 /// IOS XE key-hint data.
@@ -85,6 +86,41 @@ pub fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 pub fn parse(input: &str) -> Document {
     parse_with_dialect(input, &DIALECT)
 }
+
+/// the patterns that make configuration text read as IOS XE: its
+/// speed-prefixed Ethernet naming, extended ACLs, and the dotted-decimal masks
+/// it writes where the other vendors write prefix lengths.
+pub const SIGNALS: &[Signal] = &[
+    Signal {
+        weight: MODERATE_SIGNAL,
+        tests: &[Test::InterfaceName(NameShape::IosxeEthernet)],
+    },
+    Signal {
+        weight: STRONG_SIGNAL,
+        tests: &[Test::StartsWithAny(&["ip access-list extended "])],
+    },
+    Signal {
+        weight: MODERATE_SIGNAL,
+        tests: &[
+            Test::StartsWithAny(&["ip address "]),
+            Test::WordIsDottedMask(3),
+        ],
+    },
+    Signal {
+        weight: MODERATE_SIGNAL,
+        tests: &[
+            Test::StartsWithAny(&["network "]),
+            Test::ContainsAny(&[" mask "]),
+        ],
+    },
+    Signal {
+        weight: WEAK_SIGNAL,
+        tests: &[
+            Test::StartsWithAny(&["permit ", "deny "]),
+            Test::AnyWordIsDottedMask,
+        ],
+    },
+];
 
 /// a canonical IOS XE excerpt.
 pub const SAMPLE: &str = "\
