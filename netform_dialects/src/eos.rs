@@ -2,6 +2,7 @@
 
 use crate::IosRules;
 use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
+use netform_ir::detect::{MODERATE_SIGNAL, NameShape, Signal, Test, WEAK_SIGNAL};
 use netform_ir::{Document, IosLikeDialect, ParsedLineParts, parse_with_dialect};
 
 /// EOS key-hint data.
@@ -62,6 +63,46 @@ pub fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 pub fn parse(input: &str) -> Document {
     parse_with_dialect(input, &DIALECT)
 }
+
+/// the patterns that make configuration text read as EOS: its non-slot
+/// interface naming, CIDR addresses on interfaces, unqualified ACLs and their
+/// sequence-numbered entries.
+pub const SIGNALS: &[Signal] = &[
+    Signal {
+        weight: MODERATE_SIGNAL,
+        tests: &[Test::InterfaceName(NameShape::StartsWithAny(&[
+            "Management",
+        ]))],
+    },
+    Signal {
+        weight: MODERATE_SIGNAL,
+        tests: &[
+            Test::InterfaceName(NameShape::StartsWithAny(&["Ethernet"])),
+            Test::Not(&Test::InterfaceName(NameShape::ContainsSlash)),
+        ],
+    },
+    Signal {
+        weight: MODERATE_SIGNAL,
+        tests: &[
+            Test::StartsWithAny(&["ip address "]),
+            Test::WordContainsSlash(2),
+        ],
+    },
+    Signal {
+        weight: MODERATE_SIGNAL,
+        tests: &[
+            Test::StartsWithAny(&["ip access-list "]),
+            Test::Not(&Test::ContainsAny(&["extended"])),
+        ],
+    },
+    Signal {
+        weight: WEAK_SIGNAL,
+        tests: &[
+            Test::WordIsNumber(0),
+            Test::ContainsAny(&[" permit ", " deny "]),
+        ],
+    },
+];
 
 /// a canonical EOS excerpt.
 pub const SAMPLE: &str = "\

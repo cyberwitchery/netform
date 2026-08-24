@@ -2,6 +2,7 @@
 
 use crate::IosRules;
 use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
+use netform_ir::detect::{MODERATE_SIGNAL, NameShape, STRONG_SIGNAL, Signal, Test};
 use netform_ir::{Document, IosLikeDialect, ParsedLineParts, parse_with_dialect};
 
 /// NX-OS key-hint data.
@@ -54,6 +55,30 @@ pub fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 pub fn parse(input: &str) -> Document {
     parse_with_dialect(input, &DIALECT)
 }
+
+/// the patterns that make configuration text read as NX-OS: `feature`, vPC,
+/// RBAC roles and its plain `Ethernet<slot>/<port>` interface naming.
+pub const SIGNALS: &[Signal] = &[
+    Signal {
+        weight: STRONG_SIGNAL,
+        tests: &[Test::StartsWithAny(&["feature "])],
+    },
+    Signal {
+        weight: STRONG_SIGNAL,
+        tests: &[
+            Test::InterfaceName(NameShape::StartsWithAny(&["Ethernet"])),
+            Test::InterfaceName(NameShape::ContainsSlash),
+        ],
+    },
+    Signal {
+        weight: STRONG_SIGNAL,
+        tests: &[Test::StartsWithAny(&["vpc "])],
+    },
+    Signal {
+        weight: MODERATE_SIGNAL,
+        tests: &[Test::StartsWithAny(&["role name "])],
+    },
+];
 
 /// a canonical NX-OS excerpt.
 pub const SAMPLE: &str = "\

@@ -4,16 +4,14 @@
 //! `netform_ir::detect` scores a four-part `rack/slot/instance/port` interface
 //! name as IOS XR unless the type is one another supported dialect spells, and
 //! it carries its own hand-maintained copy of those spellings — the tables
-//! themselves live in `netform_dialects`, which depends on `netform_ir`, so the
-//! guard cannot read them.  `netform_cli` depends on both, so it is the one
-//! place they can be compared.
+//! themselves live here, in a crate that depends on it, so the guard cannot
+//! read them.
 //!
 //! without this, adding an interface type to the registry silently changes what
 //! `--dialect auto` reports for that vendor's four-part names.
 
-use netform_dialects::{DialectEntry, REGISTRY};
+use netform_dialects::{DialectEntry, REGISTRY, detect_dialect};
 use netform_ir::DialectHint;
-use netform_ir::detect::detect_dialect;
 
 /// every registered vendor with an interface-type table, except IOS XR itself:
 /// the guard exists to keep the *other* vendors' spellings out of IOS XR.

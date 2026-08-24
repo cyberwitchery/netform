@@ -181,8 +181,8 @@ fn main() {
 
     let resolved_dialect = match cli.dialect {
         CliDialect::Auto => {
-            let a_hint = netform_ir::detect::detect_dialect(&a_text);
-            let b_hint = netform_ir::detect::detect_dialect(&b_text);
+            let a_hint = netform_dialects::detect_dialect(&a_text);
+            let b_hint = netform_dialects::detect_dialect(&b_text);
             if a_hint == b_hint {
                 CliDialect::from_hint(&a_hint)
             } else {
@@ -343,7 +343,7 @@ fn auto_parse(input: &str) -> Document {
 
 fn parse_config(input: &str, dialect: CliDialect) -> Document {
     let resolved = match dialect {
-        CliDialect::Auto => CliDialect::from_hint(&netform_ir::detect::detect_dialect(input)),
+        CliDialect::Auto => CliDialect::from_hint(&netform_dialects::detect_dialect(input)),
         other => other,
     };
     match resolved {
