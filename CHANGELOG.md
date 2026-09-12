@@ -1,6 +1,6 @@
 # changelog
 
-## Unreleased
+## [0.10.0] - 2026-09-12
 
 - **breaking:** the six `netform_dialect_*` crates are gone. every vendor netform parses now lives in the new `netform_dialects` crate, one module per vendor: `netform_dialect_junos::parse_junos` is `netform_dialects::junos::parse`, `netform_dialect_eos::EOS_DIALECT` is `netform_dialects::eos::DIALECT`, and each vendor's interface-type table is `netform_dialects::<vendor>::RULES.interface_types`. a vendor is an entry in `netform_dialects::REGISTRY`, so adding one is a module and a registry entry rather than a published crate, a semver surface and a release step
 - **breaking:** `netform_ir::detect::detect_dialect` now takes the signal tables to score against — `detect_dialect(input, &tables)` — since the signals themselves belong to the vendors, which live above `netform_ir`. `netform_dialects::detect_dialect(input)` is the zero-argument form that scores every registered vendor, and is what `--dialect auto` calls. `netform_ir::detect` keeps the scoring rules: the weights (now public), the confidence and margin thresholds, which lines are scorable, and the `Signal`/`Test` vocabulary a vendor's signals are written in

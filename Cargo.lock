@@ -279,7 +279,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "netform_cli"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "clap",
  "netform_dialects",
@@ -291,14 +291,14 @@ dependencies = [
 
 [[package]]
 name = "netform_dialects"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "netform_ir",
 ]
 
 [[package]]
 name = "netform_diff"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "netform_dialects",
  "netform_ir",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "netform_ir"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "serde",
 ]

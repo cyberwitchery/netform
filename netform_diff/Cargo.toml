@@ -1,6 +1,6 @@
 [package]
 name = "netform_diff"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 license = "MIT"
 description = "Deterministic diff engine and reporting primitives for lossless network config IR"
@@ -10,11 +10,11 @@ documentation = "https://docs.rs/netform_diff"
 
 [dependencies]
 owo-colors = "4"
-netform_ir = { version = "0.9.0", path = "../netform_ir" }
+netform_ir = { version = "0.10.0", path = "../netform_ir" }
 serde = { version = "1.0", features = ["derive"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [dev-dependencies]
-netform_dialects = { version = "0.9.0", path = "../netform_dialects" }
+netform_dialects = { version = "0.10.0", path = "../netform_dialects" }
 proptest = "1.11"
 serde_json = "1.0"
