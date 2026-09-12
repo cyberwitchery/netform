@@ -7,12 +7,7 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 - `netform_ir`: core config intermediate representation (ir), parser, and lossless renderer.
 - `netform_diff`: normalization, diff engine, report formatting, and plan/report primitives.
 - `netform_cli`: `config-diff` and replay binaries.
-- `netform_dialect_eos`: eos profile for comment/token handling and dialect-aware parsing.
-- `netform_dialect_iosxe`: iosxe profile for comment/token handling and dialect-aware parsing.
-- `netform_dialect_iosxr`: iosxr profile for comment/token handling and dialect-aware parsing.
-- `netform_dialect_junos`: junos profile for comment/token handling and dialect-aware parsing.
-- `netform_dialect_nxos`: nxos profile for comment/token handling and dialect-aware parsing.
-- `netform_dialect_fortios`: fortios profile for comment/token handling and dialect-aware parsing.
+- `netform_dialects`: the registry of every vendor netform parses, one module per vendor.
 
 ## features
 
@@ -39,12 +34,7 @@ add to `Cargo.toml`:
 [dependencies]
 netform_ir = "0.9.0"
 netform_diff = "0.9.0"
-netform_dialect_eos = "0.9.0"
-netform_dialect_iosxe = "0.9.0"
-netform_dialect_iosxr = "0.9.0"
-netform_dialect_junos = "0.9.0"
-netform_dialect_nxos = "0.9.0"
-netform_dialect_fortios = "0.9.0"
+netform_dialects = "0.9.0"
 ```
 
 install the cli binary so you can run `config-diff` directly:
@@ -62,10 +52,10 @@ cargo install netform_cli
 parse and round-trip:
 
 ```rust
-use netform_dialect_junos::parse_junos;
+use netform_dialects::junos::parse;
 
 let input = "interfaces {\n    ge-0/0/0 {\n        disable;\n    }\n}\n";
-let doc = parse_junos(input);
+let doc = parse(input);
 assert_eq!(doc.render(), input);
 ```
 

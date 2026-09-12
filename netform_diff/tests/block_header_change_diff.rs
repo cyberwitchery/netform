@@ -30,8 +30,8 @@ fn iosxe_class_map_match_type_change_is_detected() {
     let before = "class-map match-any VOICE\n  match dscp ef\n";
     let after = "class-map match-all VOICE\n  match dscp ef\n";
 
-    let left = netform_dialect_iosxe::parse_iosxe(before);
-    let right = netform_dialect_iosxe::parse_iosxe(after);
+    let left = netform_dialects::iosxe::parse(before);
+    let right = netform_dialects::iosxe::parse(after);
     let diff = diff_documents(&left, &right, NormalizeOptions::default()).unwrap();
 
     assert!(
@@ -60,8 +60,8 @@ fn iosxe_ospfv3_process_id_change_is_detected() {
     let before = "router ospfv3 1\n  router-id 10.0.0.1\n";
     let after = "router ospfv3 2\n  router-id 10.0.0.1\n";
 
-    let left = netform_dialect_iosxe::parse_iosxe(before);
-    let right = netform_dialect_iosxe::parse_iosxe(after);
+    let left = netform_dialects::iosxe::parse(before);
+    let right = netform_dialects::iosxe::parse(after);
     let diff = diff_documents(&left, &right, NormalizeOptions::default()).unwrap();
 
     assert!(

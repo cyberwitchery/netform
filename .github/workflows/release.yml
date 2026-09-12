@@ -91,51 +91,11 @@ jobs:
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 
-      - name: publish netform_dialect_iosxe
+      - name: publish netform_dialects
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          out=$(cargo publish -p netform_dialect_iosxe --no-verify 2>&1) && rc=0 || rc=$?
-          echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
-
-      - name: publish netform_dialect_iosxr
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          out=$(cargo publish -p netform_dialect_iosxr --no-verify 2>&1) && rc=0 || rc=$?
-          echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
-
-      - name: publish netform_dialect_eos
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          out=$(cargo publish -p netform_dialect_eos --no-verify 2>&1) && rc=0 || rc=$?
-          echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
-
-      - name: publish netform_dialect_junos
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          out=$(cargo publish -p netform_dialect_junos --no-verify 2>&1) && rc=0 || rc=$?
-          echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
-
-      - name: publish netform_dialect_nxos
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          out=$(cargo publish -p netform_dialect_nxos --no-verify 2>&1) && rc=0 || rc=$?
-          echo "$out"
-          [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
-
-      - name: publish netform_dialect_fortios
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          out=$(cargo publish -p netform_dialect_fortios --no-verify 2>&1) && rc=0 || rc=$?
+          out=$(cargo publish -p netform_dialects --no-verify 2>&1) && rc=0 || rc=$?
           echo "$out"
           [ $rc -eq 0 ] || echo "$out" | grep -qE "already uploaded|already exists on crates\.io"
 

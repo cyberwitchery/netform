@@ -1,10 +1,143 @@
-//! Fortinet FortiOS as registry data.
+//! Fortinet FortiOS: parser and registry data.
 //!
-//! its parser needs real code and stays in `netform_dialect_fortios`; its
-//! detection signals and sample are data and live here.
+//! FortiOS is one of the two vendors whose grammar needs real code rather than
+//! a rule table — `config`/`edit` blocks closed by bare `end`/`next`, and
+//! quoted values that run past the end of a line.  its parser lives here
+//! alongside its detection signals and sample, so the registry entry and the
+//! code it points at are one module.
+//!
+//! # Example
+//!
+//! ```rust
+//! use netform_dialects::fortios::parse;
+//!
+//! let cfg = "config system global\n    set hostname \"fw\"\nend\n";
+//! let doc = parse(cfg);
+//! assert_eq!(doc.render(), cfg);
+//! ```
 
-use netform_ir::Document;
 use netform_ir::detect::{MODERATE_SIGNAL, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
+use netform_ir::{
+    Dialect, DialectHint, Document, LiteralTerminator, ParsedLineParts, TriviaKind,
+    classify_trivia_with_prefixes, ends_inside_quoted_value, parse_ios_like_parts,
+    parse_with_dialect,
+};
+
+/// dialect implementation for FortiOS configuration text.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FortiosDialect;
+
+/// parse text using [`FortiosDialect`].
+pub fn parse(input: &str) -> Document {
+    parse_with_dialect(input, &FortiosDialect)
+}
+
+impl Dialect for FortiosDialect {
+    fn dialect_hint(&self) -> DialectHint {
+        DialectHint::Named("fortios".to_string())
+    }
+
+    fn classify_trivia(&self, raw: &str) -> TriviaKind {
+        classify_fortios_trivia(raw)
+    }
+
+    fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
+        parse_ios_like_parts(raw)
+    }
+
+    fn key_hint(
+        &self,
+        _raw: &str,
+        parsed: Option<&ParsedLineParts>,
+        trivia: TriviaKind,
+    ) -> Option<String> {
+        if trivia != TriviaKind::Content {
+            return None;
+        }
+        fortios_key_hint(parsed)
+    }
+
+    fn block_terminator(&self, raw: &str) -> bool {
+        matches!(raw.trim(), "end" | "next")
+    }
+
+    fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
+        literal_region(raw)
+    }
+}
+
+/// recognize a FortiOS line whose double-quoted value is still open at the end
+/// of the line, and report what closes it.
+///
+/// certificates, private keys and replacement-message buffers are emitted as a
+/// `set <field> "…"` whose value spans many physical lines; the value ends at
+/// the next unescaped double quote.  a self-contained value (`set hostname
+/// "FortiGate"`, `edit "port1"`) and a comment line open no region.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_dialects::fortios::literal_region;
+///
+/// let region = literal_region("    set private-key \"-----BEGIN KEY-----").unwrap();
+/// assert!(region.terminates("-----END KEY-----\""));
+/// assert!(literal_region("    set hostname \"FortiGate\"").is_none());
+/// ```
+pub fn literal_region(raw: &str) -> Option<LiteralTerminator> {
+    if classify_fortios_trivia(raw) != TriviaKind::Content {
+        return None;
+    }
+
+    ends_inside_quoted_value(raw).then_some(LiteralTerminator::UnescapedQuote)
+}
+
+/// classify trivia for FortiOS configs.
+///
+/// lines starting with `#` (after leading whitespace) are comments;
+/// blank/whitespace-only lines are blank; everything else is content.
+fn classify_fortios_trivia(raw: &str) -> TriviaKind {
+    classify_trivia_with_prefixes(raw, &["#"])
+}
+
+/// strip surrounding double-quotes from a token, if present.
+fn unquote(s: &str) -> &str {
+    s.strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(s)
+}
+
+/// derive a stable identity key for FortiOS configuration lines.
+///
+/// recognized patterns:
+/// - `config <section> [<subsection>...]` → `config:<section>[:<subsection>...]`
+/// - `edit <name>` → `edit:<name>` (quotes stripped)
+/// - `set <field> ...` → `set:<field>` (stable across value changes)
+/// - `unset <field>` → `unset:<field>`
+/// - block markers (`end`, `next`) do not get key hints.
+fn fortios_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+    let parsed = parsed?;
+    let head = parsed.head.as_str();
+    let args = parsed.args.as_slice();
+
+    match head {
+        "config" => {
+            if args.is_empty() {
+                return None;
+            }
+            let path = args
+                .iter()
+                .map(|a| unquote(a))
+                .collect::<Vec<_>>()
+                .join(":");
+            Some(format!("config:{path}"))
+        }
+        "edit" => args.first().map(|name| format!("edit:{}", unquote(name))),
+        "set" | "unset" => args
+            .first()
+            .map(|field| format!("{head}:{}", unquote(field))),
+        _ => None,
+    }
+}
 
 /// the patterns that make configuration text read as FortiOS: its
 /// `config`/`edit` block structure, the bare `end`/`next` terminators that
@@ -35,11 +168,6 @@ pub const SIGNALS: &[Signal] = &[
     },
 ];
 
-/// parse text as FortiOS.
-pub fn parse(input: &str) -> Document {
-    netform_dialect_fortios::parse_fortios(input)
-}
-
 /// a canonical FortiOS excerpt.
 pub const SAMPLE: &str = "\
 config system global
@@ -52,3 +180,333 @@ config firewall address
     next
 end
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fortios_hash_comment() {
+        assert_eq!(classify_fortios_trivia("# comment"), TriviaKind::Comment);
+    }
+
+    #[test]
+    fn fortios_indented_hash_comment() {
+        assert_eq!(
+            classify_fortios_trivia("    # indented comment"),
+            TriviaKind::Comment,
+        );
+    }
+
+    #[test]
+    fn fortios_blank_line() {
+        assert_eq!(classify_fortios_trivia(""), TriviaKind::Blank);
+        assert_eq!(classify_fortios_trivia("   "), TriviaKind::Blank);
+    }
+
+    #[test]
+    fn fortios_content_line() {
+        assert_eq!(
+            classify_fortios_trivia("config system global"),
+            TriviaKind::Content,
+        );
+        assert_eq!(
+            classify_fortios_trivia("    set hostname \"FGT\""),
+            TriviaKind::Content,
+        );
+    }
+
+    #[test]
+    fn fortios_bang_is_not_comment() {
+        // FortiOS does not use `!` as a comment prefix (unlike IOS).
+        assert_eq!(classify_fortios_trivia("! note"), TriviaKind::Content);
+    }
+
+    #[test]
+    fn fortios_tokenize_config_line() {
+        let parsed = parse_ios_like_parts("config system global").expect("should parse");
+        assert_eq!(parsed.head, "config");
+        assert_eq!(parsed.args, vec!["system", "global"]);
+    }
+
+    #[test]
+    fn fortios_tokenize_set_quoted() {
+        let parsed =
+            parse_ios_like_parts("    set hostname \"My FortiGate\"").expect("should parse");
+        assert_eq!(parsed.head, "set");
+        assert_eq!(parsed.args, vec!["hostname", "\"My FortiGate\""]);
+    }
+
+    #[test]
+    fn fortios_tokenize_edit_quoted() {
+        let parsed = parse_ios_like_parts("    edit \"all\"").expect("should parse");
+        assert_eq!(parsed.head, "edit");
+        assert_eq!(parsed.args, vec!["\"all\""]);
+    }
+
+    #[test]
+    fn fortios_tokenize_end() {
+        let parsed = parse_ios_like_parts("end").expect("should parse");
+        assert_eq!(parsed.head, "end");
+        assert!(parsed.args.is_empty());
+    }
+
+    #[test]
+    fn fortios_tokenize_set_multivalue() {
+        let parsed =
+            parse_ios_like_parts("    set subnet 10.0.0.0 255.255.255.0").expect("should parse");
+        assert_eq!(parsed.head, "set");
+        assert_eq!(parsed.args, vec!["subnet", "10.0.0.0", "255.255.255.0"]);
+    }
+
+    fn hint(line: &str) -> Option<String> {
+        let parsed = parse_ios_like_parts(line);
+        fortios_key_hint(parsed.as_ref())
+    }
+
+    #[test]
+    fn key_hint_config_two_part() {
+        assert_eq!(
+            hint("config system global"),
+            Some("config:system:global".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_config_one_part() {
+        assert_eq!(
+            hint("config firewall address"),
+            Some("config:firewall:address".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_config_single_section() {
+        assert_eq!(
+            hint("config system interface"),
+            Some("config:system:interface".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_edit_quoted() {
+        assert_eq!(hint("    edit \"port1\""), Some("edit:port1".into()));
+    }
+
+    #[test]
+    fn key_hint_edit_unquoted() {
+        assert_eq!(hint("    edit 1"), Some("edit:1".into()));
+    }
+
+    #[test]
+    fn key_hint_set_field() {
+        assert_eq!(
+            hint("    set hostname \"FGT\""),
+            Some("set:hostname".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_type() {
+        assert_eq!(hint("        set type ipmask"), Some("set:type".into()));
+    }
+
+    #[test]
+    fn key_hint_set_multivalue() {
+        assert_eq!(
+            hint("    set subnet 10.0.0.0 255.255.255.0"),
+            Some("set:subnet".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_quoted_param_unquotes() {
+        assert_eq!(
+            hint("    set \"custom-field\" value"),
+            Some("set:custom-field".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_bare_no_hint() {
+        // bare "set" with no field name — shouldn't happen but must not panic.
+        assert_eq!(hint("    set"), None);
+    }
+
+    #[test]
+    fn key_hint_unset_field() {
+        assert_eq!(hint("    unset comments"), Some("unset:comments".into()));
+    }
+
+    #[test]
+    fn key_hint_unset_uuid() {
+        assert_eq!(hint("        unset uuid"), Some("unset:uuid".into()));
+    }
+
+    #[test]
+    fn key_hint_unset_bare_no_hint() {
+        assert_eq!(hint("    unset"), None);
+    }
+
+    #[test]
+    fn key_hint_set_description_quoted_value() {
+        // the key hint captures the parameter name, not the value.
+        assert_eq!(
+            hint("        set description \"Production web server\""),
+            Some("set:description".into()),
+        );
+    }
+
+    #[test]
+    fn key_hint_set_action() {
+        assert_eq!(hint("        set action accept"), Some("set:action".into()),);
+    }
+
+    #[test]
+    fn key_hint_end_no_hint() {
+        assert_eq!(hint("end"), None);
+    }
+
+    #[test]
+    fn key_hint_next_no_hint() {
+        assert_eq!(hint("    next"), None);
+    }
+
+    #[test]
+    fn key_hint_config_empty_no_hint() {
+        // bare "config" with no section — shouldn't happen in practice but
+        // must not panic.
+        assert_eq!(hint("config"), None);
+    }
+
+    #[test]
+    fn key_hint_none_on_empty() {
+        assert_eq!(fortios_key_hint(None), None);
+    }
+
+    #[test]
+    fn parse_fortios_round_trip() {
+        let cfg = "\
+config system global
+    set hostname \"FortiGate\"
+    set timezone 04
+end
+config firewall address
+    edit \"all\"
+        set uuid abc123
+        set type ipmask
+        set subnet 0.0.0.0 0.0.0.0
+    next
+    edit \"google-play\"
+        set uuid def456
+        set type fqdn
+        set fqdn \"play.google.com\"
+    next
+end
+";
+        let doc = parse(cfg);
+        assert_eq!(doc.render(), cfg);
+    }
+
+    #[test]
+    fn parse_fortios_sets_named_dialect_hint() {
+        let doc = parse("config system global\n    set hostname \"FGT\"\nend\n");
+        assert_eq!(
+            doc.metadata.dialect_hint,
+            DialectHint::Named("fortios".into()),
+        );
+    }
+
+    #[test]
+    fn parse_fortios_with_comments() {
+        let cfg = "# FortiOS configuration\nconfig system global\n    set hostname \"FGT\"\nend\n";
+        let doc = parse(cfg);
+        assert_eq!(doc.render(), cfg);
+    }
+
+    #[test]
+    fn end_and_next_attach_as_block_footers() {
+        use netform_ir::Node;
+
+        let cfg = "\
+config firewall address
+    edit \"all\"
+        set type ipmask
+    next
+end
+";
+        let doc = parse(cfg);
+        assert_eq!(doc.render(), cfg, "round trip must stay byte-for-byte");
+
+        // `end` closes the top-level `config` block and lands in its footer.
+        assert_eq!(doc.roots.len(), 1, "the terminator is no longer a sibling");
+        let Some(Node::Block(config)) = doc.node(doc.roots[0]) else {
+            panic!("expected a config block at the root");
+        };
+        assert_eq!(config.header.raw, "config firewall address");
+        assert_eq!(config.footer.as_ref().map(|f| f.raw.as_str()), Some("end"));
+
+        // `next` closes the nested `edit` block and lands in *its* footer.
+        assert_eq!(config.children.len(), 1);
+        let Some(Node::Block(edit)) = doc.node(config.children[0]) else {
+            panic!("expected an edit block nested in the config block");
+        };
+        assert_eq!(edit.header.raw, "    edit \"all\"");
+        assert_eq!(
+            edit.footer.as_ref().map(|f| f.raw.as_str()),
+            Some("    next"),
+        );
+    }
+
+    #[test]
+    fn literal_region_opens_on_an_unclosed_quoted_value() {
+        assert_eq!(
+            literal_region("        set private-key \"-----BEGIN KEY-----"),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+        assert_eq!(
+            literal_region("        set buffer \"<html>"),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_self_contained_values() {
+        assert_eq!(literal_region("    set hostname \"FortiGate\""), None);
+        assert_eq!(literal_region("    edit \"port1\""), None);
+        assert_eq!(literal_region("config system global"), None);
+        assert_eq!(literal_region("    next"), None);
+        assert_eq!(literal_region(""), None);
+    }
+
+    #[test]
+    fn literal_region_opens_on_an_escaped_quote_in_the_opener() {
+        assert_eq!(
+            literal_region(r#"        set buffer "<a href=\"/help\">Help</a>"#),
+            Some(LiteralTerminator::UnescapedQuote),
+        );
+        assert_eq!(
+            literal_region(r#"        set comment "he said \"hi\"""#),
+            None,
+        );
+    }
+
+    #[test]
+    fn literal_region_declines_a_comment_holding_an_odd_quote() {
+        assert_eq!(literal_region("#config-version=FGT\"6.4"), None);
+    }
+
+    #[test]
+    fn unclosed_config_block_has_no_footer() {
+        use netform_ir::Node;
+
+        // a config left open at EOF still parses; there is simply no footer.
+        let cfg = "config system global\n    set hostname \"FGT\"\n";
+        let doc = parse(cfg);
+        assert_eq!(doc.render(), cfg);
+        let Some(Node::Block(config)) = doc.node(doc.roots[0]) else {
+            panic!("expected a config block");
+        };
+        assert!(config.footer.is_none());
+    }
+}

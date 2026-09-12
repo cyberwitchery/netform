@@ -2,7 +2,7 @@
 //! not structural churn across the file (see `fortios_literal_region` in
 //! netform_dialect_fortios).
 
-use netform_dialect_fortios::parse_fortios;
+use netform_dialects::fortios::parse;
 use netform_diff::{
     Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     diff_documents, finding_code,
@@ -10,7 +10,7 @@ use netform_diff::{
 use netform_ir::{Dialect, LiteralTerminator, Path};
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
-    diff_documents(&parse_fortios(a), &parse_fortios(b), options).unwrap()
+    diff_documents(&parse(a), &parse(b), options).unwrap()
 }
 
 fn keyed_stable() -> NormalizeOptions {
@@ -246,15 +246,12 @@ fn the_ios_family_dialects_open_no_region_on_a_quoted_line() {
     let dialects: Vec<(&str, Option<LiteralTerminator>)> = vec![
         (
             "iosxe",
-            netform_dialect_iosxe::IOSXE_DIALECT.literal_region(quoted),
+            netform_dialects::iosxe::DIALECT.literal_region(quoted),
         ),
-        (
-            "eos",
-            netform_dialect_eos::EOS_DIALECT.literal_region(quoted),
-        ),
+        ("eos", netform_dialects::eos::DIALECT.literal_region(quoted)),
         (
             "nxos",
-            netform_dialect_nxos::NXOS_DIALECT.literal_region(quoted),
+            netform_dialects::nxos::DIALECT.literal_region(quoted),
         ),
     ];
 

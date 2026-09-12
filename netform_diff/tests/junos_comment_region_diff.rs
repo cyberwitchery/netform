@@ -1,12 +1,12 @@
 //! a Junos `/* … */` comment body is a comment for normalization too, so
 //! `--ignore-comments` drops all of it (see `junos_comment_region`).
 
-use netform_dialect_junos::parse_junos;
+use netform_dialects::junos::parse;
 use netform_diff::{Diff, Edit, NormalizationStep, NormalizeOptions, diff_documents};
 use netform_ir::Path;
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
-    diff_documents(&parse_junos(a), &parse_junos(b), options).unwrap()
+    diff_documents(&parse(a), &parse(b), options).unwrap()
 }
 
 fn ignore_comments() -> NormalizeOptions {

@@ -10,13 +10,8 @@ entrypoints:
 how to use this repo:
 
 - parse configs into a lossless `Document` with `netform_ir::parse_generic`
-- parse eos-oriented text with `netform_dialect_eos::parse_eos`
-- parse iosxe-oriented text with `netform_dialect_iosxe::parse_iosxe`
-- parse iosxr-oriented text with `netform_dialect_iosxr::parse_iosxr`
-- parse junos-oriented text with `netform_dialect_junos::parse_junos`
-- parse nxos-oriented text with `netform_dialect_nxos::parse_nxos`
-- parse fortios-oriented text with `netform_dialect_fortios::parse_fortios`
 - render with `Document::render()` to preserve exact line text and endings
+- parse as a specific vendor with `netform_dialects::find(name)` and the `parse` on its entry
 - compare two documents with `netform_diff::diff_documents`
 - emit unified, markdown, or json reports using `netform_cli`'s `config-diff` (dialect auto-detected, or forced with `--dialect`)
 

@@ -1,8 +1,8 @@
-use netform_dialect_iosxr::parse_iosxr;
+use netform_dialects::iosxr::parse;
 use netform_ir::{DialectHint, Node};
 
 fn hint(line: &str) -> Option<String> {
-    let doc = parse_iosxr(&format!("{line}\n"));
+    let doc = parse(&format!("{line}\n"));
     match doc.node(doc.roots[0]).expect("node in arena") {
         Node::Line(l) => l.key_hint.clone(),
         Node::Block(b) => b.header.key_hint.clone(),
@@ -11,7 +11,7 @@ fn hint(line: &str) -> Option<String> {
 
 #[test]
 fn parse_iosxr_sets_named_dialect_hint() {
-    let doc = parse_iosxr("hostname xr-pe-01\n");
+    let doc = parse("hostname xr-pe-01\n");
     assert_eq!(
         doc.metadata.dialect_hint,
         DialectHint::Named("iosxr".into())
@@ -217,7 +217,7 @@ fn key_hint_none_for_unkeyed_lines() {
 
 #[test]
 fn comments_and_blank_lines_are_never_keyed() {
-    let doc = parse_iosxr("!! IOS XR Configuration 7.3.2\n!\n\n");
+    let doc = parse("!! IOS XR Configuration 7.3.2\n!\n\n");
     for id in &doc.roots {
         let Node::Line(line) = doc.node(*id).expect("node in arena") else {
             panic!("comment or blank should not open a block");

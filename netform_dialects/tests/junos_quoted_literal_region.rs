@@ -1,7 +1,7 @@
 //! a Junos multi-line quoted value is opaque text, so its body neither opens
 //! nor closes blocks (see `junos_literal_region`).
 
-use netform_dialect_junos::parse_junos;
+use netform_dialects::junos::parse;
 use netform_ir::{Document, LineNode, Node, NodeId, TriviaKind};
 
 fn lines(doc: &Document) -> Vec<&LineNode> {
@@ -68,7 +68,7 @@ hkiG9w0BBQwwDgQIabcd+/EFGH==
 
 #[test]
 fn a_certificate_keeps_the_blocks_around_it_nested() {
-    let doc = parse_junos(BRACED_CERTIFICATE);
+    let doc = parse(BRACED_CERTIFICATE);
     assert_eq!(doc.render(), BRACED_CERTIFICATE);
 
     let security = only_root(&doc);
@@ -97,7 +97,7 @@ fn a_certificate_keeps_the_blocks_around_it_nested() {
 
 #[test]
 fn a_certificate_body_is_opaque_text() {
-    let doc = parse_junos(BRACED_CERTIFICATE);
+    let doc = parse(BRACED_CERTIFICATE);
 
     assert_eq!(
         literal_texts(&doc),
@@ -135,7 +135,7 @@ security {
     }
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     let security = only_root(&doc);
@@ -162,7 +162,7 @@ morekeymaterial== user@host\"; ## SECRET-DATA
     }
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     let system = only_root(&doc);
@@ -189,7 +189,7 @@ set system login announcement \"Authorized use only
 Second line of the announcement\"
 set system domain-name example.com
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
     assert_eq!(doc.roots.len(), 4);
 
@@ -216,7 +216,7 @@ line two
     };
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     assert_eq!(literal_texts(&doc), vec!["line two", "\";"]);
@@ -236,7 +236,7 @@ system {
 BBBB user@host\"; }
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     let system = only_root(&doc);
@@ -254,7 +254,7 @@ system {
     }
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     assert_eq!(finding_codes(&doc), vec!["unterminated-literal-region"]);
@@ -282,7 +282,7 @@ system {
     host-name router-1;
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     assert!(
@@ -304,7 +304,7 @@ interfaces {
     }
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
     assert!(literal_texts(&doc).is_empty());
     assert!(finding_codes(&doc).is_empty(), "{:?}", finding_codes(&doc));
@@ -326,7 +326,7 @@ end one\";
 end two\";
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     assert_eq!(literal_texts(&doc), vec!["end one\";", "end two\";"]);

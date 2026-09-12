@@ -1,6 +1,6 @@
-use netform_dialect_fortios::parse_fortios;
-use netform_dialect_iosxe::parse_iosxe;
-use netform_dialect_junos::parse_junos;
+use netform_dialects::fortios::parse as parse_fortios;
+use netform_dialects::iosxe::parse as parse_iosxe;
+use netform_dialects::junos::parse as parse_junos;
 use netform_ir::{Path, Span, parse_generic};
 
 use super::{

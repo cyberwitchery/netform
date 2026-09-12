@@ -1,4 +1,4 @@
-use netform_dialect_iosxr::parse_iosxr;
+use netform_dialects::iosxr::parse;
 use netform_ir::{Node, TriviaKind};
 
 const XR_CONFIG: &str = "\
@@ -80,13 +80,13 @@ end
 
 #[test]
 fn parse_iosxr_round_trips_a_full_configuration() {
-    assert_eq!(parse_iosxr(XR_CONFIG).render(), XR_CONFIG);
+    assert_eq!(parse(XR_CONFIG).render(), XR_CONFIG);
 }
 
 #[test]
 fn parse_iosxr_round_trips_crlf_and_a_missing_final_newline() {
     let cfg = "route-policy PASS-ALL\r\n  pass\r\nend-policy";
-    assert_eq!(parse_iosxr(cfg).render(), cfg);
+    assert_eq!(parse(cfg).render(), cfg);
 }
 
 fn root_block<'a>(doc: &'a netform_ir::Document, header: &str) -> &'a netform_ir::BlockNode {
@@ -101,7 +101,7 @@ fn root_block<'a>(doc: &'a netform_ir::Document, header: &str) -> &'a netform_ir
 
 #[test]
 fn end_policy_becomes_the_route_policy_footer() {
-    let doc = parse_iosxr(XR_CONFIG);
+    let doc = parse(XR_CONFIG);
     let block = root_block(&doc, "route-policy CUSTOMER-IN");
 
     assert_eq!(
@@ -116,7 +116,7 @@ fn end_policy_becomes_the_route_policy_footer() {
 
 #[test]
 fn end_set_becomes_the_footer_of_every_set_family() {
-    let doc = parse_iosxr(XR_CONFIG);
+    let doc = parse(XR_CONFIG);
 
     for header in [
         "prefix-set CUSTOMER-PFX",
@@ -137,7 +137,7 @@ fn end_set_becomes_the_footer_of_every_set_family() {
 #[test]
 fn a_terminator_closing_no_block_stays_an_ordinary_line() {
     let cfg = "end-policy\nhostname xr-pe-01\n";
-    let doc = parse_iosxr(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert!(matches!(doc.node(doc.roots[0]), Some(Node::Line(_))));
@@ -146,7 +146,7 @@ fn a_terminator_closing_no_block_stays_an_ordinary_line() {
 #[test]
 fn a_second_terminator_is_not_swallowed_by_an_already_footed_block() {
     let cfg = "route-policy PASS-ALL\n  pass\nend-policy\nend-policy\n";
-    let doc = parse_iosxr(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert_eq!(doc.roots.len(), 2);
@@ -154,7 +154,7 @@ fn a_second_terminator_is_not_swallowed_by_an_already_footed_block() {
 
 #[test]
 fn a_bare_end_is_not_a_terminator() {
-    let doc = parse_iosxr(XR_CONFIG);
+    let doc = parse(XR_CONFIG);
     let block = root_block(&doc, "router bgp 65001");
 
     assert!(block.footer.is_none());
@@ -173,7 +173,7 @@ end-policy
 ^
 hostname xr-pe-01
 ";
-    let doc = parse_iosxr(cfg);
+    let doc = parse(cfg);
 
     let trivia: Vec<(&str, TriviaKind)> = doc
         .roots
@@ -199,7 +199,7 @@ hostname xr-pe-01
 
 #[test]
 fn comment_prefixes_cover_the_double_bang_header() {
-    let doc = parse_iosxr(XR_CONFIG);
+    let doc = parse(XR_CONFIG);
     let first = doc.node(doc.roots[0]).expect("node in arena");
 
     assert!(matches!(
@@ -223,7 +223,7 @@ group G-CORE-INTERFACE
     mtu 9216
 end-group
 ";
-    let doc = parse_iosxr(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     for (header, footer) in [
@@ -249,7 +249,7 @@ class-map match-any VOICE
  end-class-map
 !
 ";
-    let doc = parse_iosxr(cfg);
+    let doc = parse(cfg);
     let block = root_block(&doc, "class-map match-any VOICE");
 
     assert_eq!(doc.render(), cfg);

@@ -2,7 +2,7 @@
 //! it, not structural churn across the file (see `junos_literal_region` in
 //! netform_dialect_junos).
 
-use netform_dialect_junos::parse_junos;
+use netform_dialects::junos::parse;
 use netform_diff::{
     Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     diff_documents, finding_code,
@@ -10,7 +10,7 @@ use netform_diff::{
 use netform_ir::{Dialect, Path};
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
-    diff_documents(&parse_junos(a), &parse_junos(b), options).unwrap()
+    diff_documents(&parse(a), &parse(b), options).unwrap()
 }
 
 fn keyed_stable() -> NormalizeOptions {
@@ -240,20 +240,14 @@ fn the_ios_family_dialects_open_no_region_on_a_junos_quoted_line() {
     let quoted = "                certificate \"-----BEGIN CERTIFICATE-----";
 
     assert!(
-        netform_dialect_junos::JunosDialect
+        netform_dialects::junos::JunosDialect
             .literal_region(quoted)
             .is_some()
     );
     assert_eq!(
-        netform_dialect_iosxe::IOSXE_DIALECT.literal_region(quoted),
+        netform_dialects::iosxe::DIALECT.literal_region(quoted),
         None,
     );
-    assert_eq!(
-        netform_dialect_eos::EOS_DIALECT.literal_region(quoted),
-        None
-    );
-    assert_eq!(
-        netform_dialect_nxos::NXOS_DIALECT.literal_region(quoted),
-        None,
-    );
+    assert_eq!(netform_dialects::eos::DIALECT.literal_region(quoted), None);
+    assert_eq!(netform_dialects::nxos::DIALECT.literal_region(quoted), None,);
 }

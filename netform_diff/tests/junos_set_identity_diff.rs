@@ -2,7 +2,7 @@
 //!
 //! the value-change cases pin identities that are deliberately kept coarse.
 
-use netform_dialect_junos::parse_junos;
+use netform_dialects::junos::parse;
 use netform_diff::{
     Diff, Edit, NormalizeOptions, OrderPolicy, OrderPolicyConfig, diff_documents, finding_code,
 };
@@ -15,7 +15,7 @@ fn keyed_stable() -> NormalizeOptions {
 }
 
 fn diff(before: &str, after: &str) -> Diff {
-    diff_documents(&parse_junos(before), &parse_junos(after), keyed_stable())
+    diff_documents(&parse(before), &parse(after), keyed_stable())
         .expect("junos configs should diff")
 }
 

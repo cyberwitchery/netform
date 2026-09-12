@@ -2,14 +2,14 @@
 //! `Dialect::literal_region` in netform_ir).  these tests parse real IOS XE
 //! configs and exercise `diff_documents` end to end.
 
-use netform_dialect_iosxe::parse_iosxe;
+use netform_dialects::iosxe::parse;
 use netform_diff::{
     Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     diff_documents, finding_code,
 };
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
-    diff_documents(&parse_iosxe(a), &parse_iosxe(b), options).unwrap()
+    diff_documents(&parse(a), &parse(b), options).unwrap()
 }
 
 fn ignore_comments() -> NormalizeOptions {

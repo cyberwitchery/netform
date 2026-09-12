@@ -107,7 +107,7 @@ fn nxos_strategy() -> impl Strategy<Value = String> {
 
 /// generate EOS config snippets that exercise dialect-specific key hints.
 ///
-/// EOS has its own dedicated `EOS_DIALECT` profile with EOS-specific constructs
+/// EOS has its own dedicated `DIALECT` profile with EOS-specific constructs
 /// like `mlag configuration`, `management api`, `daemon`, `event-handler`,
 /// `peer-filter`, and interface type normalization.
 ///
@@ -209,7 +209,7 @@ proptest! {
 
     #[test]
     fn self_diff_has_no_changes_eos(input in ios_like_strategy()) {
-        let dialect = netform_dialect_eos::EOS_DIALECT;
+        let dialect = netform_dialects::eos::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "EOS self-diff should report no changes");
@@ -217,7 +217,7 @@ proptest! {
 
     #[test]
     fn self_diff_has_no_changes_eos_dialect_constructs(input in eos_strategy()) {
-        let dialect = netform_dialect_eos::EOS_DIALECT;
+        let dialect = netform_dialects::eos::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "EOS self-diff (dialect constructs) should report no changes");
@@ -225,7 +225,7 @@ proptest! {
 
     #[test]
     fn self_diff_has_no_changes_nxos(input in ios_like_strategy()) {
-        let dialect = netform_dialect_nxos::NXOS_DIALECT;
+        let dialect = netform_dialects::nxos::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "NX-OS self-diff should report no changes");
@@ -233,7 +233,7 @@ proptest! {
 
     #[test]
     fn self_diff_has_no_changes_nxos_dialect_constructs(input in nxos_strategy()) {
-        let dialect = netform_dialect_nxos::NXOS_DIALECT;
+        let dialect = netform_dialects::nxos::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "NX-OS self-diff (dialect constructs) should report no changes");
@@ -241,7 +241,7 @@ proptest! {
 
     #[test]
     fn self_diff_has_no_changes_iosxe(input in ios_like_strategy()) {
-        let dialect = netform_dialect_iosxe::IOSXE_DIALECT;
+        let dialect = netform_dialects::iosxe::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "IOS-XE self-diff should report no changes");
@@ -249,7 +249,7 @@ proptest! {
 
     #[test]
     fn self_diff_has_no_changes_fortios(input in fortios_strategy()) {
-        let dialect = netform_dialect_fortios::FortiosDialect;
+        let dialect = netform_dialects::fortios::FortiosDialect;
         let doc = parse_with_dialect(&input, &dialect);
         let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "FortiOS self-diff should report no changes");
@@ -257,7 +257,7 @@ proptest! {
 
     #[test]
     fn self_diff_has_no_changes_junos(input in junos_strategy()) {
-        let dialect = netform_dialect_junos::JunosDialect;
+        let dialect = netform_dialects::junos::JunosDialect;
         let doc = parse_with_dialect(&input, &dialect);
         let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
         prop_assert!(!diff.has_changes, "Junos self-diff should report no changes");
@@ -298,49 +298,49 @@ proptest! {
 
     #[test]
     fn eos_roundtrip(input in ios_like_strategy()) {
-        let doc = parse_with_dialect(&input, &netform_dialect_eos::EOS_DIALECT);
+        let doc = parse_with_dialect(&input, &netform_dialects::eos::DIALECT);
         prop_assert_eq!(doc.render(), input, "EOS round-trip should be lossless");
     }
 
     #[test]
     fn eos_roundtrip_dialect_constructs(input in eos_strategy()) {
-        let doc = parse_with_dialect(&input, &netform_dialect_eos::EOS_DIALECT);
+        let doc = parse_with_dialect(&input, &netform_dialects::eos::DIALECT);
         prop_assert_eq!(doc.render(), input, "EOS round-trip (dialect constructs) should be lossless");
     }
 
     #[test]
     fn nxos_roundtrip(input in ios_like_strategy()) {
-        let doc = parse_with_dialect(&input, &netform_dialect_nxos::NXOS_DIALECT);
+        let doc = parse_with_dialect(&input, &netform_dialects::nxos::DIALECT);
         prop_assert_eq!(doc.render(), input, "NX-OS round-trip should be lossless");
     }
 
     #[test]
     fn nxos_roundtrip_dialect_constructs(input in nxos_strategy()) {
-        let doc = parse_with_dialect(&input, &netform_dialect_nxos::NXOS_DIALECT);
+        let doc = parse_with_dialect(&input, &netform_dialects::nxos::DIALECT);
         prop_assert_eq!(doc.render(), input, "NX-OS round-trip (dialect constructs) should be lossless");
     }
 
     #[test]
     fn iosxe_roundtrip(input in ios_like_strategy()) {
-        let doc = netform_dialect_iosxe::parse_iosxe(&input);
+        let doc = netform_dialects::iosxe::parse(&input);
         prop_assert_eq!(doc.render(), input, "IOS-XE round-trip should be lossless");
     }
 
     #[test]
     fn fortios_roundtrip(input in fortios_strategy()) {
-        let doc = netform_dialect_fortios::parse_fortios(&input);
+        let doc = netform_dialects::fortios::parse(&input);
         prop_assert_eq!(doc.render(), input, "FortiOS round-trip should be lossless");
     }
 
     #[test]
     fn junos_roundtrip(input in junos_strategy()) {
-        let doc = netform_dialect_junos::parse_junos(&input);
+        let doc = netform_dialects::junos::parse(&input);
         prop_assert_eq!(doc.render(), input, "Junos round-trip should be lossless");
     }
 
     #[test]
     fn nxos_key_hints_produced(input in nxos_strategy()) {
-        let dialect = netform_dialect_nxos::NXOS_DIALECT;
+        let dialect = netform_dialects::nxos::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let view = build_comparison_view(&doc, &NormalizeOptions::default());
         let hints: Vec<&str> = view
@@ -354,7 +354,7 @@ proptest! {
 
     #[test]
     fn eos_key_hints_produced(input in eos_strategy()) {
-        let dialect = netform_dialect_eos::EOS_DIALECT;
+        let dialect = netform_dialects::eos::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let view = build_comparison_view(&doc, &NormalizeOptions::default());
         let hints: Vec<&str> = view
@@ -367,7 +367,7 @@ proptest! {
 
     #[test]
     fn nxos_exposed_key_hints_come_from_known_constructs(input in nxos_strategy()) {
-        let dialect = netform_dialect_nxos::NXOS_DIALECT;
+        let dialect = netform_dialects::nxos::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let view = build_comparison_view(&doc, &NormalizeOptions::default());
         // every exposed hint must come from a block construct the strategy
@@ -391,7 +391,7 @@ proptest! {
 
     #[test]
     fn eos_exposed_key_hints_come_from_known_constructs(input in eos_strategy()) {
-        let dialect = netform_dialect_eos::EOS_DIALECT;
+        let dialect = netform_dialects::eos::DIALECT;
         let doc = parse_with_dialect(&input, &dialect);
         let view = build_comparison_view(&doc, &NormalizeOptions::default());
         // every exposed hint must come from a block construct the strategy
@@ -443,7 +443,7 @@ system jumbomtu
 interface Ethernet1/1
   description uplink
 ";
-    let dialect = netform_dialect_nxos::NXOS_DIALECT;
+    let dialect = netform_dialects::nxos::DIALECT;
     let doc = parse_with_dialect(input, &dialect);
     let view = build_comparison_view(&doc, &NormalizeOptions::default());
     let hints: Vec<&str> = view
@@ -499,7 +499,7 @@ interface Ethernet1
 interface Management1
   ip address 10.0.0.1/24
 ";
-    let dialect = netform_dialect_eos::EOS_DIALECT;
+    let dialect = netform_dialects::eos::DIALECT;
     let doc = parse_with_dialect(input, &dialect);
     let view = build_comparison_view(&doc, &NormalizeOptions::default());
     let hints: Vec<&str> = view
@@ -558,7 +558,7 @@ feature vpc
 ntp server 10.0.0.1
 ntp peer 172.16.0.1
 ";
-    let dialect = netform_dialect_nxos::NXOS_DIALECT;
+    let dialect = netform_dialects::nxos::DIALECT;
     let doc = parse_with_dialect(input, &dialect);
     let view = build_comparison_view(&doc, &NormalizeOptions::default());
 

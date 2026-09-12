@@ -28,8 +28,8 @@ fn nxos_eigrp_as_change_is_detected() {
     let before = "router eigrp 100\n  router-id 10.0.0.1\n";
     let after = "router eigrp 200\n  router-id 10.0.0.1\n";
 
-    let left = netform_dialect_nxos::parse_nxos(before);
-    let right = netform_dialect_nxos::parse_nxos(after);
+    let left = netform_dialects::nxos::parse(before);
+    let right = netform_dialects::nxos::parse(after);
     let diff = diff_documents(&left, &right, NormalizeOptions::default()).unwrap();
 
     assert!(
@@ -53,8 +53,8 @@ fn eos_eigrp_as_change_is_detected() {
     let before = "router eigrp 100\n  router-id 10.0.0.1\n";
     let after = "router eigrp 200\n  router-id 10.0.0.1\n";
 
-    let left = netform_dialect_eos::parse_eos(before);
-    let right = netform_dialect_eos::parse_eos(after);
+    let left = netform_dialects::eos::parse(before);
+    let right = netform_dialects::eos::parse(after);
     let diff = diff_documents(&left, &right, NormalizeOptions::default()).unwrap();
 
     assert!(
@@ -78,8 +78,8 @@ fn iosxe_isis_tag_change_is_detected() {
     let before = "router isis AREA-A\n  net 49.0001.0000.0000.0001.00\n";
     let after = "router isis AREA-B\n  net 49.0001.0000.0000.0001.00\n";
 
-    let left = netform_dialect_iosxe::parse_iosxe(before);
-    let right = netform_dialect_iosxe::parse_iosxe(after);
+    let left = netform_dialects::iosxe::parse(before);
+    let right = netform_dialects::iosxe::parse(after);
     let diff = diff_documents(&left, &right, NormalizeOptions::default()).unwrap();
 
     assert!(

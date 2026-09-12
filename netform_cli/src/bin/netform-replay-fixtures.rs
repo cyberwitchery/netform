@@ -1,12 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-use netform_dialect_eos::parse_eos;
-use netform_dialect_fortios::parse_fortios;
-use netform_dialect_iosxe::parse_iosxe;
-use netform_dialect_iosxr::parse_iosxr;
-use netform_dialect_junos::parse_junos;
-use netform_dialect_nxos::parse_nxos;
 use netform_diff::{NormalizeOptions, OrderPolicyConfig, diff_documents};
 use netform_ir::{Document, parse_generic};
 use serde::Deserialize;
@@ -30,17 +24,16 @@ struct Expected {
     finding_codes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum FixtureDialect {
-    #[default]
-    Generic,
-    Eos,
-    Fortios,
-    Iosxe,
-    Iosxr,
-    Junos,
-    Nxos,
+/// the vendor a fixture is written in, as `netform_dialects::REGISTRY` spells
+/// it; `generic` for the vendor-neutral parser.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(transparent)]
+struct FixtureDialect(String);
+
+impl Default for FixtureDialect {
+    fn default() -> Self {
+        Self("generic".into())
+    }
 }
 
 fn edit_type_name(edit: &netform_diff::Edit) -> &'static str {
@@ -71,8 +64,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let raw = fs::read_to_string(&path)?;
         let fixture: Fixture = serde_json::from_str(&raw)?;
 
-        let intended = parse_config(&fixture.intended, fixture.dialect);
-        let actual = parse_config(&fixture.actual, fixture.dialect);
+        let intended = parse_config(&fixture.intended, &fixture.dialect)
+            .map_err(|e| format!("fixture {}: {e}", fixture.name))?;
+        let actual = parse_config(&fixture.actual, &fixture.dialect)
+            .map_err(|e| format!("fixture {}: {e}", fixture.name))?;
 
         let options = NormalizeOptions::new(fixture.normalization_steps)
             .with_order_policy(fixture.order_policy);
@@ -120,14 +115,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn parse_config(input: &str, dialect: FixtureDialect) -> Document {
-    match dialect {
-        FixtureDialect::Generic => parse_generic(input),
-        FixtureDialect::Eos => parse_eos(input),
-        FixtureDialect::Fortios => parse_fortios(input),
-        FixtureDialect::Iosxe => parse_iosxe(input),
-        FixtureDialect::Iosxr => parse_iosxr(input),
-        FixtureDialect::Junos => parse_junos(input),
-        FixtureDialect::Nxos => parse_nxos(input),
+fn parse_config(input: &str, dialect: &FixtureDialect) -> Result<Document, String> {
+    if dialect.0 == "generic" {
+        return Ok(parse_generic(input));
     }
+
+    netform_dialects::find(&dialect.0)
+        .map(|entry| (entry.parse)(input))
+        .ok_or_else(|| format!("unknown dialect `{}`", dialect.0))
 }

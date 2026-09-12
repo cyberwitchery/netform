@@ -2,12 +2,12 @@
 //! shared ACL number (see `common_key_hint` in netform_ir).  these tests parse
 //! real IOS XE configs and exercise `diff_documents` end to end.
 
-use netform_dialect_iosxe::parse_iosxe;
+use netform_dialects::iosxe::parse;
 use netform_diff::{Diff, Edit, NormalizeOptions, diff_documents};
 
 fn diff(a: &str, b: &str) -> Diff {
-    let left = parse_iosxe(a);
-    let right = parse_iosxe(b);
+    let left = parse(a);
+    let right = parse(b);
     // NormalizeOptions::default() uses the Ordered policy.
     diff_documents(&left, &right, NormalizeOptions::default()).unwrap()
 }

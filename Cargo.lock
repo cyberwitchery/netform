@@ -282,12 +282,6 @@ name = "netform_cli"
 version = "0.9.0"
 dependencies = [
  "clap",
- "netform_dialect_eos",
- "netform_dialect_fortios",
- "netform_dialect_iosxe",
- "netform_dialect_iosxr",
- "netform_dialect_junos",
- "netform_dialect_nxos",
  "netform_dialects",
  "netform_diff",
  "netform_ir",
@@ -296,57 +290,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "netform_dialect_eos"
-version = "0.9.0"
-dependencies = [
- "netform_dialects",
- "netform_ir",
-]
-
-[[package]]
-name = "netform_dialect_fortios"
-version = "0.9.0"
-dependencies = [
- "netform_ir",
-]
-
-[[package]]
-name = "netform_dialect_iosxe"
-version = "0.9.0"
-dependencies = [
- "netform_dialects",
- "netform_ir",
-]
-
-[[package]]
-name = "netform_dialect_iosxr"
-version = "0.9.0"
-dependencies = [
- "netform_dialects",
- "netform_ir",
-]
-
-[[package]]
-name = "netform_dialect_junos"
-version = "0.9.0"
-dependencies = [
- "netform_ir",
-]
-
-[[package]]
-name = "netform_dialect_nxos"
-version = "0.9.0"
-dependencies = [
- "netform_dialects",
- "netform_ir",
-]
-
-[[package]]
 name = "netform_dialects"
 version = "0.9.0"
 dependencies = [
- "netform_dialect_fortios",
- "netform_dialect_junos",
  "netform_ir",
 ]
 
@@ -354,11 +300,7 @@ dependencies = [
 name = "netform_diff"
 version = "0.9.0"
 dependencies = [
- "netform_dialect_eos",
- "netform_dialect_fortios",
- "netform_dialect_iosxe",
- "netform_dialect_junos",
- "netform_dialect_nxos",
+ "netform_dialects",
  "netform_ir",
  "owo-colors",
  "proptest",

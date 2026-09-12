@@ -1,7 +1,7 @@
 //! a FortiOS multi-line quoted value is opaque free text, not configuration
 //! (see `fortios_literal_region`).
 
-use netform_dialect_fortios::parse_fortios;
+use netform_dialects::fortios::parse;
 use netform_ir::{Document, Node, NodeId, TriviaKind};
 
 const CERTIFICATE: &str = "\
@@ -55,7 +55,7 @@ fn line(doc: &Document, id: NodeId) -> &netform_ir::LineNode {
 
 #[test]
 fn certificate_body_stays_inside_the_edit_block() {
-    let doc = parse_fortios(CERTIFICATE);
+    let doc = parse(CERTIFICATE);
 
     assert_eq!(doc.roots.len(), 1);
     let config = block(&doc, doc.roots[0]);
@@ -87,7 +87,7 @@ fn certificate_body_stays_inside_the_edit_block() {
 
 #[test]
 fn opener_stays_content_and_body_lines_are_literal() {
-    let doc = parse_fortios(CERTIFICATE);
+    let doc = parse(CERTIFICATE);
 
     assert_eq!(
         line_kinds(&doc),
@@ -122,7 +122,7 @@ fn opener_stays_content_and_body_lines_are_literal() {
 
 #[test]
 fn body_lines_carry_no_tokenization_or_key_hint() {
-    let doc = parse_fortios(CERTIFICATE);
+    let doc = parse(CERTIFICATE);
 
     let mut checked = 0usize;
     for node in &doc.arena {
@@ -139,7 +139,7 @@ fn body_lines_carry_no_tokenization_or_key_hint() {
 
 #[test]
 fn round_trip_stays_byte_identical() {
-    assert_eq!(parse_fortios(CERTIFICATE).render(), CERTIFICATE);
+    assert_eq!(parse(CERTIFICATE).render(), CERTIFICATE);
 }
 
 #[test]
@@ -156,7 +156,7 @@ config system global
     set hostname \"FortiGate\"
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert_eq!(doc.roots.len(), 2, "{:?}", line_kinds(&doc));
@@ -195,7 +195,7 @@ config system replacemsg webproxy \"deny\"
 </style>\"
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     let hash = line_kinds(&doc)
@@ -214,7 +214,7 @@ config system replacemsg admin \"pre_admin-disclaimer-text\"
 bottom\"
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert!(
@@ -234,7 +234,7 @@ config system replacemsg webproxy \"deny\"
     set header http
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert_eq!(
@@ -258,7 +258,7 @@ config system replacemsg webproxy \"deny\"
 Help</a>\"
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert_eq!(
@@ -280,7 +280,7 @@ a trailing backslash \\\\\"
     set hostname \"FortiGate\"
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert_eq!(
@@ -303,7 +303,7 @@ config firewall address
     next
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert!(
@@ -324,7 +324,7 @@ config system global
     set timezone 04
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     let findings = &doc.metadata.parse_findings;
@@ -348,7 +348,7 @@ config system global
     set hostname \"FortiGate\"
 end
 ";
-    let doc = parse_fortios(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert!(doc.metadata.parse_findings.is_empty());

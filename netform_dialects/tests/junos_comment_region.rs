@@ -1,7 +1,7 @@
 //! a Junos `/* … */` comment is prose, so nothing in its body is read as
 //! configuration (see `junos_comment_region`).
 
-use netform_dialect_junos::parse_junos;
+use netform_dialects::junos::parse;
 use netform_ir::{Document, LineNode, Node, TriviaKind};
 
 fn lines(doc: &Document) -> Vec<&LineNode> {
@@ -77,8 +77,8 @@ protocols {
 
 #[test]
 fn an_inch_mark_in_comment_prose_parses_as_the_same_document_as_plain_text() {
-    let with_inch_mark = parse_junos(RACK_NOTE);
-    let control = parse_junos(&RACK_NOTE.replace("19\" cabinet", "19in cabinet"));
+    let with_inch_mark = parse(RACK_NOTE);
+    let control = parse(&RACK_NOTE.replace("19\" cabinet", "19in cabinet"));
 
     assert_eq!(with_inch_mark.render(), RACK_NOTE);
     assert_eq!(with_inch_mark.roots.len(), control.roots.len());
@@ -107,7 +107,7 @@ fn an_inch_mark_in_comment_prose_parses_as_the_same_document_as_plain_text() {
 
 #[test]
 fn comment_body_lines_are_comments() {
-    let doc = parse_junos(RACK_NOTE);
+    let doc = parse(RACK_NOTE);
 
     assert_eq!(
         trivia_kinds(&doc, TriviaKind::Comment),
@@ -139,7 +139,7 @@ system {
     host-name router-1;
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
 
     assert_eq!(doc.render(), cfg);
     assert!(finding_codes(&doc).is_empty(), "{:?}", finding_codes(&doc));
@@ -157,7 +157,7 @@ interfaces {
     }
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
     assert!(finding_codes(&doc).is_empty(), "{:?}", finding_codes(&doc));
     assert_eq!(doc.roots.len(), 1);
@@ -190,7 +190,7 @@ system {
     host-name router-1;
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
     assert_eq!(doc.roots.len(), 4, "three comment lines and `system`");
     assert!(key_hints(&doc) == vec!["system"], "{:?}", key_hints(&doc));
@@ -206,7 +206,7 @@ interfaces {
     }
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
     assert_eq!(key_hints(&doc), vec!["interfaces"]);
     assert!(finding_codes(&doc).is_empty(), "{:?}", finding_codes(&doc));
@@ -220,7 +220,7 @@ fn configuration_sharing_a_line_with_the_closing_marker_stays_comment_body() {
     host-name router-1;
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     assert_eq!(
@@ -243,7 +243,7 @@ system {
     host-name router-1;
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     assert_eq!(finding_codes(&doc), vec!["unterminated-comment-region"]);
@@ -267,7 +267,7 @@ morekeymaterial== user@host\";
     }
 }
 ";
-    let doc = parse_junos(cfg);
+    let doc = parse(cfg);
     assert_eq!(doc.render(), cfg);
 
     assert_eq!(

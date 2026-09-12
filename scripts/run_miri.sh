@@ -41,8 +41,7 @@ if [[ "${1:-}" == "--full" ]]; then
   # on macOS, Miri does not support std::process spawning (posix_spawnattr_init),
   # so we intentionally exclude subprocess-based cli_smoke integration tests.
   cargo +"${TOOLCHAIN}" miri test -p netform_ir --all-targets
-  cargo +"${TOOLCHAIN}" miri test -p netform_dialect_iosxe --all-targets
-  cargo +"${TOOLCHAIN}" miri test -p netform_dialect_junos --all-targets
+  cargo +"${TOOLCHAIN}" miri test -p netform_dialects --all-targets
   cargo +"${TOOLCHAIN}" miri test -p netform_diff --lib --bins
   cargo +"${TOOLCHAIN}" miri test -p netform_diff --test contract_shape
   cargo +"${TOOLCHAIN}" miri test -p netform_diff --test determinism_corpus
@@ -56,5 +55,4 @@ echo "Running Miri-safe subset..."
 # keep this subset isolation-safe: no subprocess spawning, no testdata directory scans.
 cargo +"${TOOLCHAIN}" miri test -p netform_diff --lib
 cargo +"${TOOLCHAIN}" miri test -p netform_ir --test round_trip --test parser_structure
-cargo +"${TOOLCHAIN}" miri test -p netform_dialect_iosxe --all-targets
-cargo +"${TOOLCHAIN}" miri test -p netform_dialect_junos --all-targets
+cargo +"${TOOLCHAIN}" miri test -p netform_dialects --all-targets
