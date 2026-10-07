@@ -48,6 +48,17 @@ fn records_applied_normalization_steps() {
 }
 
 #[test]
+fn collapse_internal_whitespace_ignores_single_tab_separator() {
+    let a = parse_generic("interface\tGi0/1\n");
+    let b = parse_generic("interface Gi0/1\n");
+    let options = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
+
+    let diff = diff_documents(&a, &b, options).unwrap();
+    assert!(!diff.has_changes);
+    assert!(diff.edits.is_empty());
+}
+
+#[test]
 fn block_aware_diff_only_reports_changed_children() {
     let a = parse_generic("interface Ethernet1\n  description old\n  mtu 9000\n");
     let b = parse_generic("interface Ethernet1\n  description new\n  mtu 9000\n");

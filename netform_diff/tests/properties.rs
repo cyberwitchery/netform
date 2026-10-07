@@ -13,6 +13,22 @@ fn text_strategy() -> impl Strategy<Value = String> {
     })
 }
 
+/// generate one line twice, its words separated by different runs of spaces and tabs.
+fn respaced_line_strategy() -> impl Strategy<Value = (String, String)> {
+    let word = || prop::string::string_regex("[a-z0-9/.-]{1,8}").expect("valid regex");
+    let sep = || prop::string::string_regex("[ \t]{1,3}").expect("valid regex");
+    (word(), prop::collection::vec((sep(), sep(), word()), 0..5)).prop_map(|(first, rest)| {
+        let (mut a, mut b) = (first.clone(), first);
+        for (sep_a, sep_b, word) in rest {
+            a.push_str(&sep_a);
+            a.push_str(&word);
+            b.push_str(&sep_b);
+            b.push_str(&word);
+        }
+        (a, b)
+    })
+}
+
 /// generate IOS-like config snippets with realistic structure.
 fn ios_like_strategy() -> impl Strategy<Value = String> {
     let iface_name = prop::sample::select(vec![
@@ -294,6 +310,13 @@ proptest! {
         let diff1 = diff_documents(&doc, &doc, opts.clone()).unwrap();
         let diff2 = diff_documents(&doc, &doc, opts).unwrap();
         prop_assert_eq!(diff1, diff2, "all-step normalization should be idempotent");
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_ignores_respacing((a, b) in respaced_line_strategy()) {
+        let opts = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
+        let diff = diff_documents(&parse_generic(&a), &parse_generic(&b), opts).unwrap();
+        prop_assert!(!diff.has_changes, "{:?} and {:?} should compare equal", a, b);
     }
 
     #[test]

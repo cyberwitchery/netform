@@ -63,7 +63,7 @@ pub(crate) fn normalize_for_compare(
                         collapsed.push(' ');
                         collapsed.push_str(word);
                     }
-                    if collapsed.len() != body.len() {
+                    if collapsed != body {
                         output = Cow::Owned(format!("{}{collapsed}", &output[..leading_len]));
                     }
                 }
@@ -120,5 +120,26 @@ mod tests {
             collapse("  description   uplink   port"),
             "  description uplink port"
         );
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_single_tab_separators() {
+        assert_eq!(collapse("interface\tGi0/1"), "interface Gi0/1");
+        assert_eq!(collapse("set\tx\ty"), "set x y");
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_mixed_single_byte_separators() {
+        assert_eq!(collapse("  set\tx y\tz"), "  set x y z");
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_vertical_tab_and_form_feed() {
+        assert_eq!(collapse("a\x0bb\x0cc"), "a b c");
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_keeps_canonical_line() {
+        assert_eq!(collapse("  description uplink"), "  description uplink");
     }
 }
