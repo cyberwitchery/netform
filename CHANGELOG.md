@@ -1,5 +1,9 @@
 # changelog
 
+## Unreleased
+
+- `--normalize-whitespace` now also turns a single tab between words into a space. a line whose words were each separated by one whitespace character was left untouched, so `interface\tGi0/1` was still reported as differing from `interface Gi0/1`
+
 ## [0.10.0] - 2026-09-12
 
 - **breaking:** the six `netform_dialect_*` crates are gone. every vendor netform parses now lives in the new `netform_dialects` crate, one module per vendor: `netform_dialect_junos::parse_junos` is `netform_dialects::junos::parse`, `netform_dialect_eos::EOS_DIALECT` is `netform_dialects::eos::DIALECT`, and each vendor's interface-type table is `netform_dialects::<vendor>::RULES.interface_types`. a vendor is an entry in `netform_dialects::REGISTRY`, so adding one is a module and a registry entry rather than a published crate, a semver surface and a release step
