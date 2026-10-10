@@ -210,6 +210,22 @@ fn key_hint_falls_back_to_the_shared_arms() {
 }
 
 #[test]
+fn key_hint_typed_class_map_and_policy_map() {
+    assert_eq!(
+        hint("class-map type traffic match-any CM-TRAFFIC"),
+        Some("class-map:traffic:CM-TRAFFIC".into()),
+    );
+    assert_eq!(
+        hint("class-map type qos match-any CM-QOS"),
+        Some("class-map:qos:CM-QOS".into()),
+    );
+    assert_eq!(
+        hint("policy-map type pbr PM-PBR"),
+        Some("policy-map:pbr:PM-PBR".into()),
+    );
+}
+
+#[test]
 fn key_hint_none_for_unkeyed_lines() {
     assert_eq!(hint("hostname xr-pe-01"), None);
     assert_eq!(hint("commit"), None);

@@ -503,6 +503,26 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_typed_class_map_and_policy_map() {
+        assert_eq!(
+            hint("class-map type control-plane match-any copp-s-bgp"),
+            Some("class-map:control-plane:copp-s-bgp".into()),
+        );
+        assert_eq!(
+            hint("class-map type queuing match-any c-out-q3"),
+            Some("class-map:queuing:c-out-q3".into()),
+        );
+        assert_eq!(
+            hint("policy-map type control-plane copp-system-p"),
+            Some("policy-map:control-plane:copp-system-p".into()),
+        );
+        assert_eq!(
+            hint("policy-map type network-qos default-nq-policy"),
+            Some("policy-map:network-qos:default-nq-policy".into()),
+        );
+    }
+
+    #[test]
     fn key_hint_spanning_tree_vlan() {
         assert_eq!(
             hint("spanning-tree vlan 1-100 priority 4096"),

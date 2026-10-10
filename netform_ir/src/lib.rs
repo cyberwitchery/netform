@@ -1035,12 +1035,13 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             [name, action] => Some(format!("route-map:{name}:{action}")),
             _ => None,
         },
-        "class-map" => match args {
+        "class-map" => typed_map_key(head, args).or_else(|| match args {
             [_match_kind, name, ..] => Some(format!("class-map:{name}")),
             [name] => Some(format!("class-map:{name}")),
             _ => None,
-        },
-        "policy-map" => args.first().map(|name| format!("policy-map:{name}")),
+        }),
+        "policy-map" => typed_map_key(head, args)
+            .or_else(|| args.first().map(|name| format!("policy-map:{name}"))),
         "ipv6" => match args {
             [next, name, ..] if next == "access-list" => Some(format!("ipv6-access-list:{name}")),
             [next, name, ..] if next == "prefix-list" => Some(format!("ipv6-prefix-list:{name}")),
@@ -1078,6 +1079,25 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
         },
         _ => None,
     }
+}
+
+/// key `<head> type <kind...> [match-*] <name>` on its kind and name.
+fn typed_map_key(head: &str, args: &[String]) -> Option<String> {
+    let [keyword, rest @ .., name] = args else {
+        return None;
+    };
+    let kind = match rest {
+        [kind @ .., criterion]
+            if matches!(criterion.as_str(), "match-all" | "match-any" | "match-none") =>
+        {
+            kind
+        }
+        kind => kind,
+    };
+    if keyword != "type" || kind.is_empty() {
+        return None;
+    }
+    Some(format!("{head}:{}:{name}", kind.join(":")))
 }
 
 /// parse an interface name into `(canonical_type, id)` using the given type
@@ -1294,6 +1314,42 @@ mod tests {
         assert_eq!(
             common_hint("class-map SIMPLE"),
             Some("class-map:SIMPLE".into())
+        );
+    }
+
+    #[test]
+    fn common_key_hint_typed_class_map() {
+        assert_eq!(
+            common_hint("class-map type qos match-all CM-VOICE"),
+            Some("class-map:qos:CM-VOICE".into()),
+        );
+        assert_eq!(
+            common_hint("class-map type control-plane match-any copp-s-bgp"),
+            Some("class-map:control-plane:copp-s-bgp".into()),
+        );
+        assert_eq!(
+            common_hint("class-map type network-qos c-nq1"),
+            Some("class-map:network-qos:c-nq1".into()),
+        );
+        assert_eq!(
+            common_hint("class-map type control subscriber match-none CM-SUB"),
+            Some("class-map:control:subscriber:CM-SUB".into()),
+        );
+    }
+
+    #[test]
+    fn common_key_hint_typed_policy_map() {
+        assert_eq!(
+            common_hint("policy-map type qos PM-IN"),
+            Some("policy-map:qos:PM-IN".into()),
+        );
+        assert_eq!(
+            common_hint("policy-map type control-plane copp-system-p"),
+            Some("policy-map:control-plane:copp-system-p".into()),
+        );
+        assert_eq!(
+            common_hint("policy-map type control subscriber PM-SUB"),
+            Some("policy-map:control:subscriber:PM-SUB".into()),
         );
     }
 
