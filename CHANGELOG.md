@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `--normalize-whitespace` now also turns a single tab between words into a space. a line whose words were each separated by one whitespace character was left untouched, so `interface\tGi0/1` was still reported as differing from `interface Gi0/1`
+- `--order-policy unordered` no longer cancels a line against an identical one in a sibling block, so two FortiOS policies swapping `set action accept` and `set action deny`, two interfaces swapping `shutdown` and `no shutdown`, or two QoS classes swapping their bodies are reported as drift instead of exiting 0. under `unordered` and `keyed-stable` child blocks are now paired by their header and compared one pair at a time, so a deeper `--policy-override` applies inside them (`--order-policy unordered --policy-override 0.0:ordered` used to be ignored), and a block that moved and changed is no longer flagged `diff_unreliable_region`. a pure reorder is still not drift
 
 ## [0.10.0] - 2026-09-12
 

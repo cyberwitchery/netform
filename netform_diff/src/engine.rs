@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::model::{
     ComparisonLine, ComparisonView, DiffError, DiffLine, DiffStats, Edit, EditAnchor,
@@ -94,15 +94,18 @@ fn diff_segment_level(
                 if level_policy == OrderPolicy::Ordered {
                     let policy =
                         flush_policy(level_policy, &pending_deleted, &pending_inserted, options);
-                    flush_replaced_segments(
+                    let unreliable = flush_replaced_segments(
                         &mut pending_deleted,
                         &mut pending_inserted,
                         &mut pending_runs,
                         policy,
+                        options,
                         edits,
                         fallback_contexts,
-                        record_fallbacks,
                     )?;
+                    if record_fallbacks {
+                        fallback_contexts.extend(unreliable);
+                    }
                 }
                 run_open = false;
 
@@ -148,18 +151,22 @@ fn diff_segment_level(
     }
 
     let policy = flush_policy(level_policy, &pending_deleted, &pending_inserted, options);
-    flush_replaced_segments(
+    let unreliable = flush_replaced_segments(
         &mut pending_deleted,
         &mut pending_inserted,
         &mut pending_runs,
         policy,
+        options,
         edits,
         fallback_contexts,
-        record_fallbacks,
-    )
+    )?;
+    if record_fallbacks {
+        fallback_contexts.extend(unreliable);
+    }
+    Ok(())
 }
 
-/// emits edits for two segments Myers aligned as equal.
+/// emits edits for two segments matched as the same sibling.
 ///
 /// two matched blocks compare their headers and diff their children under the
 /// policy for this block's path; any other pairing compares the segments' lines
@@ -204,15 +211,96 @@ fn diff_matched_segment(
             edits,
             fallback_contexts,
         )?,
-        OrderPolicy::Unordered => {
-            edits.append(&mut line_diff_unordered(left_children, right_children));
-        }
-        OrderPolicy::KeyedStable => {
-            edits.append(&mut line_diff_keyed_stable(left_children, right_children));
+        policy => {
+            let depth = left_header.path.0.len();
+            let mut chunked = diff_sibling_multiset(
+                segment_at(left_children, depth),
+                segment_at(right_children, depth),
+                policy,
+                options,
+                edits,
+                fallback_contexts,
+            )?;
+            edits.append(&mut chunked);
         }
     }
 
     Ok(())
+}
+
+/// diffs two sets of siblings without regard to their order.
+///
+/// blocks sharing a header identity are paired and diffed like matched
+/// segments; the chunked edits for leaves and unpaired blocks are returned.
+fn diff_sibling_multiset(
+    deleted: Vec<Segment>,
+    inserted: Vec<Segment>,
+    policy: OrderPolicy,
+    options: &NormalizeOptions,
+    edits: &mut Vec<Edit>,
+    fallback_contexts: &mut Vec<netform_ir::Path>,
+) -> Result<Vec<Edit>, DiffError> {
+    let (pairs, deleted, inserted) = pair_blocks(deleted, inserted, policy);
+    for (left, right) in &pairs {
+        diff_matched_segment(left, right, options, edits, fallback_contexts)?;
+    }
+
+    let deleted_lines = deleted
+        .into_iter()
+        .flat_map(|segment| segment.lines)
+        .collect::<Vec<_>>();
+    let inserted_lines = inserted
+        .into_iter()
+        .flat_map(|segment| segment.lines)
+        .collect::<Vec<_>>();
+    line_diff(&deleted_lines, &inserted_lines, policy)
+}
+
+/// pairs blocks with the same header identity in document order.
+///
+/// returns the pairs followed by every unpaired segment of each side, leaves
+/// included, in their original order.
+fn pair_blocks(
+    deleted: Vec<Segment>,
+    inserted: Vec<Segment>,
+    policy: OrderPolicy,
+) -> (Vec<(Segment, Segment)>, Vec<Segment>, Vec<Segment>) {
+    let mut open: HashMap<u64, VecDeque<usize>> = HashMap::new();
+    for (index, segment) in inserted.iter().enumerate() {
+        if segment.is_block {
+            open.entry(header_identity(segment, policy))
+                .or_default()
+                .push_back(index);
+        }
+    }
+
+    let mut inserted = inserted.into_iter().map(Some).collect::<Vec<_>>();
+    let mut pairs = Vec::new();
+    let mut unpaired_deleted = Vec::new();
+    for segment in deleted {
+        let partner = if segment.is_block {
+            open.get_mut(&header_identity(&segment, policy))
+                .and_then(VecDeque::pop_front)
+                .and_then(|index| inserted[index].take())
+        } else {
+            None
+        };
+        match partner {
+            Some(right) => pairs.push((segment, right)),
+            None => unpaired_deleted.push(segment),
+        }
+    }
+
+    let unpaired_inserted = inserted.into_iter().flatten().collect();
+    (pairs, unpaired_deleted, unpaired_inserted)
+}
+
+/// the key blocks are paired on, matching how `policy` buckets lines.
+fn header_identity(segment: &Segment, policy: OrderPolicy) -> u64 {
+    match policy {
+        OrderPolicy::Unordered => unordered_key(&segment.lines[0]),
+        OrderPolicy::Ordered | OrderPolicy::KeyedStable => segment.segment_key,
+    }
 }
 
 /// reports text differences between the lines of two segments matched as equal.
@@ -262,42 +350,43 @@ fn flush_policy(
         .map_or(level_policy, |line| options.policy_for_path(&line.path))
 }
 
-/// diffs accumulated non-matching segments as a coarse line-level fallback.
+/// diffs accumulated non-matching segments: blocks sharing a header identity
+/// are paired, and the rest go to a coarse line-level fallback.
 ///
-/// `runs` holds the start index of each contiguous unmatched run, and each run
-/// contributes its own fallback context.
+/// `runs` holds the start index of each contiguous unmatched run; the context
+/// of every run is returned when the fallback reports anything.
 fn flush_replaced_segments(
     deleted: &mut Vec<Segment>,
     inserted: &mut Vec<Segment>,
     runs: &mut Vec<(usize, usize)>,
     policy: OrderPolicy,
+    options: &NormalizeOptions,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
-    record_fallbacks: bool,
-) -> Result<(), DiffError> {
+) -> Result<Vec<netform_ir::Path>, DiffError> {
     if deleted.is_empty() && inserted.is_empty() {
         runs.clear();
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let contexts = run_contexts(deleted, inserted, runs);
     runs.clear();
 
-    let deleted_lines = deleted
-        .drain(..)
-        .flat_map(|segment| segment.lines)
-        .collect::<Vec<_>>();
-    let inserted_lines = inserted
-        .drain(..)
-        .flat_map(|segment| segment.lines)
-        .collect::<Vec<_>>();
-
-    let mut fallback = line_diff(&deleted_lines, &inserted_lines, policy)?;
-    if record_fallbacks && !fallback.is_empty() {
-        fallback_contexts.extend(contexts);
-    }
+    let mut fallback = diff_sibling_multiset(
+        std::mem::take(deleted),
+        std::mem::take(inserted),
+        policy,
+        options,
+        edits,
+        fallback_contexts,
+    )?;
+    let unreliable = if fallback.is_empty() {
+        Vec::new()
+    } else {
+        contexts
+    };
     edits.append(&mut fallback);
-    Ok(())
+    Ok(unreliable)
 }
 
 /// the path identifying each contiguous unmatched run, left side first.
@@ -443,9 +532,11 @@ fn line_diff_ordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Result<Vec<E
 }
 
 fn line_diff_unordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Vec<Edit> {
-    line_diff_multiset(a, b, |line| {
-        xxhash_rust::xxh3::xxh3_64(line.normalized.as_bytes())
-    })
+    line_diff_multiset(a, b, unordered_key)
+}
+
+fn unordered_key(line: &ComparisonLine) -> u64 {
+    xxhash_rust::xxh3::xxh3_64(line.normalized.as_bytes())
 }
 
 fn line_diff_keyed_stable(a: &[ComparisonLine], b: &[ComparisonLine]) -> Vec<Edit> {
@@ -1656,6 +1747,179 @@ mod tests {
             vec![Path(vec![0]), Path(vec![2])],
             "each unmatched run is its own unreliable region"
         );
+    }
+
+    fn firewall_policies(first: &str, second: &str) -> ComparisonView {
+        view(vec![
+            cline("config firewall policy", 100, vec![0]),
+            cline("    edit 1", 200, vec![0, 0]),
+            cline(first, 201, vec![0, 0, 0]),
+            cline("    next", 202, vec![0, 0, 1]),
+            cline("    edit 2", 300, vec![0, 1]),
+            cline(second, 301, vec![0, 1, 0]),
+            cline("    next", 302, vec![0, 1, 1]),
+            cline("end", 101, vec![0, 2]),
+        ])
+    }
+
+    #[test]
+    fn values_swapped_between_nested_blocks_are_reported_under_every_policy() {
+        let accept = "        set action accept";
+        let deny = "        set action deny";
+        let a = firewall_policies(accept, deny);
+        let b = firewall_policies(deny, accept);
+
+        for policy in [
+            OrderPolicy::Ordered,
+            OrderPolicy::Unordered,
+            OrderPolicy::KeyedStable,
+        ] {
+            let result = diff_views(&a, &b, &default_policy(policy)).unwrap();
+            let texts = edit_texts(&result.edits);
+            assert_eq!(
+                (
+                    texts.iter().filter(|text| **text == accept).count(),
+                    texts.iter().filter(|text| **text == deny).count(),
+                ),
+                (2, 2),
+                "{policy:?} must report both moved values: {:?}",
+                result.edits
+            );
+        }
+    }
+
+    #[test]
+    fn nested_block_reorder_still_cancels_under_unordered_and_keyed_stable() {
+        let a = firewall_policies("        set action accept", "        set action deny");
+        let b = view(vec![
+            cline("config firewall policy", 100, vec![0]),
+            cline("    edit 2", 300, vec![0, 0]),
+            cline("        set action deny", 301, vec![0, 0, 0]),
+            cline("    next", 302, vec![0, 0, 1]),
+            cline("    edit 1", 200, vec![0, 1]),
+            cline("        set action accept", 201, vec![0, 1, 0]),
+            cline("    next", 202, vec![0, 1, 1]),
+            cline("end", 101, vec![0, 2]),
+        ]);
+
+        for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+            let result = diff_views(&a, &b, &default_policy(policy)).unwrap();
+            assert!(result.edits.is_empty(), "{policy:?}: {:?}", result.edits);
+        }
+    }
+
+    #[test]
+    fn bodies_swapped_between_reordered_root_blocks_are_reported() {
+        let a = view(vec![
+            cline("interface Gi1", 100, vec![0]),
+            cline(" shutdown", 101, vec![0, 0]),
+            cline("interface Gi2", 200, vec![1]),
+            cline(" no shutdown", 202, vec![1, 0]),
+            cline("interface Gi3", 300, vec![2]),
+            cline(" mtu 9000", 301, vec![2, 0]),
+        ]);
+        let b = view(vec![
+            cline("interface Gi3", 300, vec![0]),
+            cline(" mtu 9000", 301, vec![0, 0]),
+            cline("interface Gi2", 200, vec![1]),
+            cline(" shutdown", 201, vec![1, 0]),
+            cline("interface Gi1", 100, vec![2]),
+            cline(" no shutdown", 102, vec![2, 0]),
+        ]);
+
+        for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+            let result = diff_views(&a, &b, &default_policy(policy)).unwrap();
+            let mut texts = edit_texts(&result.edits);
+            texts.sort_unstable();
+            assert_eq!(
+                texts,
+                vec![" no shutdown", " no shutdown", " shutdown", " shutdown"],
+                "{policy:?} must report both moved bodies: {:?}",
+                result.edits
+            );
+            assert!(
+                result.fallback_contexts.is_empty(),
+                "{policy:?} paired every block by its header: {:?}",
+                result.fallback_contexts
+            );
+        }
+    }
+
+    #[test]
+    fn bodies_swapped_between_sibling_classes_are_reported() {
+        let a = view(vec![
+            cline("policy-map WAN", 100, vec![0]),
+            cline(" class VOICE", 200, vec![0, 0]),
+            cline("  priority percent 10", 201, vec![0, 0, 0]),
+            cline(" class DATA", 300, vec![0, 1]),
+            cline("  bandwidth percent 50", 301, vec![0, 1, 0]),
+        ]);
+        let b = view(vec![
+            cline("policy-map WAN", 100, vec![0]),
+            cline(" class VOICE", 200, vec![0, 0]),
+            cline("  bandwidth percent 50", 202, vec![0, 0, 0]),
+            cline(" class DATA", 300, vec![0, 1]),
+            cline("  priority percent 10", 302, vec![0, 1, 0]),
+        ]);
+
+        for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+            let result = diff_views(&a, &b, &default_policy(policy)).unwrap();
+            let mut texts = edit_texts(&result.edits);
+            texts.sort_unstable();
+            assert_eq!(
+                texts,
+                vec![
+                    "  bandwidth percent 50",
+                    "  bandwidth percent 50",
+                    "  priority percent 10",
+                    "  priority percent 10",
+                ],
+                "{policy:?}: {:?}",
+                result.edits
+            );
+        }
+    }
+
+    #[test]
+    fn ordered_override_is_honoured_below_a_non_ordered_parent() {
+        let a = view(vec![
+            cline("policy-map WAN", 100, vec![0]),
+            cline(" class VOICE", 200, vec![0, 0]),
+            cline("  police 8000", 201, vec![0, 0, 0]),
+            cline("  priority", 202, vec![0, 0, 1]),
+        ]);
+        let b = view(vec![
+            cline("policy-map WAN", 100, vec![0]),
+            cline(" class VOICE", 200, vec![0, 0]),
+            cline("  priority", 202, vec![0, 0, 0]),
+            cline("  police 8000", 201, vec![0, 0, 1]),
+        ]);
+
+        for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+            let silent = diff_views(&a, &b, &default_policy(policy)).unwrap();
+            assert!(silent.edits.is_empty(), "{policy:?}: {:?}", silent.edits);
+
+            let options = NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+                default: policy,
+                overrides: vec![OrderPolicyOverride {
+                    context_prefix: vec![0, 0],
+                    policy: OrderPolicy::Ordered,
+                }],
+            });
+            let result = diff_views(&a, &b, &options).unwrap();
+            assert!(
+                matches!(
+                    &result.edits[..],
+                    [Edit::Delete { .. }, Edit::Insert { .. }]
+                ),
+                "{policy:?} must report the reorder the override makes significant: {:?}",
+                result.edits
+            );
+            assert_eq!(
+                edit_texts(&result.edits),
+                vec!["  police 8000", "  police 8000"]
+            );
+        }
     }
 
     #[test]
