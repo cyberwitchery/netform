@@ -418,6 +418,51 @@ fn config_diff_root_level_reorder_with_a_change_still_exits_nonzero() {
 }
 
 #[test]
+fn config_diff_reports_actions_swapped_between_fortios_policies_under_every_policy() {
+    let left = temp_file_path("left-fortios-action-swap");
+    let right = temp_file_path("right-fortios-action-swap");
+    let policies = |first: &str, second: &str| {
+        format!(
+            "config firewall policy\n    edit 1\n        set action {first}\n    next\n    edit 2\n        set action {second}\n    next\nend\n"
+        )
+    };
+    fs::write(&left, policies("accept", "deny")).expect("write left");
+    fs::write(&right, policies("deny", "accept")).expect("write right");
+
+    for policy in ["ordered", "unordered", "keyed-stable"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+            .arg("--dialect")
+            .arg("fortios")
+            .arg("--order-policy")
+            .arg(policy)
+            .arg(&left)
+            .arg(&right)
+            .output()
+            .expect("run config-diff on swapped fortios policy actions");
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{policy} must exit 1 when two policies swap their actions"
+        );
+
+        let json_output = Command::new(env!("CARGO_BIN_EXE_config-diff"))
+            .arg("--no-exit-code")
+            .arg("--dialect")
+            .arg("fortios")
+            .arg("--order-policy")
+            .arg(policy)
+            .arg("--json")
+            .arg(&left)
+            .arg(&right)
+            .output()
+            .expect("run config-diff --json on swapped fortios policy actions");
+        let diff_json: serde_json::Value =
+            serde_json::from_slice(&json_output.stdout).expect("valid json");
+        assert_eq!(diff_json["has_changes"], true, "{policy}");
+    }
+}
+
+#[test]
 fn config_diff_junos_dialect_with_keyed_stable_policy() {
     let left = temp_file_path("left-junos-keyed");
     let right = temp_file_path("right-junos-keyed");
