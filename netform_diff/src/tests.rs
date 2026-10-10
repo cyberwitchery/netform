@@ -1,12 +1,13 @@
 use netform_dialects::fortios::parse as parse_fortios;
 use netform_dialects::iosxe::parse as parse_iosxe;
+use netform_dialects::iosxr::parse as parse_iosxr;
 use netform_dialects::junos::parse as parse_junos;
 use netform_ir::{Path, Span, parse_generic};
 
 use super::{
     Diff, DiffLine, Edit, EditAnchor, NormalizationStep, NormalizeOptions, OrderPolicy,
-    OrderPolicyConfig, PlanAction, PlanLineEditKind, build_comparison_view, build_plan,
-    diff_documents,
+    OrderPolicyConfig, OrderPolicyOverride, PlanAction, PlanLineEditKind, build_comparison_view,
+    build_plan, diff_documents,
 };
 
 #[test]
@@ -1201,5 +1202,166 @@ fn fortios_block_footer_participates_in_comparison_and_diff() {
     assert!(
         mentions_end,
         "the `end` footer should appear in the diff edits",
+    );
+}
+
+fn with_policy(policy: OrderPolicy, overrides: Vec<OrderPolicyOverride>) -> NormalizeOptions {
+    NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+        default: policy,
+        overrides,
+    })
+}
+
+fn edited_texts(diff: &Diff) -> Vec<&str> {
+    let mut texts = diff
+        .edits
+        .iter()
+        .flat_map(|edit| match edit {
+            Edit::Delete { lines, .. } | Edit::Insert { lines, .. } => lines.iter().collect(),
+            Edit::Replace {
+                old_lines,
+                new_lines,
+                ..
+            } => old_lines.iter().chain(new_lines).collect::<Vec<_>>(),
+        })
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>();
+    texts.sort_unstable();
+    texts
+}
+
+const SAME_HEADER_SIBLINGS: &str = "\
+router bgp 65000
+ address-family ipv4
+  neighbor 10.0.0.1 activate
+ address-family ipv4
+  neighbor 10.0.0.2 activate
+";
+
+#[test]
+fn reordered_same_header_siblings_cancel_under_unordered_and_keyed_stable() {
+    let a = parse_generic(SAME_HEADER_SIBLINGS);
+    let b = parse_generic(
+        "router bgp 65000\n address-family ipv4\n  neighbor 10.0.0.2 activate\n address-family ipv4\n  neighbor 10.0.0.1 activate\n",
+    );
+
+    for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        assert!(diff.edits.is_empty(), "{policy:?}: {:?}", diff.edits);
+    }
+}
+
+#[test]
+fn swapped_route_policy_statements_cancel_under_unordered_and_keyed_stable() {
+    let gold = "  if community matches-any C-GOLD then\n    set local-preference 200\n  else\n    set local-preference 100\n  endif\n";
+    let bogons = "  if destination in PS-BOGONS then\n    drop\n  else\n    pass\n  endif\n";
+    let a = parse_iosxr(&format!("route-policy RP-IN\n{gold}{bogons}end-policy\n"));
+    let b = parse_iosxr(&format!("route-policy RP-IN\n{bogons}{gold}end-policy\n"));
+
+    let ordered = diff_documents(&a, &b, with_policy(OrderPolicy::Ordered, Vec::new())).unwrap();
+    assert!(ordered.has_changes, "the swap is drift under ordered");
+    for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        assert!(diff.edits.is_empty(), "{policy:?}: {:?}", diff.edits);
+    }
+}
+
+#[test]
+fn same_header_siblings_swapped_and_reordered_inside_cancel() {
+    let a = parse_generic(
+        "router bgp 65000\n address-family ipv4\n  neighbor 10.0.0.1 activate\n  neighbor 10.0.0.2 activate\n address-family ipv4\n  neighbor 10.0.0.3 activate\n  neighbor 10.0.0.4 activate\n",
+    );
+    let b = parse_generic(
+        "router bgp 65000\n address-family ipv4\n  neighbor 10.0.0.4 activate\n  neighbor 10.0.0.3 activate\n address-family ipv4\n  neighbor 10.0.0.2 activate\n  neighbor 10.0.0.1 activate\n",
+    );
+
+    for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        assert!(diff.edits.is_empty(), "{policy:?}: {:?}", diff.edits);
+    }
+}
+
+#[test]
+fn same_header_siblings_with_new_lines_pair_in_document_order() {
+    let a = parse_generic(SAME_HEADER_SIBLINGS);
+    let b = parse_generic(
+        "router bgp 65000\n address-family ipv4\n  neighbor 10.0.0.1 activate\n  neighbor 10.0.0.3 activate\n address-family ipv4\n  neighbor 10.0.0.2 activate\n  neighbor 10.0.0.4 activate\n",
+    );
+
+    for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        assert_eq!(
+            edited_texts(&diff),
+            vec![
+                "  neighbor 10.0.0.3 activate",
+                "  neighbor 10.0.0.4 activate"
+            ],
+            "{policy:?}: {:?}",
+            diff.edits
+        );
+    }
+}
+
+#[test]
+fn actions_swapped_between_fortios_policies_report_four_edits_under_unordered() {
+    let policies = |first: &str, second: &str| {
+        parse_fortios(&format!(
+            "config firewall policy\n    edit 1\n        set action {first}\n    next\n    edit 2\n        set action {second}\n    next\nend\n"
+        ))
+    };
+    let a = policies("accept", "deny");
+    let b = policies("deny", "accept");
+
+    let diff = diff_documents(&a, &b, with_policy(OrderPolicy::Unordered, Vec::new())).unwrap();
+    assert_eq!(diff.edits.len(), 4, "{:?}", diff.edits);
+}
+
+#[test]
+fn override_on_a_moved_block_follows_its_left_path() {
+    let a = parse_generic("hostname r1\npolicy-map WAN\n class VOICE\n  police 8000\n  priority\n");
+    let b = parse_generic("policy-map WAN\n class VOICE\n  priority\n  police 8000\nhostname r1\n");
+    let options = with_policy(
+        OrderPolicy::Unordered,
+        vec![OrderPolicyOverride {
+            context_prefix: vec![1, 0],
+            policy: OrderPolicy::Ordered,
+        }],
+    );
+
+    let diff = diff_documents(&a, &b, options).unwrap();
+    assert_eq!(
+        edited_texts(&diff),
+        vec!["  police 8000", "  police 8000"],
+        "{:?}",
+        diff.edits
+    );
+}
+
+#[test]
+fn block_whose_partner_paired_by_contents_takes_the_next_one() {
+    let a = parse_generic(
+        "router bgp 65000\n address-family ipv4\n  neighbor 10.0.0.1 activate\n  neighbor 10.0.0.2 activate\n  neighbor 10.0.0.3 activate\n address-family ipv4\n  neighbor 10.0.0.9 activate\n",
+    );
+    let b = parse_generic(
+        "router bgp 65000\n address-family ipv4\n  neighbor 10.0.0.9 activate\n address-family ipv4\n  neighbor 10.0.0.2 activate\n  neighbor 10.0.0.1 activate\n",
+    );
+    let options = with_policy(
+        OrderPolicy::Unordered,
+        vec![OrderPolicyOverride {
+            context_prefix: vec![0, 0],
+            policy: OrderPolicy::Ordered,
+        }],
+    );
+
+    let diff = diff_documents(&a, &b, options).unwrap();
+    assert_eq!(
+        edited_texts(&diff),
+        vec![
+            "  neighbor 10.0.0.1 activate",
+            "  neighbor 10.0.0.1 activate",
+            "  neighbor 10.0.0.3 activate",
+        ],
+        "the override must apply to the block: {:?}",
+        diff.edits
     );
 }

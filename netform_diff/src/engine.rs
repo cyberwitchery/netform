@@ -256,35 +256,58 @@ fn diff_sibling_multiset(
     line_diff(&deleted_lines, &inserted_lines, policy)
 }
 
-/// pairs blocks with the same header identity in document order.
+/// pairs blocks with the same header identity, preferring a partner with the
+/// same contents and falling back to document order.
 ///
-/// returns the pairs followed by every unpaired segment of each side, leaves
-/// included, in their original order.
+/// returns the pairs in left order followed by every unpaired segment of each
+/// side, leaves included, in their original order.
 fn pair_blocks(
     deleted: Vec<Segment>,
     inserted: Vec<Segment>,
     policy: OrderPolicy,
 ) -> (Vec<(Segment, Segment)>, Vec<Segment>, Vec<Segment>) {
-    let mut open: HashMap<u64, VecDeque<usize>> = HashMap::new();
+    let mut by_header: HashMap<u64, VecDeque<usize>> = HashMap::new();
+    let mut by_contents: HashMap<(u64, u64), VecDeque<usize>> = HashMap::new();
     for (index, segment) in inserted.iter().enumerate() {
         if segment.is_block {
-            open.entry(header_identity(segment, policy))
+            let header = header_identity(segment, policy);
+            by_header.entry(header).or_default().push_back(index);
+            by_contents
+                .entry((header, tree_fingerprint(&segment.lines)))
                 .or_default()
                 .push_back(index);
         }
     }
 
     let mut inserted = inserted.into_iter().map(Some).collect::<Vec<_>>();
+    let identical = deleted
+        .iter()
+        .map(|segment| {
+            if segment.is_block {
+                let key = (
+                    header_identity(segment, policy),
+                    tree_fingerprint(&segment.lines),
+                );
+                take_first(by_contents.get_mut(&key), &mut inserted)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
     let mut pairs = Vec::new();
     let mut unpaired_deleted = Vec::new();
-    for segment in deleted {
-        let partner = if segment.is_block {
-            open.get_mut(&header_identity(&segment, policy))
-                .and_then(VecDeque::pop_front)
-                .and_then(|index| inserted[index].take())
-        } else {
-            None
-        };
+    for (segment, identical) in deleted.into_iter().zip(identical) {
+        let partner = identical.or_else(|| {
+            if segment.is_block {
+                take_first(
+                    by_header.get_mut(&header_identity(&segment, policy)),
+                    &mut inserted,
+                )
+            } else {
+                None
+            }
+        });
         match partner {
             Some(right) => pairs.push((segment, right)),
             None => unpaired_deleted.push(segment),
@@ -293,6 +316,44 @@ fn pair_blocks(
 
     let unpaired_inserted = inserted.into_iter().flatten().collect();
     (pairs, unpaired_deleted, unpaired_inserted)
+}
+
+/// takes the first inserted segment in `queue` that is still unpaired.
+fn take_first(
+    queue: Option<&mut VecDeque<usize>>,
+    inserted: &mut [Option<Segment>],
+) -> Option<Segment> {
+    let queue = queue?;
+    while let Some(index) = queue.pop_front() {
+        if let Some(segment) = inserted[index].take() {
+            return Some(segment);
+        }
+    }
+    None
+}
+
+/// hashes a block as an unordered tree: its header text plus its children's sorted fingerprints.
+fn tree_fingerprint(lines: &[ComparisonLine]) -> u64 {
+    let depth = lines[0].path.0.len();
+    let mut children = Vec::new();
+    let mut start = 1;
+    while start < lines.len() {
+        let child = lines[start].path.0.get(depth);
+        let end = lines[start..]
+            .iter()
+            .position(|line| line.path.0.get(depth) != child)
+            .map_or(lines.len(), |offset| start + offset);
+        children.push(tree_fingerprint(&lines[start..end]));
+        start = end;
+    }
+    children.sort_unstable();
+
+    let mut hasher = xxhash_rust::xxh3::Xxh3Default::new();
+    hasher.update(lines[0].normalized.as_bytes());
+    for child in children {
+        hasher.update(&child.to_le_bytes());
+    }
+    hasher.digest()
 }
 
 /// the key blocks are paired on, matching how `policy` buckets lines.
@@ -1920,6 +1981,78 @@ mod tests {
                 vec!["  police 8000", "  police 8000"]
             );
         }
+    }
+
+    #[test]
+    fn unordered_pairs_siblings_on_header_text_not_their_shared_key() {
+        let a = view(vec![
+            cline("parameter-map PM", 100, vec![0]),
+            cline(" class-map type inspect match-any CM-A", 500, vec![0, 0]),
+            cline("  match protocol http", 501, vec![0, 0, 0]),
+            cline(" class-map type inspect match-any CM-B", 500, vec![0, 1]),
+            cline("  match protocol ftp", 502, vec![0, 1, 0]),
+        ]);
+        let b = view(vec![
+            cline("parameter-map PM", 100, vec![0]),
+            cline(" class-map type inspect match-any CM-B", 500, vec![0, 0]),
+            cline("  match protocol sftp", 503, vec![0, 0, 0]),
+            cline(" class-map type inspect match-any CM-A", 500, vec![0, 1]),
+            cline("  match protocol https", 504, vec![0, 1, 0]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        let mut texts = edit_texts(&result.edits);
+        texts.sort_unstable();
+        assert_eq!(
+            texts,
+            vec![
+                "  match protocol ftp",
+                "  match protocol http",
+                "  match protocol https",
+                "  match protocol sftp",
+            ],
+            "{:?}",
+            result.edits
+        );
+    }
+
+    #[test]
+    fn keyed_stable_pairs_siblings_on_their_key_not_header_text() {
+        let policy = |header: &str, first: (&str, u64), second: (&str, u64)| {
+            view(vec![
+                cline("config firewall policy", 100, vec![0]),
+                cline(header, 200, vec![0, 0]),
+                cline(first.0, first.1, vec![0, 0, 0]),
+                cline(second.0, second.1, vec![0, 0, 1]),
+                cline("    next", 203, vec![0, 0, 2]),
+                cline("end", 101, vec![0, 1]),
+            ])
+        };
+        let src = ("        set srcintf port1", 201);
+        let dst = ("        set dstintf port2", 202);
+        let a = policy("    edit \"1\"", src, dst);
+        let b = policy("    edit 1", dst, src);
+        let options = NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+            default: OrderPolicy::KeyedStable,
+            overrides: vec![OrderPolicyOverride {
+                context_prefix: vec![0, 0],
+                policy: OrderPolicy::Ordered,
+            }],
+        });
+
+        let result = diff_views(&a, &b, &options).unwrap();
+        assert!(
+            matches!(
+                &result.edits[..],
+                [
+                    Edit::Replace { .. },
+                    Edit::Delete { .. },
+                    Edit::Insert { .. }
+                ]
+            ),
+            "the header change and the reorder the override makes significant: {:?}",
+            result.edits
+        );
     }
 
     #[test]
