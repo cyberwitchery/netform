@@ -547,6 +547,26 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_typed_class_map_and_policy_map() {
+        assert_eq!(
+            hint("class-map type qos match-any CM-VOICE"),
+            Some("class-map:qos:CM-VOICE".into()),
+        );
+        assert_eq!(
+            hint("class-map type pbr match-any CM-PBR"),
+            Some("class-map:pbr:CM-PBR".into()),
+        );
+        assert_eq!(
+            hint("policy-map type pbr PM-PBR"),
+            Some("policy-map:pbr:PM-PBR".into()),
+        );
+        assert_eq!(
+            hint("policy-map type quality-of-service PM-QOS"),
+            Some("policy-map:quality-of-service:PM-QOS".into()),
+        );
+    }
+
+    #[test]
     fn key_hint_spanning_tree_vlan() {
         assert_eq!(
             hint("spanning-tree vlan 1-100 priority 4096"),

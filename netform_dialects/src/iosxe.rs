@@ -713,6 +713,26 @@ mod tests {
     }
 
     #[test]
+    fn key_hint_typed_class_map_and_policy_map() {
+        assert_eq!(
+            hint("class-map type inspect match-any CM-INSPECT"),
+            Some("class-map:inspect:CM-INSPECT".into()),
+        );
+        assert_eq!(
+            hint("class-map type control subscriber match-all CM-SUB"),
+            Some("class-map:control:subscriber:CM-SUB".into()),
+        );
+        assert_eq!(
+            hint("policy-map type inspect PM-INSPECT"),
+            Some("policy-map:inspect:PM-INSPECT".into()),
+        );
+        assert_eq!(
+            hint("policy-map type control subscriber PM-SUB"),
+            Some("policy-map:control:subscriber:PM-SUB".into()),
+        );
+    }
+
+    #[test]
     fn key_hint_spanning_tree_vlan() {
         assert_eq!(
             hint("spanning-tree vlan 1-100 priority 4096"),
