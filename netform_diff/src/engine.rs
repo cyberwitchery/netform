@@ -32,18 +32,95 @@ pub(crate) fn diff_views(
 ) -> Result<DiffComputation, DiffError> {
     let mut edits = Vec::new();
     let mut fallback_contexts = Vec::new();
-    diff_segment_level(
-        &a.lines,
-        &b.lines,
-        &netform_ir::Path(Vec::new()),
-        options,
-        &mut edits,
-        &mut fallback_contexts,
-    )?;
+    let root = netform_ir::Path(Vec::new());
+    if options.policy_for_path(&root) == OrderPolicy::Unordered {
+        diff_unordered_root(
+            &a.lines,
+            &b.lines,
+            options,
+            &mut edits,
+            &mut fallback_contexts,
+        )?;
+    } else {
+        diff_segment_level(
+            &a.lines,
+            &b.lines,
+            &root,
+            options,
+            &mut edits,
+            &mut fallback_contexts,
+        )?;
+    }
     Ok(DiffComputation {
         edits,
         fallback_contexts,
     })
+}
+
+/// diffs an unordered top level as nested unordered levels are diffed, recording
+/// the runs a Myers pass on the same identity leaves unmatched as fallback contexts.
+fn diff_unordered_root(
+    a_lines: &[ComparisonLine],
+    b_lines: &[ComparisonLine],
+    options: &NormalizeOptions,
+    edits: &mut Vec<Edit>,
+    fallback_contexts: &mut Vec<netform_ir::Path>,
+) -> Result<(), DiffError> {
+    let a_segments = segment_at(a_lines, 0);
+    let b_segments = segment_at(b_lines, 0);
+    let identities = |segments: &[Segment]| {
+        segments
+            .iter()
+            .map(|segment| header_identity(segment, OrderPolicy::Unordered))
+            .collect::<Vec<_>>()
+    };
+    let ops = compute_ops(&identities(&a_segments), &identities(&b_segments))?;
+    let contexts = unmatched_run_contexts(&ops, &a_segments, &b_segments);
+
+    let mut fallback = diff_sibling_multiset(
+        a_segments,
+        b_segments,
+        OrderPolicy::Unordered,
+        options,
+        edits,
+        fallback_contexts,
+    )?;
+    if !fallback.is_empty() {
+        fallback_contexts.extend(contexts);
+    }
+    edits.append(&mut fallback);
+    Ok(())
+}
+
+/// the path starting each run of siblings `ops` leaves unmatched, left side first.
+fn unmatched_run_contexts(ops: &[Op], a: &[Segment], b: &[Segment]) -> Vec<netform_ir::Path> {
+    let mut a_iter = a.iter();
+    let mut b_iter = b.iter();
+    let mut runs: Vec<(Option<&Segment>, Option<&Segment>)> = Vec::new();
+    let mut run_open = false;
+    for op in ops {
+        let (deleted, inserted) = match op {
+            Op::Equal => {
+                a_iter.next();
+                b_iter.next();
+                run_open = false;
+                continue;
+            }
+            Op::Delete => (a_iter.next(), None),
+            Op::Insert => (None, b_iter.next()),
+        };
+        match runs.last_mut() {
+            Some(run) if run_open => *run = (run.0.or(deleted), run.1.or(inserted)),
+            _ => runs.push((deleted, inserted)),
+        }
+        run_open = true;
+    }
+
+    runs.into_iter()
+        .filter_map(|(deleted, inserted)| deleted.or(inserted))
+        .filter_map(|segment| segment.lines.first())
+        .map(|line| line.path.clone())
+        .collect()
 }
 
 /// structure-aware sibling matching among the children of `level_path`.
@@ -356,7 +433,7 @@ fn tree_fingerprint(lines: &[ComparisonLine]) -> u64 {
     hasher.digest()
 }
 
-/// the key blocks are paired on, matching how `policy` buckets lines.
+/// the key siblings are paired on, matching how `policy` buckets lines.
 fn header_identity(segment: &Segment, policy: OrderPolicy) -> u64 {
     match policy {
         OrderPolicy::Unordered => unordered_key(&segment.lines[0]),
@@ -2053,6 +2130,93 @@ mod tests {
             "the header change and the reorder the override makes significant: {:?}",
             result.edits
         );
+    }
+
+    const ROUTE_1: &str = "ip route 10.0.0.0 255.0.0.0 192.0.2.1";
+    const ROUTE_2: &str = "ip route 10.0.0.0 255.0.0.0 192.0.2.2";
+    const ROUTE_3: &str = "ip route 10.0.0.0 255.0.0.0 192.0.2.3";
+    const ROUTE_4: &str = "ip route 10.0.0.0 255.0.0.0 192.0.2.4";
+
+    fn routes_after_hostname(first: &str, second: &str) -> ComparisonView {
+        view(vec![
+            cline("hostname r1", 100, vec![0]),
+            cline(first, 200, vec![1]),
+            cline(second, 200, vec![2]),
+        ])
+    }
+
+    #[test]
+    fn root_level_swap_of_lines_sharing_a_key_cancels_under_unordered() {
+        let a = routes_after_hostname(ROUTE_1, ROUTE_2);
+        let b = routes_after_hostname(ROUTE_2, ROUTE_1);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert!(result.edits.is_empty(), "{:?}", result.edits);
+        assert!(
+            result.fallback_contexts.is_empty(),
+            "{:?}",
+            result.fallback_contexts
+        );
+    }
+
+    #[test]
+    fn root_level_blocks_sharing_a_header_cancel_when_swapped_under_unordered() {
+        let families = |first: &str, second: &str| {
+            view(vec![
+                cline("address-family ipv4", 100, vec![0]),
+                cline(first, 101, vec![0, 0]),
+                cline("address-family ipv4", 100, vec![1]),
+                cline(second, 102, vec![1, 0]),
+            ])
+        };
+        let a = families(" neighbor 10.0.0.1 activate", " neighbor 10.0.0.2 activate");
+        let b = families(" neighbor 10.0.0.2 activate", " neighbor 10.0.0.1 activate");
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert!(result.edits.is_empty(), "{:?}", result.edits);
+    }
+
+    #[test]
+    fn unordered_root_records_the_first_left_sibling_of_each_unmatched_run() {
+        let a = view(vec![
+            cline(ROUTE_1, 200, vec![0]),
+            cline("hostname r1", 100, vec![1]),
+            cline(ROUTE_2, 200, vec![2]),
+            cline(ROUTE_4, 200, vec![3]),
+        ]);
+        let b = view(vec![
+            cline("hostname r1", 100, vec![0]),
+            cline(ROUTE_3, 200, vec![1]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        let mut texts = edit_texts(&result.edits);
+        texts.sort_unstable();
+        assert_eq!(texts, vec![ROUTE_1, ROUTE_2, ROUTE_3, ROUTE_4]);
+        assert_eq!(result.fallback_contexts, vec![Path(vec![0]), Path(vec![2])]);
+    }
+
+    #[test]
+    fn root_policy_is_resolved_like_any_other_path() {
+        let a = routes_after_hostname(ROUTE_1, ROUTE_2);
+        let b = routes_after_hostname(ROUTE_2, ROUTE_1);
+        let root_override = |default: OrderPolicy, policy: OrderPolicy| {
+            NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+                default,
+                overrides: vec![OrderPolicyOverride {
+                    context_prefix: Vec::new(),
+                    policy,
+                }],
+            })
+        };
+
+        let unordered = root_override(OrderPolicy::Ordered, OrderPolicy::Unordered);
+        let result = diff_views(&a, &b, &unordered).unwrap();
+        assert!(result.edits.is_empty(), "{:?}", result.edits);
+
+        let ordered = root_override(OrderPolicy::Unordered, OrderPolicy::Ordered);
+        let result = diff_views(&a, &b, &ordered).unwrap();
+        assert!(!result.edits.is_empty(), "the swap is drift under ordered");
     }
 
     #[test]

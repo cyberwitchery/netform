@@ -1365,3 +1365,188 @@ fn block_whose_partner_paired_by_contents_takes_the_next_one() {
         diff.edits
     );
 }
+
+const ROUTE_1: &str = "ip route 10.0.0.0 255.0.0.0 192.0.2.1";
+const ROUTE_2: &str = "ip route 10.0.0.0 255.0.0.0 192.0.2.2";
+const ROUTE_3: &str = "ip route 10.0.0.0 255.0.0.0 192.0.2.3";
+const SEQ_5: &str = "ip prefix-list PL seq 5 permit 10.0.0.0/8";
+const SEQ_5_DENY: &str = "ip prefix-list PL seq 5 deny 10.0.0.0/8";
+const SEQ_10: &str = "ip prefix-list PL seq 10 permit 192.168.0.0/16";
+
+type Parse = fn(&str) -> netform_ir::Document;
+
+const IOS_LIKE: [(&str, Parse); 3] = [
+    ("iosxe", parse_iosxe),
+    ("eos", netform_dialects::eos::parse),
+    ("nxos", netform_dialects::nxos::parse),
+];
+
+/// `hostname r1` then `lines`, at the top level and under `vrf definition X`.
+fn top_level_and_nested(lines: &[&str]) -> (String, String) {
+    let top = lines.iter().map(|line| format!("{line}\n"));
+    let nested = lines.iter().map(|line| format!(" {line}\n"));
+    (
+        format!("hostname r1\n{}", top.collect::<String>()),
+        format!(
+            "hostname r1\nvrf definition X\n{}",
+            nested.collect::<String>()
+        ),
+    )
+}
+
+fn unordered_top_level_diff(parse: Parse, a: &[&str], b: &[&str]) -> Diff {
+    let (a, _) = top_level_and_nested(a);
+    let (b, _) = top_level_and_nested(b);
+    diff_documents(
+        &parse(&a),
+        &parse(&b),
+        with_policy(OrderPolicy::Unordered, Vec::new()),
+    )
+    .unwrap()
+}
+
+#[test]
+fn swapped_top_level_static_routes_cancel_under_unordered() {
+    for (name, parse) in IOS_LIKE {
+        let diff = unordered_top_level_diff(parse, &[ROUTE_1, ROUTE_2], &[ROUTE_2, ROUTE_1]);
+        assert!(diff.edits.is_empty(), "{name}: {:?}", diff.edits);
+    }
+}
+
+#[test]
+fn swapped_top_level_prefix_list_entries_cancel_under_unordered() {
+    for (name, parse) in IOS_LIKE {
+        let diff = unordered_top_level_diff(parse, &[SEQ_5, SEQ_10], &[SEQ_10, SEQ_5]);
+        assert!(diff.edits.is_empty(), "{name}: {:?}", diff.edits);
+    }
+}
+
+#[test]
+fn top_level_value_change_is_still_reported_under_unordered() {
+    for (name, parse) in IOS_LIKE {
+        for (old, new) in [(ROUTE_1, ROUTE_3), (SEQ_5, SEQ_5_DENY)] {
+            let diff = unordered_top_level_diff(parse, &[old, SEQ_10], &[SEQ_10, new]);
+            assert!(diff.has_changes, "{name}: {old} -> {new}");
+            let mut expected = vec![old, new];
+            expected.sort_unstable();
+            assert_eq!(edited_texts(&diff), expected, "{name}: {:?}", diff.edits);
+        }
+    }
+}
+
+/// each edit's kind and its lines' trimmed text, sorted.
+fn edit_shapes(diff: &Diff) -> Vec<(&'static str, Vec<&str>)> {
+    fn texts(lines: &[DiffLine]) -> Vec<&str> {
+        lines.iter().map(|line| line.text.trim()).collect()
+    }
+    let mut shapes = diff
+        .edits
+        .iter()
+        .map(|edit| match edit {
+            Edit::Insert { lines, .. } => ("insert", texts(lines)),
+            Edit::Delete { lines, .. } => ("delete", texts(lines)),
+            Edit::Replace {
+                old_lines,
+                new_lines,
+                ..
+            } => ("replace", [texts(old_lines), texts(new_lines)].concat()),
+        })
+        .collect::<Vec<_>>();
+    shapes.sort_unstable();
+    shapes
+}
+
+#[test]
+fn unordered_top_level_and_nested_level_report_the_same_edits() {
+    let cases: [(&[&str], &[&str]); 4] = [
+        (&[ROUTE_1, ROUTE_2], &[ROUTE_2, ROUTE_1]),
+        (&[SEQ_5, SEQ_10], &[SEQ_10, SEQ_5]),
+        (&[ROUTE_1, ROUTE_2], &[ROUTE_2, ROUTE_3]),
+        (&[SEQ_5, SEQ_10], &[SEQ_10, SEQ_5_DENY]),
+    ];
+    let options = || with_policy(OrderPolicy::Unordered, Vec::new());
+
+    for (name, parse) in IOS_LIKE {
+        for (left, right) in cases {
+            let (a_top, a_nested) = top_level_and_nested(left);
+            let (b_top, b_nested) = top_level_and_nested(right);
+            let top = diff_documents(&parse(&a_top), &parse(&b_top), options()).unwrap();
+            let nested = diff_documents(&parse(&a_nested), &parse(&b_nested), options()).unwrap();
+            assert_eq!(
+                edit_shapes(&top),
+                edit_shapes(&nested),
+                "{name}: {left:?} -> {right:?}"
+            );
+        }
+    }
+}
+
+fn unreliable_regions(diff: &Diff) -> Vec<Path> {
+    diff.findings
+        .iter()
+        .filter(|finding| finding.code == crate::finding_code::DIFF_UNRELIABLE_REGION)
+        .filter_map(|finding| finding.path.clone())
+        .collect()
+}
+
+#[test]
+fn unordered_top_level_flags_the_regions_the_generic_dialect_flags() {
+    let cases: [(&[&str], &[&str], Vec<Path>); 3] = [
+        (&[ROUTE_1, ROUTE_2], &[ROUTE_2, ROUTE_1], Vec::new()),
+        (&[ROUTE_1, SEQ_10], &[ROUTE_3, SEQ_10], vec![Path(vec![1])]),
+        (
+            &[ROUTE_1, ROUTE_2, SEQ_10],
+            &[ROUTE_2, ROUTE_1, SEQ_5],
+            vec![Path(vec![1]), Path(vec![3])],
+        ),
+    ];
+
+    for (name, parse) in IOS_LIKE {
+        for (left, right, expected) in &cases {
+            let keyed = unordered_top_level_diff(parse, left, right);
+            let generic = unordered_top_level_diff(parse_generic, left, right);
+            assert_eq!(
+                unreliable_regions(&keyed),
+                *expected,
+                "{name}: {left:?} -> {right:?}"
+            );
+            assert_eq!(
+                unreliable_regions(&generic),
+                *expected,
+                "generic: {left:?} -> {right:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn ordered_override_on_a_top_level_block_holds_under_an_unordered_top_level() {
+    let acl = |first: &str, second: &str| {
+        format!(
+            "ip access-list extended ACL\n permit tcp any any eq {first}\n permit tcp any any eq {second}\n"
+        )
+    };
+    let a = parse_iosxe(&format!(
+        "hostname r1\n{ROUTE_1}\n{ROUTE_2}\n{}",
+        acl("443", "80")
+    ));
+    let b = parse_iosxe(&format!(
+        "{}{ROUTE_2}\n{ROUTE_1}\nhostname r1\n",
+        acl("80", "443")
+    ));
+
+    let silent = diff_documents(&a, &b, with_policy(OrderPolicy::Unordered, Vec::new())).unwrap();
+    assert!(silent.edits.is_empty(), "{:?}", silent.edits);
+
+    let acl_ordered = vec![OrderPolicyOverride {
+        context_prefix: vec![3],
+        policy: OrderPolicy::Ordered,
+    }];
+    let diff = diff_documents(&a, &b, with_policy(OrderPolicy::Unordered, acl_ordered)).unwrap();
+    assert_eq!(
+        edited_texts(&diff),
+        vec![" permit tcp any any eq 443", " permit tcp any any eq 443"],
+        "{:?}",
+        diff.edits
+    );
+}
