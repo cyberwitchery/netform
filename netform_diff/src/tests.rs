@@ -1316,6 +1316,104 @@ fn actions_swapped_between_fortios_policies_report_four_edits_under_unordered() 
     assert_eq!(diff.edits.len(), 4, "{:?}", diff.edits);
 }
 
+const REPATCHED_A: &str = "hostname r1\ninterface Ethernet1\n description srv1\n switchport access vlan 10\ninterface Ethernet2\n";
+const REPATCHED_B: &str = "hostname r1\ninterface Ethernet1\ninterface Ethernet2\n description srv1\n switchport access vlan 10\n";
+
+fn in_vrf(config: &str) -> String {
+    let body = config.lines().skip(1).map(|line| format!(" {line}\n"));
+    format!(
+        "hostname r1\nvrf definition X\n{}",
+        body.collect::<String>()
+    )
+}
+
+fn planned_line_edits(diff: &Diff) -> Vec<String> {
+    build_plan(diff)
+        .actions
+        .iter()
+        .flat_map(|action| match action {
+            PlanAction::ApplyLineEditsUnderContext {
+                context_path,
+                line_edits,
+            } => line_edits
+                .iter()
+                .map(|edit| format!("{:?} {:?} {}", context_path.0, edit.kind, edit.text))
+                .collect::<Vec<_>>(),
+            other => panic!("expected line edits, got {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn children_moved_to_an_empty_sibling_are_drift_under_every_policy() {
+    let shapes = [
+        (REPATCHED_A.to_string(), REPATCHED_B.to_string()),
+        (in_vrf(REPATCHED_A), in_vrf(REPATCHED_B)),
+    ];
+    for (a, b) in &shapes {
+        for parse in [parse_iosxe, parse_generic] {
+            for policy in [
+                OrderPolicy::Ordered,
+                OrderPolicy::Unordered,
+                OrderPolicy::KeyedStable,
+            ] {
+                let diff =
+                    diff_documents(&parse(a), &parse(b), with_policy(policy, Vec::new())).unwrap();
+                assert!(diff.has_changes, "{policy:?}:\n{a}");
+                let headers_reported = edited_texts(&diff)
+                    .iter()
+                    .any(|text| text.trim() == "interface Ethernet1");
+                assert_eq!(
+                    headers_reported,
+                    policy != OrderPolicy::Unordered,
+                    "{policy:?}: {:?}",
+                    diff.edits
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn moved_children_are_planned_under_the_interfaces_they_left_and_joined() {
+    let diff = diff_documents(
+        &parse_iosxe(REPATCHED_A),
+        &parse_iosxe(REPATCHED_B),
+        with_policy(OrderPolicy::Unordered, Vec::new()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        planned_line_edits(&diff),
+        [
+            "[1] Delete  description srv1",
+            "[1] Delete  switchport access vlan 10",
+            "[2] Insert  description srv1",
+            "[2] Insert  switchport access vlan 10",
+        ]
+    );
+}
+
+#[test]
+fn a_renamed_interface_is_planned_whole_under_unordered() {
+    let diff = diff_documents(
+        &parse_iosxe("hostname r1\ninterface Ethernet1\n shutdown\n"),
+        &parse_iosxe("hostname r1\ninterface Ethernet10\n shutdown\n"),
+        with_policy(OrderPolicy::Unordered, Vec::new()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        planned_line_edits(&diff),
+        [
+            "[] Delete interface Ethernet1",
+            "[] Delete  shutdown",
+            "[] Insert interface Ethernet10",
+            "[] Insert  shutdown",
+        ]
+    );
+}
+
 #[test]
 fn override_on_a_moved_block_follows_its_left_path() {
     let a = parse_generic("hostname r1\npolicy-map WAN\n class VOICE\n  police 8000\n  priority\n");
