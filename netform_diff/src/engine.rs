@@ -232,6 +232,8 @@ fn diff_matched_segment(
 ///
 /// blocks sharing a header identity are paired and diffed like matched
 /// segments; the chunked edits for leaves and unpaired blocks are returned.
+/// under `Unordered` a block also pairs with a leaf of the same text, and an
+/// unpaired block is reported whole rather than line by line.
 fn diff_sibling_multiset(
     deleted: Vec<Segment>,
     inserted: Vec<Segment>,
@@ -240,10 +242,23 @@ fn diff_sibling_multiset(
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<Vec<Edit>, DiffError> {
-    let (pairs, deleted, inserted) = pair_blocks(deleted, inserted, policy);
+    let unordered = policy == OrderPolicy::Unordered;
+    let (mut pairs, deleted, inserted) = pair_blocks(deleted, inserted, policy);
+    let (deleted, inserted) = if unordered {
+        pair_blocks_with_leaves(&mut pairs, deleted, inserted)
+    } else {
+        (deleted, inserted)
+    };
     for (left, right) in &pairs {
         diff_matched_segment(left, right, options, edits, fallback_contexts)?;
     }
+
+    let (deleted_blocks, deleted): (Vec<_>, Vec<_>) = deleted
+        .into_iter()
+        .partition(|segment| unordered && segment.is_block);
+    let (inserted_blocks, inserted): (Vec<_>, Vec<_>) = inserted
+        .into_iter()
+        .partition(|segment| unordered && segment.is_block);
 
     let deleted_lines = deleted
         .into_iter()
@@ -253,7 +268,16 @@ fn diff_sibling_multiset(
         .into_iter()
         .flat_map(|segment| segment.lines)
         .collect::<Vec<_>>();
-    line_diff(&deleted_lines, &inserted_lines, policy)
+    let mut chunked = line_diff(&deleted_lines, &inserted_lines, policy)?;
+    for block in &deleted_blocks {
+        let lines = block.lines.iter().map(to_diff_line).collect();
+        chunked.extend(finalize_edit(lines, Vec::new()));
+    }
+    for block in &inserted_blocks {
+        let lines = block.lines.iter().map(to_diff_line).collect();
+        chunked.extend(finalize_edit(Vec::new(), lines));
+    }
+    Ok(chunked)
 }
 
 /// pairs blocks with the same header identity, preferring a partner with the
@@ -318,14 +342,63 @@ fn pair_blocks(
     (pairs, unpaired_deleted, unpaired_inserted)
 }
 
-/// takes the first inserted segment in `queue` that is still unpaired.
+/// pairs each unpaired block with the first unpaired leaf of the same text on the other side.
+fn pair_blocks_with_leaves(
+    pairs: &mut Vec<(Segment, Segment)>,
+    deleted: Vec<Segment>,
+    inserted: Vec<Segment>,
+) -> (Vec<Segment>, Vec<Segment>) {
+    let mut deleted = deleted.into_iter().map(Some).collect::<Vec<_>>();
+    let mut inserted = inserted.into_iter().map(Some).collect::<Vec<_>>();
+    let mut deleted_leaves = leaves_by_text(&deleted);
+    let mut inserted_leaves = leaves_by_text(&inserted);
+
+    for slot in &mut deleted {
+        if let Some(block) = slot.take_if(|segment| segment.is_block) {
+            let key = unordered_key(&block.lines[0]);
+            match take_first(inserted_leaves.get_mut(&key), &mut inserted) {
+                Some(leaf) => pairs.push((block, leaf)),
+                None => *slot = Some(block),
+            }
+        }
+    }
+    for slot in &mut inserted {
+        if let Some(block) = slot.take_if(|segment| segment.is_block) {
+            let key = unordered_key(&block.lines[0]);
+            match take_first(deleted_leaves.get_mut(&key), &mut deleted) {
+                Some(leaf) => pairs.push((leaf, block)),
+                None => *slot = Some(block),
+            }
+        }
+    }
+
+    (
+        deleted.into_iter().flatten().collect(),
+        inserted.into_iter().flatten().collect(),
+    )
+}
+
+fn leaves_by_text(segments: &[Option<Segment>]) -> HashMap<u64, VecDeque<usize>> {
+    let mut by_text: HashMap<u64, VecDeque<usize>> = HashMap::new();
+    for (index, segment) in segments.iter().enumerate() {
+        if let Some(leaf) = segment.as_ref().filter(|segment| !segment.is_block) {
+            by_text
+                .entry(unordered_key(&leaf.lines[0]))
+                .or_default()
+                .push_back(index);
+        }
+    }
+    by_text
+}
+
+/// takes the first segment in `queue` that is still unpaired.
 fn take_first(
     queue: Option<&mut VecDeque<usize>>,
-    inserted: &mut [Option<Segment>],
+    segments: &mut [Option<Segment>],
 ) -> Option<Segment> {
     let queue = queue?;
     while let Some(index) = queue.pop_front() {
-        if let Some(segment) = inserted[index].take() {
+        if let Some(segment) = segments[index].take() {
             return Some(segment);
         }
     }
@@ -1756,16 +1829,19 @@ mod tests {
         });
 
         let result = diff_views(&a, &b, &options).unwrap();
-        let texts = edit_texts(&result.edits);
-        assert!(
-            texts.contains(&"ip access-list extended ACL-IN")
-                && texts.contains(&"ip access-list extended ACL-OUT"),
-            "the rename must still be reported: {:?}",
-            result.edits
-        );
-        assert!(
-            !texts.iter().any(|text| text.contains("permit")),
-            "an override on this segment makes its reordered lines cancel: {:?}",
+        let mut texts = edit_texts(&result.edits);
+        texts.sort_unstable();
+        assert_eq!(
+            texts,
+            vec![
+                " permit tcp any any eq 443",
+                " permit tcp any any eq 443",
+                " permit tcp any any eq 80",
+                " permit tcp any any eq 80",
+                "ip access-list extended ACL-IN",
+                "ip access-list extended ACL-OUT",
+            ],
+            "an override on this segment makes the flush report each ACL whole: {:?}",
             result.edits
         );
     }
@@ -1981,6 +2057,123 @@ mod tests {
                 vec!["  police 8000", "  police 8000"]
             );
         }
+    }
+
+    fn repatched_interfaces(prefix: &[usize]) -> (ComparisonView, ComparisonView) {
+        let at = |tail: &[usize]| [prefix, tail].concat();
+        let parent =
+            || (!prefix.is_empty()).then(|| cline("vrf definition X", 100, prefix.to_vec()));
+        let a = parent().into_iter().chain([
+            cline("interface Ethernet1", 200, at(&[0])),
+            cline(" description srv1", 201, at(&[0, 0])),
+            cline(" switchport access vlan 10", 202, at(&[0, 1])),
+            cline("interface Ethernet2", 310, at(&[1])),
+        ]);
+        let b = parent().into_iter().chain([
+            cline("interface Ethernet1", 210, at(&[0])),
+            cline("interface Ethernet2", 300, at(&[1])),
+            cline(" description srv1", 301, at(&[1, 0])),
+            cline(" switchport access vlan 10", 302, at(&[1, 1])),
+        ]);
+        (view(a.collect()), view(b.collect()))
+    }
+
+    #[test]
+    fn children_moved_to_a_sibling_that_was_a_leaf_are_reported_under_unordered() {
+        for prefix in [&[][..], &[0]] {
+            let (a, b) = repatched_interfaces(prefix);
+            let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+            let [
+                Edit::Delete {
+                    lines: deleted,
+                    left_anchor: Some(left),
+                    ..
+                },
+                Edit::Insert {
+                    lines: inserted,
+                    right_anchor: Some(right),
+                    ..
+                },
+            ] = &result.edits[..]
+            else {
+                panic!(
+                    "{prefix:?}: expected a delete and an insert, got {:?}",
+                    result.edits
+                );
+            };
+            let children = [" description srv1", " switchport access vlan 10"];
+            assert_eq!(
+                deleted.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+                children
+            );
+            assert_eq!(
+                inserted.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+                children
+            );
+            assert_eq!(left.path, Path([prefix, &[0, 0]].concat()));
+            assert_eq!(right.path, Path([prefix, &[1, 0]].concat()));
+            assert!(
+                result.fallback_contexts.is_empty(),
+                "{:?}",
+                result.fallback_contexts
+            );
+        }
+    }
+
+    #[test]
+    fn a_block_pairs_with_a_block_before_a_leaf_of_its_header() {
+        let a = view(vec![
+            cline("vrf definition X", 100, vec![0]),
+            cline(" interface Ethernet1", 200, vec![0, 0]),
+            cline("  shutdown", 201, vec![0, 0, 0]),
+        ]);
+        let b = view(vec![
+            cline("vrf definition X", 100, vec![0]),
+            cline(" interface Ethernet1", 210, vec![0, 0]),
+            cline(" interface Ethernet1", 200, vec![0, 1]),
+            cline("  shutdown", 201, vec![0, 1, 0]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        assert_eq!(edit_texts(&result.edits), vec![" interface Ethernet1"]);
+        assert!(matches!(&result.edits[..], [Edit::Insert { .. }]));
+    }
+
+    #[test]
+    fn a_renamed_child_block_is_reported_whole_only_under_unordered() {
+        let a = view(vec![
+            cline("vrf definition X", 100, vec![0]),
+            cline(" interface Ethernet1", 200, vec![0, 0]),
+            cline("  shutdown", 201, vec![0, 0, 0]),
+        ]);
+        let b = view(vec![
+            cline("vrf definition X", 100, vec![0]),
+            cline(" interface Ethernet10", 210, vec![0, 0]),
+            cline("  shutdown", 211, vec![0, 0, 0]),
+        ]);
+
+        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
+        let [
+            Edit::Delete { lines: deleted, .. },
+            Edit::Insert {
+                lines: inserted, ..
+            },
+        ] = &result.edits[..]
+        else {
+            panic!("expected a delete and an insert, got {:?}", result.edits);
+        };
+        let texts = |lines: &[DiffLine]| lines.iter().map(|l| l.text.clone()).collect::<Vec<_>>();
+        assert_eq!(texts(deleted), [" interface Ethernet1", "  shutdown"]);
+        assert_eq!(texts(inserted), [" interface Ethernet10", "  shutdown"]);
+
+        let ordered = diff_views(&a, &b, &default_policy(OrderPolicy::Ordered)).unwrap();
+        assert!(
+            matches!(&ordered.edits[..], [Edit::Replace { .. }]),
+            "{:?}",
+            ordered.edits
+        );
+        let keyed = diff_views(&a, &b, &default_policy(OrderPolicy::KeyedStable)).unwrap();
+        assert_eq!(keyed.edits.len(), 4, "{:?}", keyed.edits);
     }
 
     #[test]

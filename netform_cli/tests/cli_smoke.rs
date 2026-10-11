@@ -1223,8 +1223,10 @@ fn config_diff_policy_override_on_a_renamed_root_segment() {
         "the rename must still be reported: {stdout}"
     );
     assert!(
-        !stdout.contains("permit"),
-        "--policy-override 0:unordered must cancel the reordered lines it names: {stdout}"
+        stdout.contains("@@ delete 3 line(s)")
+            && stdout.contains("@@ insert 3 line(s)")
+            && !stdout.contains("@@ replace"),
+        "--policy-override 0:unordered must report each ACL whole, not the ordered replace: {stdout}"
     );
 }
 
