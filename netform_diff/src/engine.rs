@@ -255,6 +255,43 @@ fn diff_matched_segment(
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<(), DiffError> {
+    let first_edit = edits.len();
+    diff_matched_contents(left, right, options, edits, fallback_contexts)?;
+    anchor_child_inserts(&mut edits[first_edit..], &left.lines[0], &right.lines[0]);
+    Ok(())
+}
+
+/// gives each insert placed directly under `right_header` the left-side header it pairs with.
+fn anchor_child_inserts(
+    edits: &mut [Edit],
+    left_header: &ComparisonLine,
+    right_header: &ComparisonLine,
+) {
+    for edit in edits {
+        if let Edit::Insert {
+            left_anchor: left_anchor @ None,
+            lines,
+            ..
+        } = edit
+            && lines
+                .first()
+                .is_some_and(|line| crate::util::parent_path(&line.path) == right_header.path)
+        {
+            *left_anchor = Some(EditAnchor {
+                path: left_header.path.clone(),
+                span: left_header.span.clone(),
+            });
+        }
+    }
+}
+
+fn diff_matched_contents(
+    left: &Segment,
+    right: &Segment,
+    options: &NormalizeOptions,
+    edits: &mut Vec<Edit>,
+    fallback_contexts: &mut Vec<netform_ir::Path>,
+) -> Result<(), DiffError> {
     if !(left.is_block && right.is_block) {
         edits.extend(diff_matched_lines(&left.lines, &right.lines));
         return Ok(());
