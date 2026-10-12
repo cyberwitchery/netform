@@ -65,7 +65,7 @@ struct Node {
 struct Applier<'a> {
     nodes: Vec<Node>,
     by_path: HashMap<Vec<usize>, usize>,
-    replaced_from: HashMap<String, Vec<String>>,
+    replaced_from: HashMap<(usize, String), Vec<String>>,
     parse: Parse,
     options: &'a NormalizeOptions,
 }
@@ -98,9 +98,10 @@ impl<'a> Applier<'a> {
             } = edit
                 && let ([old], [new]) = (old_lines.as_slice(), new_lines.as_slice())
             {
+                let context = applier.by_path[&old.path.0[..old.path.0.len() - 1]];
                 applier
                     .replaced_from
-                    .entry(new.text.clone())
+                    .entry((context, new.text.clone()))
                     .or_default()
                     .push(old.text.clone());
             }
@@ -210,15 +211,18 @@ impl<'a> Applier<'a> {
                 for edit in run {
                     let olds = self
                         .replaced_from
-                        .get(&edit.text)
-                        .cloned()
-                        .unwrap_or_default();
-                    let child = self.nodes[context]
+                        .get_mut(&(context, edit.text.clone()))
+                        .ok_or_else(|| format!("no line for replace `{}`", edit.text))?;
+                    let (child, old) = self.nodes[context]
                         .children
                         .iter()
-                        .copied()
-                        .find(|&child| olds.contains(&self.nodes[child].original))
+                        .find_map(|&child| {
+                            let original = &self.nodes[child].original;
+                            let old = olds.iter().position(|old| old == original)?;
+                            Some((child, old))
+                        })
                         .ok_or_else(|| format!("no line for replace `{}`", edit.text))?;
+                    olds.swap_remove(old);
                     let new = self
                         .fragment([&edit.text])
                         .pop()
@@ -299,6 +303,41 @@ fn new_nested_block_is_planned_whole_under_its_parent() {
     for policy in POLICIES {
         check_plan(left, right, parse_generic, &options_for(policy));
     }
+}
+
+#[test]
+fn edited_twin_block_is_planned_before_its_twin_is_deleted() {
+    let left = "router bgp 1\n   address-family ipv4\n      network 10.1.0.0/16\n   address-family ipv4\n      network 10.1.0.0/16\n";
+    let right = "router bgp 1\n   address-family ipv6\n      network 2001:db8::/32\n   address-family ipv4\n      network 10.1.0.0/16\n      network 10.2.0.0/16\n";
+    for policy in POLICIES {
+        check_plan(left, right, parse_generic, &options_for(policy));
+    }
+}
+
+#[test]
+fn edited_route_policy_else_branch_is_planned_before_its_twin_is_deleted() {
+    let parse = netform_dialects::find("iosxr")
+        .expect("iosxr dialect")
+        .parse;
+    let left = "route-policy X\n  if destination in A then\n    drop\n  else\n    pass\n  endif\n  if destination in B then\n    drop\n  else\n    pass\n  endif\nend-policy\n";
+    let right = "route-policy X\n  set med 10\n  if destination in A then\n    drop\n  else\n    set local-preference 200\n    pass\n  endif\nend-policy\n";
+    for policy in POLICIES {
+        check_plan(left, right, parse, &options_for(policy));
+    }
+}
+
+#[test]
+fn replaces_with_the_same_new_text_apply_to_their_own_lines() {
+    let left =
+        "interface Ethernet1\n  description x\ninterface Ethernet2\n  description x\n  mtu 1500\n";
+    let right =
+        "interface Ethernet1\n  mtu 9000\ninterface Ethernet2\n  description x\n  mtu 9000\n";
+    check_plan(
+        left,
+        right,
+        parse_generic,
+        &options_for(OrderPolicy::Ordered),
+    );
 }
 
 #[derive(serde::Deserialize)]

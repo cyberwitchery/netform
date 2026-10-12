@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
 use netform_ir::Path;
@@ -10,8 +11,9 @@ use crate::util::{parent_path, path_starts_with};
 
 /// convert a [`Diff`] into a transport-neutral action plan.
 ///
-/// every `context_path` and `target_path` in the plan addresses the left-hand
-/// document, the one the plan is applied to.
+/// every `context_path` and `target_path` in the plan names a node of the
+/// original left-hand document, the one the plan is applied to, and actions
+/// come deepest first.
 pub fn build_plan(diff: &Diff) -> Plan {
     let mut lines = PlanLines::default();
     let mut findings = Vec::new();
@@ -201,15 +203,14 @@ impl<'a> PlanLines<'a> {
         let block_targets = self
             .blocks
             .iter()
-            .map(|block| &block.target.path)
-            .collect::<Vec<_>>();
+            .map(|block| block.target.path.0.as_slice())
+            .collect::<HashSet<_>>();
         let deleted = self
             .deleted
             .into_iter()
             .filter(|placed| {
-                !block_targets
-                    .iter()
-                    .any(|target| path_starts_with(&placed.line.path.0, &target.0))
+                let path = &placed.line.path.0;
+                !(0..=path.len()).any(|len| block_targets.contains(&path[..len]))
             })
             .map(|placed| (placed, ()))
             .collect();
@@ -262,7 +263,13 @@ impl<'a> PlanLines<'a> {
                 )
             }))
             .collect::<Vec<_>>();
-        actions.sort_by_key(|(order, _)| *order);
+        actions.sort_by_key(|(order, action)| {
+            let depth = match action {
+                PlanAction::ReplaceBlock { target_path, .. } => target_path.0.len(),
+                PlanAction::ApplyLineEditsUnderContext { context_path, .. } => context_path.0.len(),
+            };
+            (Reverse(depth), *order)
+        });
         actions.into_iter().map(|(_, action)| action).collect()
     }
 }

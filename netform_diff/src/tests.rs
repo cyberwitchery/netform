@@ -1704,3 +1704,35 @@ fn ordered_override_on_a_top_level_block_holds_under_an_unordered_top_level() {
         diff.edits
     );
 }
+
+#[test]
+fn inserts_into_a_block_only_the_right_side_has_get_no_left_anchor() {
+    let a = parse_generic("router bgp 1\n  neighbor 1.1.1.1\n");
+    let b = parse_generic(
+        "router bgp 1\n  neighbor 1.1.1.1\n  vrf A\n    address-family ipv4\n      network 10.0.0.0/8\n",
+    );
+
+    let diff = diff_documents(&a, &b, with_policy(OrderPolicy::KeyedStable, Vec::new())).unwrap();
+    let mut anchors = diff
+        .edits
+        .iter()
+        .map(|edit| match edit {
+            Edit::Insert {
+                left_anchor, lines, ..
+            } => (
+                lines[0].text.as_str(),
+                left_anchor.as_ref().map(|anchor| anchor.path.0.clone()),
+            ),
+            other => panic!("expected only inserts, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    anchors.sort();
+    assert_eq!(
+        anchors,
+        [
+            ("      network 10.0.0.0/8", None),
+            ("    address-family ipv4", None),
+            ("  vrf A", Some(vec![0])),
+        ]
+    );
+}
