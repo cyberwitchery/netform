@@ -37,7 +37,10 @@
       "additionalProperties": false,
       "properties": {
         "type": { "const": "replace_block" },
-        "target_path": { "$ref": "#/$defs/path" },
+        "target_path": {
+          "$ref": "#/$defs/path",
+          "description": "the left-side node to replace, its subtree included"
+        },
         "target_span": { "$ref": "#/$defs/span" },
         "intended_lines": {
           "type": "array",
@@ -51,9 +54,13 @@
       "additionalProperties": false,
       "properties": {
         "type": { "const": "apply_line_edits_under_context" },
-        "context_path": { "$ref": "#/$defs/path" },
+        "context_path": {
+          "$ref": "#/$defs/path",
+          "description": "the left-side block whose children the line edits change; empty for the top level"
+        },
         "line_edits": {
           "type": "array",
+          "description": "deletes, then replaces, then inserts; a removed or added block's lines follow its header",
           "items": {
             "type": "object",
             "required": ["kind", "text"],

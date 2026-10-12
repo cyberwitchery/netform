@@ -256,7 +256,14 @@ fn build_plan_creates_insert_and_delete_line_actions_with_anchor_context() {
             },
             Edit::Insert {
                 at_key: Some(22),
-                left_anchor: None,
+                left_anchor: Some(EditAnchor {
+                    path: Path(vec![0]),
+                    span: Span {
+                        line: 1,
+                        start_byte: 0,
+                        end_byte: 9,
+                    },
+                }),
                 right_anchor: Some(insert_anchor),
                 lines: vec![DiffLine {
                     content_key: 22,
@@ -577,7 +584,7 @@ fn build_plan_replace_with_single_old_multi_new_creates_replace_block() {
 }
 
 #[test]
-fn build_plan_replace_with_multi_old_single_new_creates_replace_block() {
+fn build_plan_replace_of_sibling_lines_deletes_them_and_inserts_under_their_context() {
     let anchor = EditAnchor {
         path: Path(vec![0, 1]),
         span: Span {
@@ -632,8 +639,29 @@ fn build_plan_replace_with_multi_old_single_new_creates_replace_block() {
     };
 
     let plan = build_plan(&diff);
+    assert!(plan.findings.is_empty());
     assert_eq!(plan.actions.len(), 1);
-    assert!(matches!(plan.actions[0], PlanAction::ReplaceBlock { .. }));
+    match &plan.actions[0] {
+        PlanAction::ApplyLineEditsUnderContext {
+            context_path,
+            line_edits,
+        } => {
+            assert_eq!(context_path.0, vec![0]);
+            let edits = line_edits
+                .iter()
+                .map(|edit| (edit.kind.clone(), edit.text.as_str()))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                edits,
+                [
+                    (PlanLineEditKind::Delete, "  description old-a"),
+                    (PlanLineEditKind::Delete, "  description old-b"),
+                    (PlanLineEditKind::Insert, "  description merged"),
+                ]
+            );
+        }
+        other => panic!("expected line edits under [0], got {other:?}"),
+    }
 }
 
 #[test]
@@ -649,7 +677,14 @@ fn build_plan_insert_with_anchor_creates_insert_line_edit() {
     let diff = Diff {
         edits: vec![Edit::Insert {
             at_key: Some(1),
-            left_anchor: None,
+            left_anchor: Some(EditAnchor {
+                path: Path(vec![0]),
+                span: Span {
+                    line: 1,
+                    start_byte: 0,
+                    end_byte: 9,
+                },
+            }),
             right_anchor: Some(anchor),
             lines: vec![DiffLine {
                 content_key: 1,
@@ -752,7 +787,14 @@ fn build_plan_edits_under_different_contexts_create_separate_actions() {
         edits: vec![
             Edit::Insert {
                 at_key: Some(1),
-                left_anchor: None,
+                left_anchor: Some(EditAnchor {
+                    path: Path(vec![0]),
+                    span: Span {
+                        line: 1,
+                        start_byte: 0,
+                        end_byte: 9,
+                    },
+                }),
                 right_anchor: Some(anchor_a),
                 lines: vec![DiffLine {
                     content_key: 1,
@@ -768,7 +810,14 @@ fn build_plan_edits_under_different_contexts_create_separate_actions() {
             },
             Edit::Insert {
                 at_key: Some(2),
-                left_anchor: None,
+                left_anchor: Some(EditAnchor {
+                    path: Path(vec![1]),
+                    span: Span {
+                        line: 4,
+                        start_byte: 40,
+                        end_byte: 49,
+                    },
+                }),
                 right_anchor: Some(anchor_b),
                 lines: vec![DiffLine {
                     content_key: 2,
@@ -834,7 +883,14 @@ fn build_plan_mixed_edit_types_group_under_same_context() {
             },
             Edit::Insert {
                 at_key: Some(2),
-                left_anchor: None,
+                left_anchor: Some(EditAnchor {
+                    path: Path(vec![0]),
+                    span: Span {
+                        line: 1,
+                        start_byte: 0,
+                        end_byte: 9,
+                    },
+                }),
                 right_anchor: Some(mk_anchor(2)),
                 lines: vec![mk_line(2, 2, "  shutdown")],
             },
@@ -860,8 +916,8 @@ fn build_plan_mixed_edit_types_group_under_same_context() {
             assert_eq!(context_path.0, vec![0]);
             assert_eq!(line_edits.len(), 3);
             assert_eq!(line_edits[0].kind, PlanLineEditKind::Delete);
-            assert_eq!(line_edits[1].kind, PlanLineEditKind::Insert);
-            assert_eq!(line_edits[2].kind, PlanLineEditKind::Replace);
+            assert_eq!(line_edits[1].kind, PlanLineEditKind::Replace);
+            assert_eq!(line_edits[2].kind, PlanLineEditKind::Insert);
         }
         _ => panic!("expected single grouped line-edit action"),
     }
@@ -1646,5 +1702,37 @@ fn ordered_override_on_a_top_level_block_holds_under_an_unordered_top_level() {
         vec![" permit tcp any any eq 443", " permit tcp any any eq 443"],
         "{:?}",
         diff.edits
+    );
+}
+
+#[test]
+fn inserts_into_a_block_only_the_right_side_has_get_no_left_anchor() {
+    let a = parse_generic("router bgp 1\n  neighbor 1.1.1.1\n");
+    let b = parse_generic(
+        "router bgp 1\n  neighbor 1.1.1.1\n  vrf A\n    address-family ipv4\n      network 10.0.0.0/8\n",
+    );
+
+    let diff = diff_documents(&a, &b, with_policy(OrderPolicy::KeyedStable, Vec::new())).unwrap();
+    let mut anchors = diff
+        .edits
+        .iter()
+        .map(|edit| match edit {
+            Edit::Insert {
+                left_anchor, lines, ..
+            } => (
+                lines[0].text.as_str(),
+                left_anchor.as_ref().map(|anchor| anchor.path.0.clone()),
+            ),
+            other => panic!("expected only inserts, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    anchors.sort();
+    assert_eq!(
+        anchors,
+        [
+            ("      network 10.0.0.0/8", None),
+            ("    address-family ipv4", None),
+            ("  vrf A", Some(vec![0])),
+        ]
     );
 }

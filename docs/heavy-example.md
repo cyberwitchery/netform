@@ -197,8 +197,8 @@ with `--format markdown` added to the run above:
       "type": "apply_line_edits_under_context",
       "context_path": [19],
       "line_edits": [
-        { "kind": "insert", "text": "  shutdown" },
-        { "kind": "delete", "text": "  no shutdown" }
+        { "kind": "delete", "text": "  no shutdown" },
+        { "kind": "insert", "text": "  shutdown" }
       ]
     }
   ],
