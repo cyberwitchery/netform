@@ -6,11 +6,8 @@
   "required": ["normalization_steps", "order_policy", "has_changes", "edits", "stats", "findings"],
   "additionalProperties": false,
   "properties": {
-    "normalization_steps": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/normalization_step" }
-    },
-    "order_policy": { "$ref": "#/$defs/order_policy" },
+    "normalization_steps": { "$ref": "normalization-pipeline.schema.json" },
+    "order_policy": { "$ref": "order-policy.schema.json" },
     "has_changes": { "type": "boolean" },
     "edits": {
       "type": "array",
@@ -23,43 +20,6 @@
     }
   },
   "$defs": {
-    "normalization_step": {
-      "type": "string",
-      "enum": [
-        "ignore_comments",
-        "ignore_blank_lines",
-        "trim_trailing_whitespace",
-        "normalize_leading_whitespace",
-        "collapse_internal_whitespace"
-      ]
-    },
-    "order_policy_mode": {
-      "type": "string",
-      "enum": ["ordered", "unordered", "keyed-stable"]
-    },
-    "order_policy": {
-      "type": "object",
-      "required": ["default", "overrides"],
-      "additionalProperties": false,
-      "properties": {
-        "default": { "$ref": "#/$defs/order_policy_mode" },
-        "overrides": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["context_prefix", "policy"],
-            "additionalProperties": false,
-            "properties": {
-              "context_prefix": {
-                "type": "array",
-                "items": { "type": "integer", "minimum": 0 }
-              },
-              "policy": { "$ref": "#/$defs/order_policy_mode" }
-            }
-          }
-        }
-      }
-    },
     "path": {
       "type": "array",
       "items": { "type": "integer", "minimum": 0 }
@@ -174,23 +134,25 @@
         "replaced_new_lines": { "type": "integer", "minimum": 0 }
       }
     },
+    "finding_code": {
+      "type": "string",
+      "enum": [
+        "unknown_unparsed_construct",
+        "ambiguous_key_match",
+        "diff_unreliable_region"
+      ]
+    },
+    "finding_level": {
+      "type": "string",
+      "enum": ["warning", "info"]
+    },
     "finding": {
       "type": "object",
       "required": ["code", "level", "message", "path", "span"],
       "additionalProperties": false,
       "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "unknown_unparsed_construct",
-            "ambiguous_key_match",
-            "diff_unreliable_region"
-          ]
-        },
-        "level": {
-          "type": "string",
-          "enum": ["warning", "info"]
-        },
+        "code": { "$ref": "#/$defs/finding_code" },
+        "level": { "$ref": "#/$defs/finding_level" },
         "message": { "type": "string" },
         "path": {
           "oneOf": [

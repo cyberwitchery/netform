@@ -17,20 +17,8 @@
     }
   },
   "$defs": {
-    "path": {
-      "type": "array",
-      "items": { "type": "integer", "minimum": 0 }
-    },
-    "span": {
-      "type": "object",
-      "required": ["line", "start_byte", "end_byte"],
-      "additionalProperties": false,
-      "properties": {
-        "line": { "type": "integer", "minimum": 1 },
-        "start_byte": { "type": "integer", "minimum": 0 },
-        "end_byte": { "type": "integer", "minimum": 0 }
-      }
-    },
+    "path": { "$ref": "diff.schema.json#/$defs/path" },
+    "span": { "$ref": "diff.schema.json#/$defs/span" },
     "replace_block_action": {
       "type": "object",
       "required": ["type", "target_path", "target_span", "intended_lines"],
@@ -82,13 +70,20 @@
         { "$ref": "#/$defs/apply_line_edits_action" }
       ]
     },
+    "finding_code": {
+      "type": "string",
+      "enum": ["missing_anchor"]
+    },
     "finding": {
       "type": "object",
       "required": ["code", "message"],
       "additionalProperties": false,
       "properties": {
-        "code": { "type": "string" },
-        "message": { "type": "string" }
+        "code": { "$ref": "#/$defs/finding_code" },
+        "message": { "type": "string" },
+        "level": { "$ref": "diff.schema.json#/$defs/finding_level" },
+        "path": { "$ref": "#/$defs/path" },
+        "span": { "$ref": "#/$defs/span" }
       }
     }
   }
