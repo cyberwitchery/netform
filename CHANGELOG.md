@@ -1,6 +1,6 @@
 # changelog
 
-## Unreleased
+## [0.10.1] - 2026-10-14
 
 - `--order-policy unordered` now reports lines that move into a sibling block that has no children on the other side. moving `description srv1` and `switchport access vlan 10` from `interface Ethernet1` to an empty `interface Ethernet2` exited 0 with no edits, at the top level and inside a block such as `vrf definition X`, while `ordered` and `keyed-stable` exited 1; it is now reported as those two lines deleted under `interface Ethernet1` and inserted under `interface Ethernet2`. a block with no counterpart on the other side, such as a renamed `ip access-list`, is now reported whole instead of as its header alone, so `--plan-json` no longer plans the renamed block without its body
 - `--normalize-whitespace` now also turns a single tab between words into a space. a line whose words were each separated by one whitespace character was left untouched, so `interface\tGi0/1` was still reported as differing from `interface Gi0/1`
