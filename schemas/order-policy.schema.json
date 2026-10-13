@@ -6,10 +6,7 @@
   "required": ["default", "overrides"],
   "additionalProperties": false,
   "properties": {
-    "default": {
-      "type": "string",
-      "enum": ["ordered", "unordered", "keyed-stable"]
-    },
+    "default": { "$ref": "#/$defs/mode" },
     "overrides": {
       "type": "array",
       "items": {
@@ -21,12 +18,15 @@
             "type": "array",
             "items": { "type": "integer", "minimum": 0 }
           },
-          "policy": {
-            "type": "string",
-            "enum": ["ordered", "unordered", "keyed-stable"]
-          }
+          "policy": { "$ref": "#/$defs/mode" }
         }
       }
+    }
+  },
+  "$defs": {
+    "mode": {
+      "type": "string",
+      "enum": ["ordered", "unordered", "keyed-stable"]
     }
   }
 }

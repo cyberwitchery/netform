@@ -16,24 +16,12 @@
     "name": { "type": "string" },
     "dialect": {
       "type": "string",
-      "enum": ["generic", "eos", "iosxe", "junos"],
+      "enum": ["generic", "eos", "fortios", "iosxe", "iosxr", "junos", "nxos"],
       "default": "generic"
     },
     "intended": { "type": "string" },
     "actual": { "type": "string" },
-    "normalization_steps": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "ignore_comments",
-          "ignore_blank_lines",
-          "trim_trailing_whitespace",
-          "normalize_leading_whitespace",
-          "collapse_internal_whitespace"
-        ]
-      }
-    },
+    "normalization_steps": { "$ref": "normalization-pipeline.schema.json" },
     "order_policy": { "$ref": "order-policy.schema.json" },
     "expected": {
       "type": "object",
@@ -47,14 +35,7 @@
         },
         "finding_codes": {
           "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "unknown_unparsed_construct",
-              "ambiguous_key_match",
-              "diff_unreliable_region"
-            ]
-          }
+          "items": { "$ref": "diff.schema.json#/$defs/finding_code" }
         }
       }
     }
