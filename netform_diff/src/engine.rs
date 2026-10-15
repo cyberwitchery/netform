@@ -1131,54 +1131,20 @@ mod tests {
     }
 
     #[test]
-    fn compute_ops_identical_sequences() {
-        let ops = compute_ops(&[1, 2, 3], &[1, 2, 3]).unwrap();
-        assert_eq!(ops, vec![Op::Equal, Op::Equal, Op::Equal]);
-    }
-
-    #[test]
-    fn compute_ops_empty_left_yields_all_inserts() {
-        let ops = compute_ops(&[], &[1, 2]).unwrap();
-        assert_eq!(ops, vec![Op::Insert, Op::Insert]);
-    }
-
-    #[test]
-    fn compute_ops_empty_right_yields_all_deletes() {
-        let ops = compute_ops(&[1, 2], &[]).unwrap();
-        assert_eq!(ops, vec![Op::Delete, Op::Delete]);
-    }
-
-    #[test]
-    fn compute_ops_both_empty() {
-        let ops = compute_ops(&[], &[]).unwrap();
-        assert!(ops.is_empty());
-    }
-
-    #[test]
-    fn compute_ops_single_insertion() {
-        let ops = compute_ops(&[1, 3], &[1, 2, 3]).unwrap();
-        let inserts = ops.iter().filter(|o| **o == Op::Insert).count();
-        let equals = ops.iter().filter(|o| **o == Op::Equal).count();
-        assert_eq!(inserts, 1);
-        assert_eq!(equals, 2);
-    }
-
-    #[test]
-    fn compute_ops_single_deletion() {
-        let ops = compute_ops(&[1, 2, 3], &[1, 3]).unwrap();
-        let deletes = ops.iter().filter(|o| **o == Op::Delete).count();
-        let equals = ops.iter().filter(|o| **o == Op::Equal).count();
-        assert_eq!(deletes, 1);
-        assert_eq!(equals, 2);
-    }
-
-    #[test]
-    fn compute_ops_complete_replacement() {
-        let ops = compute_ops(&[1, 2], &[3, 4]).unwrap();
-        let deletes = ops.iter().filter(|o| **o == Op::Delete).count();
-        let inserts = ops.iter().filter(|o| **o == Op::Insert).count();
-        assert_eq!(deletes, 2);
-        assert_eq!(inserts, 2);
+    fn compute_ops_cases() {
+        use Op::{Delete, Equal, Insert};
+        let cases: &[(&[u64], &[u64], &[Op])] = &[
+            (&[1, 2, 3], &[1, 2, 3], &[Equal, Equal, Equal]),
+            (&[], &[1, 2], &[Insert, Insert]),
+            (&[1, 2], &[], &[Delete, Delete]),
+            (&[], &[], &[]),
+            (&[1, 3], &[1, 2, 3], &[Equal, Insert, Equal]),
+            (&[1, 2, 3], &[1, 3], &[Equal, Delete, Equal]),
+            (&[1, 2], &[3, 4], &[Delete, Delete, Insert, Insert]),
+        ];
+        for &(a, b, expected) in cases {
+            assert_eq!(compute_ops(a, b).unwrap(), expected, "{a:?} -> {b:?}");
+        }
     }
 
     #[test]
@@ -1200,12 +1166,6 @@ mod tests {
         }
         assert_eq!(ai, a.len());
         assert_eq!(bi, b.len());
-    }
-
-    #[test]
-    fn build_stats_empty_edits() {
-        let stats = build_stats(&[]);
-        assert_eq!(stats, DiffStats::default());
     }
 
     #[test]
@@ -1235,25 +1195,6 @@ mod tests {
         assert_eq!(stats.inserts, 1);
         assert_eq!(stats.inserted_lines, 2);
         assert_eq!(stats.deletes, 0);
-    }
-
-    #[test]
-    fn build_stats_counts_deletes() {
-        let edits = vec![Edit::Delete {
-            at_key: Some(1),
-            left_anchor: None,
-            right_anchor: None,
-            lines: vec![DiffLine {
-                content_key: 1,
-                occurrence_key: 1,
-                text: "x".into(),
-                path: Path(vec![0]),
-                span: span(0),
-            }],
-        }];
-        let stats = build_stats(&edits);
-        assert_eq!(stats.deletes, 1);
-        assert_eq!(stats.deleted_lines, 1);
     }
 
     #[test]
@@ -1341,22 +1282,6 @@ mod tests {
     }
 
     #[test]
-    fn build_segments_empty_view() {
-        let v = view(vec![]);
-        let segs = segment_at(&v.lines, 0);
-        assert!(segs.is_empty());
-    }
-
-    #[test]
-    fn build_segments_single_line() {
-        let v = view(vec![cline("hostname router1", 100, vec![0])]);
-        let segs = segment_at(&v.lines, 0);
-        assert_eq!(segs.len(), 1);
-        assert_eq!(segs[0].lines.len(), 1);
-        assert!(!segs[0].is_block);
-    }
-
-    #[test]
     fn build_segments_groups_same_root() {
         let v = view(vec![
             cline("interface Eth1", 100, vec![0]),
@@ -1396,14 +1321,17 @@ mod tests {
     }
 
     #[test]
-    fn diff_views_identical_flat_lines() {
-        let a = view(vec![
-            cline("hostname router1", 100, vec![0]),
-            cline("ip route 0.0.0.0/0 10.0.0.1", 200, vec![1]),
-        ]);
-        let b = a.clone();
-        let result = diff_views(&a, &b, &default_options()).unwrap();
-        assert!(result.edits.is_empty());
+    fn diff_views_identical_inputs_emit_no_edits() {
+        for a in [
+            view(vec![]),
+            view(vec![
+                cline("hostname router1", 100, vec![0]),
+                cline("ip route 0.0.0.0/0 10.0.0.1", 200, vec![1]),
+            ]),
+        ] {
+            let result = diff_views(&a, &a.clone(), &default_options()).unwrap();
+            assert!(result.edits.is_empty(), "{:?}", a.lines);
+        }
     }
 
     #[test]
@@ -1414,12 +1342,10 @@ mod tests {
             cline("ip route default", 200, vec![1]),
         ]);
         let result = diff_views(&a, &b, &default_options()).unwrap();
-        assert!(!result.edits.is_empty());
         assert!(
-            result
-                .edits
-                .iter()
-                .any(|e| matches!(e, Edit::Insert { .. }))
+            matches!(&result.edits[..], [Edit::Insert { lines, .. }] if lines.len() == 1 && lines[0].text == "ip route default"),
+            "{:?}",
+            result.edits
         );
     }
 
@@ -1431,21 +1357,11 @@ mod tests {
         ]);
         let b = view(vec![cline("hostname router1", 100, vec![0])]);
         let result = diff_views(&a, &b, &default_options()).unwrap();
-        assert!(!result.edits.is_empty());
         assert!(
-            result
-                .edits
-                .iter()
-                .any(|e| matches!(e, Edit::Delete { .. }))
+            matches!(&result.edits[..], [Edit::Delete { lines, .. }] if lines.len() == 1 && lines[0].text == "ip route default"),
+            "{:?}",
+            result.edits
         );
-    }
-
-    #[test]
-    fn diff_views_both_empty() {
-        let a = view(vec![]);
-        let b = view(vec![]);
-        let result = diff_views(&a, &b, &default_options()).unwrap();
-        assert!(result.edits.is_empty());
     }
 
     #[test]
@@ -1461,13 +1377,15 @@ mod tests {
             cline("  mtu 9000", 102, vec![0, 1]),
         ]);
         let result = diff_views(&a, &b, &default_options()).unwrap();
-        assert!(!result.edits.is_empty());
+        assert_eq!(result.edits.len(), 1, "{:?}", result.edits);
         match &result.edits[0] {
             Edit::Replace {
                 old_lines,
                 new_lines,
                 ..
             } => {
+                assert_eq!(old_lines.len(), 1);
+                assert_eq!(new_lines.len(), 1);
                 assert_eq!(old_lines[0].text, "  description old");
                 assert_eq!(new_lines[0].text, "  description new");
             }
@@ -1523,15 +1441,6 @@ mod tests {
         };
         assert_eq!(old_lines[0].text, "    set hostname edge-1");
         assert_eq!(new_lines[0].text, "    set hostname edge-2");
-    }
-
-    #[test]
-    fn matched_leaf_identical_text_emits_no_edit() {
-        let a = view(vec![cline("set hostname edge-1", 100, vec![0])]);
-        let b = a.clone();
-
-        let result = diff_views(&a, &b, &default_options()).unwrap();
-        assert!(result.edits.is_empty(), "{:?}", result.edits);
     }
 
     #[test]
@@ -1782,35 +1691,21 @@ mod tests {
     }
 
     #[test]
-    fn root_level_reorder_cancels_under_unordered() {
+    fn root_level_reorder_cancels_under_unordered_and_keyed_stable() {
         let (a, b) = root_reorder_pair();
-        let result = diff_views(&a, &b, &default_policy(OrderPolicy::Unordered)).unwrap();
-        assert!(
-            result.edits.is_empty(),
-            "a pure root-level reorder is not drift under unordered: {:?}",
-            result.edits
-        );
-        assert!(
-            result.fallback_contexts.is_empty(),
-            "a diff that reports nothing must not warn about an unreliable region: {:?}",
-            result.fallback_contexts
-        );
-    }
-
-    #[test]
-    fn root_level_reorder_cancels_under_keyed_stable() {
-        let (a, b) = root_reorder_pair();
-        let result = diff_views(&a, &b, &default_policy(OrderPolicy::KeyedStable)).unwrap();
-        assert!(
-            result.edits.is_empty(),
-            "a pure root-level reorder is not drift under keyed-stable: {:?}",
-            result.edits
-        );
-        assert!(
-            result.fallback_contexts.is_empty(),
-            "a diff that reports nothing must not warn about an unreliable region: {:?}",
-            result.fallback_contexts
-        );
+        for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+            let result = diff_views(&a, &b, &default_policy(policy)).unwrap();
+            assert!(
+                result.edits.is_empty(),
+                "a pure root-level reorder is not drift under {policy:?}: {:?}",
+                result.edits
+            );
+            assert!(
+                result.fallback_contexts.is_empty(),
+                "a diff that reports nothing must not warn about an unreliable region: {:?}",
+                result.fallback_contexts
+            );
+        }
     }
 
     #[test]
@@ -1964,10 +1859,17 @@ mod tests {
     fn renamed_block_without_an_override_reports_its_reordered_children() {
         let (a, b) = renamed_block_with_reordered_children();
         let result = diff_views(&a, &b, &default_policy(OrderPolicy::Ordered)).unwrap();
-        let texts = edit_texts(&result.edits);
-        assert!(
-            texts.iter().any(|text| text.contains("permit")),
-            "without an override the ordered fallback reports the whole segment: {:?}",
+        let mut texts = edit_texts(&result.edits);
+        texts.sort_unstable();
+        assert_eq!(
+            texts,
+            vec![
+                " permit tcp any any eq 443",
+                " permit tcp any any eq 443",
+                "ip access-list extended ACL-IN",
+                "ip access-list extended ACL-OUT",
+            ],
+            "without an override the ordered fallback reports the renamed header and the moved child: {:?}",
             result.edits
         );
     }
@@ -2460,8 +2362,18 @@ mod tests {
             cline("  neighbor 10.0.0.1", 201, vec![0, 0]),
         ]);
         let result = diff_views(&a, &b, &default_options()).unwrap();
-        assert!(!result.edits.is_empty());
-        assert!(!result.fallback_contexts.is_empty());
+        assert_eq!(result.fallback_contexts, vec![Path(vec![0])]);
+        let mut texts = edit_texts(&result.edits);
+        texts.sort_unstable();
+        assert_eq!(
+            texts,
+            vec![
+                "  description a",
+                "  neighbor 10.0.0.1",
+                "interface Eth1",
+                "router bgp 65000",
+            ]
+        );
     }
 
     #[test]
@@ -2482,9 +2394,14 @@ mod tests {
                 .all(|e| matches!(e, Edit::Delete { .. })),
             "delete-only fallback should produce only Delete edits"
         );
-        assert!(
-            !result.fallback_contexts.is_empty(),
+        assert_eq!(
+            result.fallback_contexts,
+            vec![Path(vec![0])],
             "delete-only fallback should record a fallback context"
+        );
+        assert_eq!(
+            edit_texts(&result.edits),
+            vec!["interface Eth1", "  description a"]
         );
     }
 
@@ -2506,9 +2423,14 @@ mod tests {
                 .all(|e| matches!(e, Edit::Insert { .. })),
             "insert-only fallback should produce only Insert edits"
         );
-        assert!(
-            !result.fallback_contexts.is_empty(),
+        assert_eq!(
+            result.fallback_contexts,
+            vec![Path(vec![0])],
             "insert-only fallback should record a fallback context"
+        );
+        assert_eq!(
+            edit_texts(&result.edits),
+            vec!["router bgp 65000", "  neighbor 10.0.0.1"]
         );
     }
 
@@ -2531,8 +2453,9 @@ mod tests {
         ]);
         let result = diff_views(&a, &b, &default_options()).unwrap();
         assert!(!result.edits.is_empty());
-        assert!(
-            !result.fallback_contexts.is_empty(),
+        assert_eq!(
+            result.fallback_contexts,
+            vec![Path(vec![0])],
             "multi-segment replacement should use fallback"
         );
         // the fallback flattens all pending segments into lines before
@@ -2550,8 +2473,8 @@ mod tests {
                 } => old_lines.len() + new_lines.len(),
             })
             .sum();
-        assert!(
-            total_edit_lines > 0,
+        assert_eq!(
+            total_edit_lines, 8,
             "fallback should produce line-level edits"
         );
     }
@@ -2573,8 +2496,9 @@ mod tests {
             cline("hostname router1", 500, vec![1]),
         ]);
         let result = diff_views(&a, &b, &default_options()).unwrap();
-        assert!(
-            !result.fallback_contexts.is_empty(),
+        assert_eq!(
+            result.fallback_contexts,
+            vec![Path(vec![0])],
             "pending segments before Equal should be flushed via fallback"
         );
         // the shared segment (hostname) should not appear in edits.
@@ -2623,121 +2547,91 @@ mod tests {
         );
     }
 
+    fn edit_shape(edit: &Edit) -> (&'static str, Vec<&str>) {
+        match edit {
+            Edit::Insert { lines, .. } => {
+                ("insert", lines.iter().map(|l| l.text.as_str()).collect())
+            }
+            Edit::Delete { lines, .. } => {
+                ("delete", lines.iter().map(|l| l.text.as_str()).collect())
+            }
+            Edit::Replace {
+                old_lines,
+                new_lines,
+                ..
+            } => (
+                "replace",
+                old_lines
+                    .iter()
+                    .chain(new_lines.iter())
+                    .map(|l| l.text.as_str())
+                    .collect(),
+            ),
+        }
+    }
+
     #[test]
-    fn line_diff_ordered_no_changes() {
-        let lines = vec![
+    fn line_diff_cases() {
+        use OrderPolicy::{KeyedStable, Ordered, Unordered};
+        let pair = vec![
             cline("  description uplink", 10, vec![0, 0]),
             cline("  mtu 9000", 20, vec![0, 1]),
         ];
-        let edits = line_diff(&lines, &lines, OrderPolicy::Ordered).unwrap();
-        assert!(edits.is_empty());
-    }
-
-    #[test]
-    fn line_diff_ordered_detects_replacement() {
-        let a = vec![cline("  description old", 10, vec![0, 0])];
-        let b = vec![cline("  description new", 20, vec![0, 0])];
-        let edits = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
-        assert_eq!(edits.len(), 1);
-        assert!(matches!(edits[0], Edit::Replace { .. }));
-    }
-
-    #[test]
-    fn line_diff_ordered_insertion_at_end() {
-        let a = vec![cline("  mtu 9000", 10, vec![0, 0])];
-        let b = vec![
+        let old = vec![cline("  description old", 10, vec![0, 0])];
+        let new = vec![cline("  description new", 20, vec![0, 0])];
+        let mtu = vec![cline("  mtu 9000", 10, vec![0, 0])];
+        let mtu_shut = vec![
             cline("  mtu 9000", 10, vec![0, 0]),
             cline("  no shutdown", 20, vec![0, 1]),
         ];
-        let edits = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
-        assert_eq!(edits.len(), 1);
-        assert!(matches!(edits[0], Edit::Insert { .. }));
-    }
-
-    #[test]
-    fn line_diff_ordered_deletion() {
-        let a = vec![
-            cline("  mtu 9000", 10, vec![0, 0]),
-            cline("  no shutdown", 20, vec![0, 1]),
+        let cases = vec![
+            (Ordered, &pair, &pair, vec![]),
+            (
+                Ordered,
+                &old,
+                &new,
+                vec![("replace", vec!["  description old", "  description new"])],
+            ),
+            (
+                Ordered,
+                &mtu,
+                &mtu_shut,
+                vec![("insert", vec!["  no shutdown"])],
+            ),
+            (
+                Ordered,
+                &mtu_shut,
+                &mtu,
+                vec![("delete", vec!["  no shutdown"])],
+            ),
+            (
+                Unordered,
+                &mtu,
+                &mtu_shut,
+                vec![("insert", vec!["  no shutdown"])],
+            ),
+            (
+                Unordered,
+                &mtu_shut,
+                &mtu,
+                vec![("delete", vec!["  no shutdown"])],
+            ),
+            // two key buckets: the old line is deleted, the new one inserted.
+            (
+                KeyedStable,
+                &old,
+                &new,
+                vec![
+                    ("delete", vec!["  description old"]),
+                    ("insert", vec!["  description new"]),
+                ],
+            ),
         ];
-        let b = vec![cline("  mtu 9000", 10, vec![0, 0])];
-        let edits = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
-        assert_eq!(edits.len(), 1);
-        assert!(matches!(edits[0], Edit::Delete { .. }));
-    }
-
-    #[test]
-    fn line_diff_ordered_reorder_is_a_change() {
-        let a = vec![
-            cline("  description uplink", 10, vec![0, 0]),
-            cline("  mtu 9000", 20, vec![0, 1]),
-        ];
-        let b = vec![
-            cline("  mtu 9000", 20, vec![0, 0]),
-            cline("  description uplink", 10, vec![0, 1]),
-        ];
-        let edits = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
-        assert!(!edits.is_empty());
-    }
-
-    #[test]
-    fn line_diff_unordered_ignores_reorder() {
-        let a = vec![
-            cline("  description uplink", 10, vec![0, 0]),
-            cline("  mtu 9000", 20, vec![0, 1]),
-        ];
-        let b = vec![
-            cline("  mtu 9000", 20, vec![0, 0]),
-            cline("  description uplink", 10, vec![0, 1]),
-        ];
-        let edits = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
-        assert!(edits.is_empty());
-    }
-
-    #[test]
-    fn line_diff_unordered_detects_extra_line() {
-        let a = vec![cline("  mtu 9000", 10, vec![0, 0])];
-        let b = vec![
-            cline("  mtu 9000", 10, vec![0, 0]),
-            cline("  no shutdown", 20, vec![0, 1]),
-        ];
-        let edits = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
-        assert_eq!(edits.len(), 1);
-        assert!(matches!(edits[0], Edit::Insert { .. }));
-    }
-
-    #[test]
-    fn line_diff_unordered_detects_removed_line() {
-        let a = vec![
-            cline("  mtu 9000", 10, vec![0, 0]),
-            cline("  no shutdown", 20, vec![0, 1]),
-        ];
-        let b = vec![cline("  mtu 9000", 10, vec![0, 0])];
-        let edits = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
-        assert_eq!(edits.len(), 1);
-        assert!(matches!(edits[0], Edit::Delete { .. }));
-    }
-
-    #[test]
-    fn line_diff_keyed_stable_ignores_reorder() {
-        let a = vec![
-            cline("  description uplink", 10, vec![0, 0]),
-            cline("  mtu 9000", 20, vec![0, 1]),
-        ];
-        let b = vec![
-            cline("  mtu 9000", 20, vec![0, 0]),
-            cline("  description uplink", 10, vec![0, 1]),
-        ];
-        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable).unwrap();
-        assert!(edits.is_empty());
-    }
-
-    #[test]
-    fn line_diff_keyed_stable_detects_content_change() {
-        let a = vec![cline("  description old", 10, vec![0, 0])];
-        let b = vec![cline("  description new", 20, vec![0, 0])];
-        let edits = line_diff(&a, &b, OrderPolicy::KeyedStable).unwrap();
-        assert!(!edits.is_empty());
+        for (policy, a, b, expected) in cases {
+            let edits = line_diff(a, b, policy).unwrap();
+            let shapes: Vec<_> = edits.iter().map(edit_shape).collect();
+            assert_eq!(shapes, expected, "{policy:?}: {a:?} -> {b:?}");
+        }
     }
 
     #[test]
@@ -2892,26 +2786,6 @@ mod tests {
     }
 
     #[test]
-    fn finalize_chunked_edits_both_empty() {
-        let result = finalize_chunked_edits(vec![], vec![]);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn finalize_chunked_edits_only_deletes() {
-        let deletes = vec![DiffLine {
-            content_key: 1,
-            occurrence_key: 1,
-            text: "removed".into(),
-            path: Path(vec![0]),
-            span: span(0),
-        }];
-        let result = finalize_chunked_edits(deletes, vec![]);
-        assert_eq!(result.len(), 1);
-        assert!(matches!(result[0], Edit::Delete { .. }));
-    }
-
-    #[test]
     fn finalize_chunked_edits_only_inserts() {
         let inserts = vec![DiffLine {
             content_key: 1,
@@ -2923,27 +2797,6 @@ mod tests {
         let result = finalize_chunked_edits(vec![], inserts);
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0], Edit::Insert { .. }));
-    }
-
-    #[test]
-    fn finalize_chunked_edits_both_present_yields_replace() {
-        let deletes = vec![DiffLine {
-            content_key: 1,
-            occurrence_key: 1,
-            text: "old".into(),
-            path: Path(vec![0]),
-            span: span(0),
-        }];
-        let inserts = vec![DiffLine {
-            content_key: 2,
-            occurrence_key: 2,
-            text: "new".into(),
-            path: Path(vec![0]),
-            span: span(0),
-        }];
-        let result = finalize_chunked_edits(deletes, inserts);
-        assert_eq!(result.len(), 1);
-        assert!(matches!(result[0], Edit::Replace { .. }));
     }
 
     #[test]
@@ -2991,34 +2844,5 @@ mod tests {
 
         assert_eq!(lines[0].text, "first");
         assert_eq!(left_anchor.clone().unwrap().span, span(0));
-    }
-
-    #[test]
-    fn to_diff_line_preserves_fields() {
-        let cl = cline("  mtu 9000", 42, vec![0, 1]);
-        let dl = to_diff_line(&cl);
-        assert_eq!(dl.content_key, cl.content_key);
-        assert_eq!(dl.occurrence_key, cl.occurrence_key);
-        assert_eq!(dl.text, cl.original);
-        assert_eq!(dl.path, cl.path);
-        assert_eq!(dl.span, cl.span);
-    }
-
-    #[test]
-    fn to_anchor_extracts_path_and_span() {
-        let dl = DiffLine {
-            content_key: 1,
-            occurrence_key: 1,
-            text: "test".into(),
-            path: Path(vec![2, 3]),
-            span: Span {
-                line: 5,
-                start_byte: 10,
-                end_byte: 20,
-            },
-        };
-        let anchor = to_anchor(&dl);
-        assert_eq!(anchor.path, dl.path);
-        assert_eq!(anchor.span, dl.span);
     }
 }

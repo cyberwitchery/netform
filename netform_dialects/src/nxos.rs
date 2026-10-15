@@ -97,9 +97,7 @@ interface port-channel10
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::{
-        DialectHint, Node, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts,
-    };
+    use netform_ir::{Node, TriviaKind, parse_ios_like_parts};
 
     fn root_trivia(doc: &Document) -> Vec<(&str, TriviaKind)> {
         doc.roots
@@ -128,430 +126,63 @@ mod tests {
         );
     }
 
+    /// nxos-specific key hints; the arms nxos shares with eos and iosxe are in
+    /// `crate::tests::ios_family_shared_key_hints`.
     #[test]
-    fn nxos_comment_classification_supports_bang_and_hash() {
-        assert_eq!(classify_ios_like_trivia("!"), TriviaKind::Comment);
-        assert_eq!(classify_ios_like_trivia("# generated"), TriviaKind::Comment);
-        assert_eq!(
-            classify_ios_like_trivia("interface Ethernet1/1"),
-            TriviaKind::Content
-        );
-    }
-
-    #[test]
-    fn nxos_tokenization_keeps_quoted_values_together() {
-        let parsed =
-            parse_ios_like_parts("description \"Uplink to spine\"").expect("content should parse");
-        assert_eq!(parsed.head, "description");
-        assert_eq!(parsed.args, vec!["\"Uplink to spine\""]);
-    }
-
-    #[test]
-    fn parse_sets_named_dialect_hint() {
-        let doc = parse("hostname n9k-leaf-01\n");
-        assert_eq!(doc.metadata.dialect_hint, DialectHint::Named("nxos".into()));
-    }
-
-    fn hint(line: &str) -> Option<String> {
-        let parsed = parse_ios_like_parts(line);
-        key_hint(parsed.as_ref())
-    }
-
-    #[test]
-    fn key_hint_interface_ethernet_slot_port() {
-        assert_eq!(
-            hint("interface Ethernet1/1"),
-            Some("interface:ethernet:1/1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_ethernet_fex() {
-        assert_eq!(
-            hint("interface Ethernet1/1/1"),
-            Some("interface:ethernet:1/1/1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_ethernet_subinterface() {
-        assert_eq!(
-            hint("interface Ethernet1/1.100"),
-            Some("interface:ethernet:1/1.100".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_ethernet_lowercase() {
-        assert_eq!(
-            hint("interface ethernet1/1"),
-            Some("interface:ethernet:1/1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_port_channel() {
-        assert_eq!(
-            hint("interface port-channel10"),
-            Some("interface:port-channel:10".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_port_channel_capitalized() {
-        assert_eq!(
-            hint("interface Port-channel10"),
-            Some("interface:port-channel:10".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_vlan() {
-        assert_eq!(hint("interface Vlan100"), Some("interface:vlan:100".into()),);
-    }
-
-    #[test]
-    fn key_hint_interface_vlan_lowercase() {
-        assert_eq!(hint("interface vlan100"), Some("interface:vlan:100".into()),);
-    }
-
-    #[test]
-    fn key_hint_interface_loopback() {
-        assert_eq!(
-            hint("interface loopback0"),
-            Some("interface:loopback:0".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_loopback_capitalized() {
-        assert_eq!(
-            hint("interface Loopback0"),
-            Some("interface:loopback:0".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_mgmt() {
-        assert_eq!(hint("interface mgmt0"), Some("interface:mgmt:0".into()),);
-    }
-
-    #[test]
-    fn key_hint_interface_nve() {
-        assert_eq!(hint("interface nve1"), Some("interface:nve:1".into()),);
-    }
-
-    #[test]
-    fn key_hint_interface_nve_capitalized() {
-        assert_eq!(hint("interface Nve1"), Some("interface:nve:1".into()),);
-    }
-
-    #[test]
-    fn key_hint_interface_tunnel() {
-        assert_eq!(hint("interface tunnel0"), Some("interface:tunnel:0".into()),);
-    }
-
-    #[test]
-    fn key_hint_interface_tunnel_capitalized() {
-        assert_eq!(hint("interface Tunnel1"), Some("interface:tunnel:1".into()),);
-    }
-
-    #[test]
-    fn key_hint_interface_fabric() {
-        assert_eq!(
-            hint("interface fabric1/1"),
-            Some("interface:fabric:1/1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_fabric_capitalized() {
-        assert_eq!(
-            hint("interface Fabric1/1"),
-            Some("interface:fabric:1/1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_ethernet_allcaps() {
-        assert_eq!(
-            hint("interface ETHERNET1/1"),
-            Some("interface:ethernet:1/1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_unknown_type() {
-        // unknown types fall back to raw name.
-        assert_eq!(
-            hint("interface GigabitEthernet0/0/0"),
-            Some("interface:GigabitEthernet0/0/0".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_interface_bare_no_hint() {
-        assert_eq!(hint("interface"), None);
-    }
-
-    #[test]
-    fn key_hint_vlan_single() {
-        assert_eq!(hint("vlan 100"), Some("vlan:100".into()));
-    }
-
-    #[test]
-    fn key_hint_vlan_range() {
-        assert_eq!(
-            hint("vlan 1-100,200,300-400"),
-            Some("vlan:1-100,200,300-400".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_vrf_context() {
-        assert_eq!(hint("vrf context MGMT"), Some("vrf:MGMT".into()));
-    }
-
-    #[test]
-    fn key_hint_vrf_bare() {
-        assert_eq!(hint("vrf MGMT"), Some("vrf:MGMT".into()));
-    }
-
-    #[test]
-    fn key_hint_router_bgp() {
-        assert_eq!(hint("router bgp 65001"), Some("router:bgp:65001".into()));
-    }
-
-    #[test]
-    fn key_hint_router_ospf_with_process_id() {
-        assert_eq!(hint("router ospf 1"), Some("router:ospf:1".into()));
-    }
-
-    #[test]
-    fn key_hint_router_ospf_without_process_id() {
-        assert_eq!(hint("router ospf"), Some("router:ospf".into()));
-    }
-
-    #[test]
-    fn key_hint_router_eigrp_with_as() {
-        assert_eq!(hint("router eigrp 100"), Some("router:eigrp:100".into()));
-    }
-
-    #[test]
-    fn key_hint_router_eigrp_named() {
-        assert_eq!(
-            hint("router eigrp ENTERPRISE"),
-            Some("router:eigrp:ENTERPRISE".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_router_isis_bare() {
-        assert_eq!(hint("router isis"), Some("router:isis".into()));
-    }
-
-    #[test]
-    fn key_hint_router_isis_with_tag() {
-        assert_eq!(
-            hint("router isis AREA-A"),
-            Some("router:isis:AREA-A".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_route_map_full() {
-        assert_eq!(
-            hint("route-map REDISTRIBUTE permit 10"),
-            Some("route-map:REDISTRIBUTE:permit:10".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_route_map_no_seq() {
-        assert_eq!(
-            hint("route-map EXPORT deny"),
-            Some("route-map:EXPORT:deny".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_access_list() {
-        assert_eq!(
-            hint("ip access-list ACL-MGMT"),
-            Some("ip-access-list:ACL-MGMT".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_access_list_extended() {
-        assert_eq!(
-            hint("ip access-list extended BLOCK-RFC1918"),
-            Some("ip-access-list:extended:BLOCK-RFC1918".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_prefix_list() {
-        assert_eq!(
-            hint("ip prefix-list DEFAULT-ONLY"),
-            Some("prefix-list:DEFAULT-ONLY".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_route() {
-        assert_eq!(
-            hint("ip route 10.0.0.0/8 192.168.1.1"),
-            Some("ip-route:10.0.0.0/8".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ip_route_vrf() {
-        assert_eq!(
-            hint("ip route vrf MGMT 0.0.0.0/0 10.0.0.1"),
-            Some("ip-route:MGMT:0.0.0.0/0".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_feature() {
-        assert_eq!(hint("feature ospf"), Some("feature:ospf".into()));
-        assert_eq!(hint("feature bgp"), Some("feature:bgp".into()));
-        assert_eq!(hint("feature vpc"), Some("feature:vpc".into()));
-        assert_eq!(
-            hint("feature interface-vlan"),
-            Some("feature:interface-vlan".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_vpc_domain() {
-        assert_eq!(hint("vpc domain 10"), Some("vpc-domain:10".into()));
-        assert_eq!(hint("vpc domain 100"), Some("vpc-domain:100".into()));
-    }
-
-    #[test]
-    fn key_hint_vpc_no_domain() {
-        assert_eq!(hint("vpc orphan-ports suspend"), None);
-    }
-
-    #[test]
-    fn key_hint_role_name() {
-        assert_eq!(
-            hint("role name custom-admin"),
-            Some("role:custom-admin".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_role_no_name() {
-        assert_eq!(hint("role feature-group name"), None);
-    }
-
-    #[test]
-    fn key_hint_monitor_session() {
-        assert_eq!(hint("monitor session 1"), Some("monitor-session:1".into()));
-    }
-
-    #[test]
-    fn key_hint_monitor_no_session() {
-        assert_eq!(hint("monitor copp-system-p-policy"), None);
-    }
-
-    #[test]
-    fn key_hint_ntp_server() {
-        assert_eq!(
-            hint("ntp server 10.0.0.1"),
-            Some("ntp:server:10.0.0.1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_ntp_peer() {
-        assert_eq!(hint("ntp peer 10.0.0.2"), Some("ntp:peer:10.0.0.2".into()));
-    }
-
-    #[test]
-    fn key_hint_ntp_no_match() {
-        assert_eq!(hint("ntp source-interface mgmt0"), None);
-    }
-
-    #[test]
-    fn key_hint_system() {
-        assert_eq!(hint("system jumbomtu 9216"), Some("system:jumbomtu".into()));
-        assert_eq!(
-            hint("system default switchport"),
-            Some("system:default".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_class_map() {
-        assert_eq!(
-            hint("class-map match-all VOICE"),
-            Some("class-map:VOICE".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_policy_map() {
-        assert_eq!(
-            hint("policy-map QOS-POLICY"),
-            Some("policy-map:QOS-POLICY".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_typed_class_map_and_policy_map() {
-        assert_eq!(
-            hint("class-map type control-plane match-any copp-s-bgp"),
-            Some("class-map:control-plane:copp-s-bgp".into()),
-        );
-        assert_eq!(
-            hint("class-map type queuing match-any c-out-q3"),
-            Some("class-map:queuing:c-out-q3".into()),
-        );
-        assert_eq!(
-            hint("policy-map type control-plane copp-system-p"),
-            Some("policy-map:control-plane:copp-system-p".into()),
-        );
-        assert_eq!(
-            hint("policy-map type network-qos default-nq-policy"),
-            Some("policy-map:network-qos:default-nq-policy".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_spanning_tree_vlan() {
-        assert_eq!(
-            hint("spanning-tree vlan 1-100 priority 4096"),
-            Some("spanning-tree:vlan:1-100".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_crypto_ikev2() {
-        assert_eq!(
-            hint("crypto ikev2 proposal PROP-1"),
-            Some("crypto:ikev2:proposal:PROP-1".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_line() {
-        assert_eq!(hint("line vty 0 4"), Some("line:vty:0:4".into()));
-        assert_eq!(hint("line con 0"), Some("line:con:0".into()));
-    }
-
-    #[test]
-    fn key_hint_none_for_unknown() {
-        assert_eq!(hint("hostname ROUTER-1"), None);
-    }
-
-    #[test]
-    fn key_hint_none_on_empty() {
-        assert_eq!(key_hint(None), None);
+    fn key_hints() {
+        for (line, expected) in [
+            // interface types (0.5.0 table); ids are kept verbatim
+            ("interface Ethernet1/1", Some("interface:ethernet:1/1")),
+            ("interface Ethernet1/1/1", Some("interface:ethernet:1/1/1")),
+            (
+                "interface Ethernet1/1.100",
+                Some("interface:ethernet:1/1.100"),
+            ),
+            ("interface ethernet1/1", Some("interface:ethernet:1/1")),
+            ("interface ETHERNET1/1", Some("interface:ethernet:1/1")),
+            (
+                "interface port-channel10",
+                Some("interface:port-channel:10"),
+            ),
+            (
+                "interface Port-channel10",
+                Some("interface:port-channel:10"),
+            ),
+            ("interface Vlan100", Some("interface:vlan:100")),
+            ("interface vlan100", Some("interface:vlan:100")),
+            ("interface loopback0", Some("interface:loopback:0")),
+            ("interface Loopback0", Some("interface:loopback:0")),
+            ("interface mgmt0", Some("interface:mgmt:0")),
+            ("interface nve1", Some("interface:nve:1")),
+            ("interface Nve1", Some("interface:nve:1")),
+            ("interface tunnel0", Some("interface:tunnel:0")),
+            ("interface Tunnel1", Some("interface:tunnel:1")),
+            ("interface fabric1/1", Some("interface:fabric:1/1")),
+            ("interface Fabric1/1", Some("interface:fabric:1/1")),
+            // unknown types fall back to the raw name
+            (
+                "interface GigabitEthernet0/0/0",
+                Some("interface:GigabitEthernet0/0/0"),
+            ),
+            ("vrf context MGMT", Some("vrf:MGMT")),
+            ("feature ospf", Some("feature:ospf")),
+            ("feature bgp", Some("feature:bgp")),
+            ("feature vpc", Some("feature:vpc")),
+            ("feature interface-vlan", Some("feature:interface-vlan")),
+            ("vpc domain 10", Some("vpc-domain:10")),
+            ("vpc domain 100", Some("vpc-domain:100")),
+            ("vpc orphan-ports suspend", None),
+            ("role name custom-admin", Some("role:custom-admin")),
+            ("role feature-group name", None),
+            ("system jumbomtu 9216", Some("system:jumbomtu")),
+            ("system default switchport", Some("system:default")),
+        ] {
+            assert_eq!(
+                key_hint(parse_ios_like_parts(line).as_ref()).as_deref(),
+                expected,
+                "{line}",
+            );
+        }
     }
 
     #[test]

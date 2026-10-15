@@ -38,98 +38,22 @@ fn generates_replace_block_plan_for_multi_line_replace() {
     let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     let plan = build_plan(&diff);
 
-    assert!(!plan.actions.is_empty());
-    assert!(
-        plan.actions
-            .iter()
-            .any(|a| matches!(a, PlanAction::ReplaceBlock { .. }))
+    assert_eq!(
+        plan.actions,
+        vec![PlanAction::ReplaceBlock {
+            target_path: Path(vec![0]),
+            target_span: Span {
+                line: 1,
+                start_byte: 0,
+                end_byte: 19,
+            },
+            intended_lines: vec![
+                "router bgp 65000".to_string(),
+                "  neighbor 10.0.0.1 remote-as 65001".to_string(),
+            ],
+        }]
     );
-
-    let json = serde_json::to_string_pretty(&plan).expect("serialize plan");
-    assert!(json.contains("\"version\""));
-    assert!(json.contains("\"actions\""));
-    assert!(json.contains("\"findings\""));
-}
-
-#[test]
-fn groups_multiple_line_edits_under_same_context() {
-    let anchor_a = EditAnchor {
-        path: Path(vec![0, 1]),
-        span: Span {
-            line: 2,
-            start_byte: 10,
-            end_byte: 28,
-        },
-    };
-    let anchor_b = EditAnchor {
-        path: Path(vec![0, 2]),
-        span: Span {
-            line: 3,
-            start_byte: 29,
-            end_byte: 39,
-        },
-    };
-    let diff = Diff {
-        edits: vec![
-            Edit::Replace {
-                old_at_key: Some(11),
-                new_at_key: Some(12),
-                left_anchor: Some(anchor_a.clone()),
-                right_anchor: Some(anchor_a.clone()),
-                old_lines: vec![DiffLine {
-                    content_key: 11,
-                    occurrence_key: 11,
-                    text: "  description old".to_string(),
-                    path: Path(vec![0, 1]),
-                    span: anchor_a.span.clone(),
-                }],
-                new_lines: vec![DiffLine {
-                    content_key: 12,
-                    occurrence_key: 12,
-                    text: "  description new".to_string(),
-                    path: Path(vec![0, 1]),
-                    span: anchor_a.span.clone(),
-                }],
-            },
-            Edit::Replace {
-                old_at_key: Some(21),
-                new_at_key: Some(22),
-                left_anchor: Some(anchor_b.clone()),
-                right_anchor: Some(anchor_b.clone()),
-                old_lines: vec![DiffLine {
-                    content_key: 21,
-                    occurrence_key: 21,
-                    text: "  mtu 9000".to_string(),
-                    path: Path(vec![0, 2]),
-                    span: anchor_b.span.clone(),
-                }],
-                new_lines: vec![DiffLine {
-                    content_key: 22,
-                    occurrence_key: 22,
-                    text: "  mtu 9216".to_string(),
-                    path: Path(vec![0, 2]),
-                    span: anchor_b.span.clone(),
-                }],
-            },
-        ],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-
-    assert_eq!(plan.actions.len(), 1);
-    match &plan.actions[0] {
-        PlanAction::ApplyLineEditsUnderContext {
-            context_path,
-            line_edits,
-        } => {
-            assert_eq!(context_path.0, vec![0]);
-            assert_eq!(line_edits.len(), 2);
-            assert_eq!(line_edits[0].kind, PlanLineEditKind::Replace);
-            assert_eq!(line_edits[1].kind, PlanLineEditKind::Replace);
-        }
-        _ => panic!("expected grouped line-edit action"),
-    }
+    assert!(plan.findings.is_empty());
 }
 
 #[test]

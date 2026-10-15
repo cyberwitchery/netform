@@ -7,7 +7,7 @@ use netform_diff::{
     Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     diff_documents, finding_code,
 };
-use netform_ir::{Dialect, LiteralTerminator, Path};
+use netform_ir::{Dialect, Path};
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
     diff_documents(&parse(a), &parse(b), options).unwrap()
@@ -102,30 +102,9 @@ fn a_rotated_key_line_is_the_only_change_reported() {
         ],
     );
     assert!(diff.findings.is_empty(), "{:?}", diff.findings);
-}
-
-#[test]
-fn the_change_is_scoped_to_the_certificate_entry() {
-    let after = CERTIFICATE_AND_POLICY.replace(
-        "hkiG9w0BBQwwDgQIabcd+/EFGH==",
-        "hkiG9w0BBQwwDgQIzyxw9/8VUTS=",
-    );
-
-    let diff = diff(CERTIFICATE_AND_POLICY, &after, keyed_stable());
-
-    let paths = edit_paths(&diff);
-    assert!(!paths.is_empty());
-    for path in &paths {
-        assert_eq!(
-            path.0.first(),
-            Some(&0),
-            "the firewall policy is root 1 and must not be touched: {paths:?}",
-        );
-        assert!(
-            path.0.len() >= 3,
-            "a key body line is nested under the edit entry, not a root sibling: {paths:?}",
-        );
-    }
+    // scoped to the key body line under the certificate's edit entry; the
+    // firewall policy is root 1 and stays untouched.
+    assert_eq!(edit_paths(&diff), vec![Path(vec![0, 0, 2]); 2]);
 }
 
 #[test]
@@ -146,20 +125,6 @@ fn a_longer_key_adds_one_contained_line() {
             .any(|finding| finding.code == finding_code::DIFF_UNRELIABLE_REGION),
         "{:?}",
         diff.findings,
-    );
-}
-
-#[test]
-fn a_certificate_does_not_shift_the_root_index_of_the_sections_below_it() {
-    let with_certificate = diff(
-        CERTIFICATE_AND_POLICY,
-        &CERTIFICATE_AND_POLICY.replace("set action accept", "set action deny"),
-        keyed_stable(),
-    );
-
-    assert_eq!(
-        edit_paths(&with_certificate),
-        vec![Path(vec![1, 0, 2]), Path(vec![1, 0, 2]),]
     );
 }
 
@@ -186,6 +151,11 @@ end
         keyed_stable(),
     );
 
+    // the certificate does not shift the root index of the sections below it
+    assert_eq!(
+        edit_paths(&with_certificate),
+        vec![Path(vec![1, 0, 2]), Path(vec![1, 0, 2])]
+    );
     assert_eq!(edit_texts(&with_certificate), edit_texts(&baseline));
     assert!(
         !with_certificate
@@ -194,18 +164,6 @@ end
             .any(|finding| finding.code == finding_code::AMBIGUOUS_KEY_MATCH),
         "{:?}",
         with_certificate.findings,
-    );
-}
-
-#[test]
-fn identical_configs_with_a_certificate_report_no_changes() {
-    assert!(
-        !diff(
-            CERTIFICATE_AND_POLICY,
-            CERTIFICATE_AND_POLICY,
-            keyed_stable()
-        )
-        .has_changes
     );
 }
 
@@ -222,7 +180,10 @@ fn normalization_never_masks_a_change_inside_a_quoted_value() {
         NormalizationStep::IgnoreBlankLines,
     ]);
 
-    assert!(diff(before, after, options).has_changes);
+    assert_eq!(
+        edit_texts(&diff(before, after, options)),
+        vec!["\thard  wrapped", "    hard wrapped "],
+    );
 }
 
 #[test]
@@ -242,20 +203,18 @@ fn a_hash_line_inside_a_quoted_value_survives_ignore_comments() {
 
 #[test]
 fn the_ios_family_dialects_open_no_region_on_a_quoted_line() {
-    let quoted = "    set private-key \"-----BEGIN ENCRYPTED PRIVATE KEY-----";
-    let dialects: Vec<(&str, Option<LiteralTerminator>)> = vec![
-        (
-            "iosxe",
-            netform_dialects::iosxe::DIALECT.literal_region(quoted),
-        ),
-        ("eos", netform_dialects::eos::DIALECT.literal_region(quoted)),
-        (
-            "nxos",
-            netform_dialects::nxos::DIALECT.literal_region(quoted),
-        ),
-    ];
-
-    for (name, region) in dialects {
-        assert_eq!(region, None, "{name}");
+    for quoted in [
+        // FortiOS
+        "    set private-key \"-----BEGIN ENCRYPTED PRIVATE KEY-----",
+        // Junos
+        "                certificate \"-----BEGIN CERTIFICATE-----",
+    ] {
+        for (name, dialect) in [
+            ("iosxe", &netform_dialects::iosxe::DIALECT),
+            ("eos", &netform_dialects::eos::DIALECT),
+            ("nxos", &netform_dialects::nxos::DIALECT),
+        ] {
+            assert_eq!(dialect.literal_region(quoted), None, "{name}: {quoted}");
+        }
     }
 }

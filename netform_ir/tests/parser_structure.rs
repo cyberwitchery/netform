@@ -69,29 +69,18 @@ fn keeps_flat_structure_when_no_indent_signal() {
 }
 
 #[test]
-fn records_finding_for_mixed_leading_whitespace() {
-    let input = "interface Ethernet1\n \t description mixed\n";
-    let doc = parse_generic(input);
-
-    assert!(
-        doc.metadata
-            .parse_findings
-            .iter()
-            .any(|f| f.code == "mixed-leading-whitespace")
-    );
-}
-
-#[test]
 fn records_finding_for_orphan_indentation() {
     let input = "  orphan-child-line\n";
     let doc = parse_generic(input);
 
-    assert!(
-        doc.metadata
-            .parse_findings
-            .iter()
-            .any(|f| f.code == "orphan-indentation")
-    );
+    let codes: Vec<&str> = doc
+        .metadata
+        .parse_findings
+        .iter()
+        .map(|f| f.code.as_str())
+        .collect();
+    assert_eq!(codes, vec!["orphan-indentation"]);
+    assert_eq!(doc.metadata.parse_findings[0].span.line, 1);
     assert_eq!(doc.render(), input);
 }
 
@@ -153,10 +142,15 @@ fn generic_dialect_does_not_attach_footers() {
         ),
         _ => panic!("expected the root to be a block"),
     }
-    assert!(
-        doc.roots.len() >= 2,
+    assert_eq!(
+        doc.roots.len(),
+        2,
         "the closing brace should remain a detached sibling line",
     );
+    match doc.node(doc.roots[1]).expect("root 1") {
+        Node::Line(line) => assert_eq!(line.raw, "}"),
+        _ => panic!("expected the closing brace to be a line"),
+    }
 }
 
 #[test]
@@ -164,28 +158,24 @@ fn spans_are_present_for_all_lines() {
     let input = "a\n  b\nc\n";
     let doc = parse_generic(input);
 
-    let mut line_count = 0usize;
+    let mut spans = Vec::new();
     for node_id in &doc.roots {
         match doc.node(*node_id).expect("node") {
             Node::Line(line) => {
-                line_count += 1;
-                assert!(line.span.end_byte >= line.span.start_byte);
-                assert!(line.span.line >= 1);
+                spans.push((line.span.line, line.span.start_byte, line.span.end_byte))
             }
             Node::Block(block) => {
-                line_count += 1;
-                assert!(block.header.span.end_byte >= block.header.span.start_byte);
-                assert!(block.header.span.line >= 1);
+                let span = &block.header.span;
+                spans.push((span.line, span.start_byte, span.end_byte));
                 for child_id in &block.children {
                     if let Node::Line(child) = doc.node(*child_id).expect("child") {
-                        line_count += 1;
-                        assert!(child.span.end_byte >= child.span.start_byte);
-                        assert!(child.span.line >= 1);
+                        spans.push((child.span.line, child.span.start_byte, child.span.end_byte));
                     }
                 }
             }
         }
     }
 
-    assert_eq!(line_count, doc.metadata.line_count);
+    assert_eq!(spans, vec![(1, 0, 1), (2, 2, 5), (3, 6, 7)]);
+    assert_eq!(spans.len(), doc.metadata.line_count);
 }

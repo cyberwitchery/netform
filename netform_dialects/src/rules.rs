@@ -197,50 +197,30 @@ mod tests {
     }
 
     #[test]
-    fn literal_action_ignores_the_guarded_argument() {
-        assert_eq!(hint("mlag configuration"), Some("mlag".into()));
-    }
-
-    #[test]
-    fn a_failed_guard_yields_no_hint() {
-        assert_eq!(hint("mlag peer-link Port-Channel1"), None);
-    }
-
-    #[test]
-    fn a_guard_accepts_any_of_its_words() {
-        assert_eq!(hint("management ssh"), None);
-        assert_eq!(
-            hint("management telnet vrf MGMT"),
-            Some("management:telnet:vrf".into())
-        );
-    }
-
-    #[test]
-    fn missing_captures_yield_no_hint() {
-        assert_eq!(hint("crypto pki trustpoint"), None);
-    }
-
-    #[test]
-    fn a_claimed_head_with_no_matching_rule_yields_no_hint() {
-        assert_eq!(hint("mlag"), None);
-    }
-
-    #[test]
-    fn a_common_rule_lets_its_head_fall_through() {
-        assert_eq!(
-            hint("crypto ikev2 proposal PROP1"),
-            Some("crypto:ikev2:proposal:PROP1".into()),
-        );
-    }
-
-    #[test]
-    fn an_unclaimed_head_falls_through_to_the_shared_arms() {
-        assert_eq!(hint("policy-map SHAPE"), Some("policy-map:SHAPE".into()));
-    }
-
-    #[test]
-    fn an_unclaimed_head_with_no_shared_arm_yields_no_hint() {
-        assert_eq!(hint("hostname leaf-01"), None);
+    fn rule_key_hints() {
+        for (line, expected) in [
+            // a literal action ignores the guarded argument.
+            ("mlag configuration", Some("mlag")),
+            // a failed guard on a claimed head yields no hint.
+            ("mlag peer-link Port-Channel1", None),
+            // a claimed head with no matching rule yields no hint.
+            ("mlag", None),
+            // a guard accepts any of its words; too few args yields no hint.
+            ("management ssh", None),
+            ("management telnet vrf MGMT", Some("management:telnet:vrf")),
+            // missing captures yield no hint.
+            ("crypto pki trustpoint", None),
+            // a Common rule lets its head fall through.
+            (
+                "crypto ikev2 proposal PROP1",
+                Some("crypto:ikev2:proposal:PROP1"),
+            ),
+            // an unclaimed head falls through to the shared arms.
+            ("policy-map SHAPE", Some("policy-map:SHAPE")),
+            ("hostname leaf-01", None),
+        ] {
+            assert_eq!(hint(line).as_deref(), expected, "{line:?}");
+        }
     }
 
     #[test]

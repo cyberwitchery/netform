@@ -186,77 +186,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fortios_hash_comment() {
-        assert_eq!(classify_fortios_trivia("# comment"), TriviaKind::Comment);
+    fn classify_fortios_trivia_kinds() {
+        for (line, expected) in [
+            ("# comment", TriviaKind::Comment),
+            ("    # indented comment", TriviaKind::Comment),
+            ("", TriviaKind::Blank),
+            ("   ", TriviaKind::Blank),
+            ("config system global", TriviaKind::Content),
+            ("    set hostname \"FGT\"", TriviaKind::Content),
+            // FortiOS does not use `!` as a comment prefix (unlike IOS).
+            ("! note", TriviaKind::Content),
+        ] {
+            assert_eq!(classify_fortios_trivia(line), expected, "{line:?}");
+        }
     }
 
     #[test]
-    fn fortios_indented_hash_comment() {
-        assert_eq!(
-            classify_fortios_trivia("    # indented comment"),
-            TriviaKind::Comment,
-        );
-    }
-
-    #[test]
-    fn fortios_blank_line() {
-        assert_eq!(classify_fortios_trivia(""), TriviaKind::Blank);
-        assert_eq!(classify_fortios_trivia("   "), TriviaKind::Blank);
-    }
-
-    #[test]
-    fn fortios_content_line() {
-        assert_eq!(
-            classify_fortios_trivia("config system global"),
-            TriviaKind::Content,
-        );
-        assert_eq!(
-            classify_fortios_trivia("    set hostname \"FGT\""),
-            TriviaKind::Content,
-        );
-    }
-
-    #[test]
-    fn fortios_bang_is_not_comment() {
-        // FortiOS does not use `!` as a comment prefix (unlike IOS).
-        assert_eq!(classify_fortios_trivia("! note"), TriviaKind::Content);
-    }
-
-    #[test]
-    fn fortios_tokenize_config_line() {
-        let parsed = parse_ios_like_parts("config system global").expect("should parse");
-        assert_eq!(parsed.head, "config");
-        assert_eq!(parsed.args, vec!["system", "global"]);
-    }
-
-    #[test]
-    fn fortios_tokenize_set_quoted() {
-        let parsed =
-            parse_ios_like_parts("    set hostname \"My FortiGate\"").expect("should parse");
-        assert_eq!(parsed.head, "set");
-        assert_eq!(parsed.args, vec!["hostname", "\"My FortiGate\""]);
-    }
-
-    #[test]
-    fn fortios_tokenize_edit_quoted() {
-        let parsed = parse_ios_like_parts("    edit \"all\"").expect("should parse");
-        assert_eq!(parsed.head, "edit");
-        assert_eq!(parsed.args, vec!["\"all\""]);
-    }
-
-    #[test]
-    fn fortios_tokenize_end() {
-        let parsed = parse_ios_like_parts("end").expect("should parse");
-        assert_eq!(parsed.head, "end");
-        assert!(parsed.args.is_empty());
-    }
-
-    #[test]
-    fn fortios_tokenize_set_multivalue() {
-        let parsed =
-            parse_ios_like_parts("    set subnet 10.0.0.0 255.255.255.0").expect("should parse");
-        assert_eq!(parsed.head, "set");
-        assert_eq!(parsed.args, vec!["subnet", "10.0.0.0", "255.255.255.0"]);
+    fn fortios_tokenize() {
+        let cases: &[(&str, &str, &[&str])] = &[
+            ("config system global", "config", &["system", "global"]),
+            (
+                "    set hostname \"My FortiGate\"",
+                "set",
+                &["hostname", "\"My FortiGate\""],
+            ),
+            ("    edit \"all\"", "edit", &["\"all\""]),
+            ("end", "end", &[]),
+            (
+                "    set subnet 10.0.0.0 255.255.255.0",
+                "set",
+                &["subnet", "10.0.0.0", "255.255.255.0"],
+            ),
+        ];
+        for (line, head, args) in cases {
+            let parsed = parse_ios_like_parts(line).expect("should parse");
+            assert_eq!(parsed.head, *head, "{line:?}");
+            assert_eq!(parsed.args, *args, "{line:?}");
+        }
     }
 
     fn hint(line: &str) -> Option<String> {
@@ -265,122 +231,35 @@ mod tests {
     }
 
     #[test]
-    fn key_hint_config_two_part() {
-        assert_eq!(
-            hint("config system global"),
-            Some("config:system:global".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_config_one_part() {
-        assert_eq!(
-            hint("config firewall address"),
-            Some("config:firewall:address".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_config_single_section() {
-        assert_eq!(
-            hint("config system interface"),
-            Some("config:system:interface".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_edit_quoted() {
-        assert_eq!(hint("    edit \"port1\""), Some("edit:port1".into()));
-    }
-
-    #[test]
-    fn key_hint_edit_unquoted() {
-        assert_eq!(hint("    edit 1"), Some("edit:1".into()));
-    }
-
-    #[test]
-    fn key_hint_set_field() {
-        assert_eq!(
-            hint("    set hostname \"FGT\""),
-            Some("set:hostname".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_set_type() {
-        assert_eq!(hint("        set type ipmask"), Some("set:type".into()));
-    }
-
-    #[test]
-    fn key_hint_set_multivalue() {
-        assert_eq!(
-            hint("    set subnet 10.0.0.0 255.255.255.0"),
-            Some("set:subnet".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_set_quoted_param_unquotes() {
-        assert_eq!(
-            hint("    set \"custom-field\" value"),
-            Some("set:custom-field".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_set_bare_no_hint() {
-        // bare "set" with no field name — shouldn't happen but must not panic.
-        assert_eq!(hint("    set"), None);
-    }
-
-    #[test]
-    fn key_hint_unset_field() {
-        assert_eq!(hint("    unset comments"), Some("unset:comments".into()));
-    }
-
-    #[test]
-    fn key_hint_unset_uuid() {
-        assert_eq!(hint("        unset uuid"), Some("unset:uuid".into()));
-    }
-
-    #[test]
-    fn key_hint_unset_bare_no_hint() {
-        assert_eq!(hint("    unset"), None);
-    }
-
-    #[test]
-    fn key_hint_set_description_quoted_value() {
-        // the key hint captures the parameter name, not the value.
-        assert_eq!(
-            hint("        set description \"Production web server\""),
-            Some("set:description".into()),
-        );
-    }
-
-    #[test]
-    fn key_hint_set_action() {
-        assert_eq!(hint("        set action accept"), Some("set:action".into()),);
-    }
-
-    #[test]
-    fn key_hint_end_no_hint() {
-        assert_eq!(hint("end"), None);
-    }
-
-    #[test]
-    fn key_hint_next_no_hint() {
-        assert_eq!(hint("    next"), None);
-    }
-
-    #[test]
-    fn key_hint_config_empty_no_hint() {
-        // bare "config" with no section — shouldn't happen in practice but
-        // must not panic.
-        assert_eq!(hint("config"), None);
-    }
-
-    #[test]
-    fn key_hint_none_on_empty() {
+    fn fortios_key_hints() {
+        for (line, expected) in [
+            ("config system global", Some("config:system:global")),
+            ("config firewall address", Some("config:firewall:address")),
+            ("config system interface", Some("config:system:interface")),
+            // bare `config` with no section must not panic.
+            ("config", None),
+            ("    edit \"port1\"", Some("edit:port1")),
+            ("    edit 1", Some("edit:1")),
+            ("    set hostname \"FGT\"", Some("set:hostname")),
+            ("        set type ipmask", Some("set:type")),
+            ("    set subnet 10.0.0.0 255.255.255.0", Some("set:subnet")),
+            ("    set \"custom-field\" value", Some("set:custom-field")),
+            // the key hint captures the parameter name, not the value.
+            (
+                "        set description \"Production web server\"",
+                Some("set:description"),
+            ),
+            ("        set action accept", Some("set:action")),
+            // bare `set`/`unset` with no field name must not panic.
+            ("    set", None),
+            ("    unset comments", Some("unset:comments")),
+            ("        unset uuid", Some("unset:uuid")),
+            ("    unset", None),
+            ("end", None),
+            ("    next", None),
+        ] {
+            assert_eq!(hint(line).as_deref(), expected, "{line:?}");
+        }
         assert_eq!(fortios_key_hint(None), None);
     }
 
@@ -406,15 +285,6 @@ end
 ";
         let doc = parse(cfg);
         assert_eq!(doc.render(), cfg);
-    }
-
-    #[test]
-    fn parse_fortios_sets_named_dialect_hint() {
-        let doc = parse("config system global\n    set hostname \"FGT\"\nend\n");
-        assert_eq!(
-            doc.metadata.dialect_hint,
-            DialectHint::Named("fortios".into()),
-        );
     }
 
     #[test]

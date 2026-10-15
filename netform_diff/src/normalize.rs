@@ -95,51 +95,22 @@ mod tests {
     }
 
     #[test]
-    fn collapse_internal_whitespace_preserves_leading_indent() {
-        assert_eq!(collapse("    hello   world"), "    hello world");
-    }
-
-    #[test]
-    fn collapse_internal_whitespace_preserves_tab_indent() {
-        assert_eq!(collapse("\thello   world"), "\thello world");
-    }
-
-    #[test]
-    fn collapse_internal_whitespace_no_indent() {
-        assert_eq!(collapse("hello   world"), "hello world");
-    }
-
-    #[test]
-    fn collapse_internal_whitespace_only_indent() {
-        assert_eq!(collapse("    "), "    ");
-    }
-
-    #[test]
-    fn collapse_internal_whitespace_mixed_indent_and_runs() {
-        assert_eq!(
-            collapse("  description   uplink   port"),
-            "  description uplink port"
-        );
-    }
-
-    #[test]
-    fn collapse_internal_whitespace_single_tab_separators() {
-        assert_eq!(collapse("interface\tGi0/1"), "interface Gi0/1");
-        assert_eq!(collapse("set\tx\ty"), "set x y");
-    }
-
-    #[test]
-    fn collapse_internal_whitespace_mixed_single_byte_separators() {
-        assert_eq!(collapse("  set\tx y\tz"), "  set x y z");
-    }
-
-    #[test]
-    fn collapse_internal_whitespace_vertical_tab_and_form_feed() {
-        assert_eq!(collapse("a\x0bb\x0cc"), "a b c");
-    }
-
-    #[test]
-    fn collapse_internal_whitespace_keeps_canonical_line() {
-        assert_eq!(collapse("  description uplink"), "  description uplink");
+    fn collapse_internal_whitespace_cases() {
+        for (input, expected) in [
+            // leading indentation is kept (0.3.0 fix)
+            ("    hello   world", "    hello world"),
+            ("\thello   world", "\thello world"),
+            ("hello   world", "hello world"),
+            ("    ", "    "),
+            ("  description   uplink   port", "  description uplink port"),
+            // a single tab separator becomes a space (0.10.1)
+            ("interface\tGi0/1", "interface Gi0/1"),
+            ("set\tx\ty", "set x y"),
+            ("  set\tx y\tz", "  set x y z"),
+            ("a\x0bb\x0cc", "a b c"),
+            ("  description uplink", "  description uplink"),
+        ] {
+            assert_eq!(collapse(input), expected, "{input:?}");
+        }
     }
 }

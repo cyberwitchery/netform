@@ -59,30 +59,11 @@ interface GigabitEthernet0/0/0
 ";
 
 #[test]
-fn banner_text_change_survives_ignore_comments() {
-    let after = BANNER_WITH_BANG.replace("! contact noc@example.net", "! contact soc@example.net");
-
-    let diff = diff(BANNER_WITH_BANG, &after, ignore_comments());
-
-    assert!(diff.has_changes, "banner text change must be visible");
-    assert_eq!(
-        edit_texts(&diff),
-        vec!["! contact noc@example.net", "! contact soc@example.net"],
-    );
-}
-
-#[test]
 fn real_comments_are_still_dropped_by_ignore_comments() {
     let after = BANNER_WITH_BANG.replace("hostname edge-1\n!\n", "hostname edge-1\n! new note\n");
 
     let diff = diff(BANNER_WITH_BANG, &after, ignore_comments());
 
-    assert!(!diff.has_changes);
-}
-
-#[test]
-fn identical_configs_with_banners_report_no_changes() {
-    let diff = diff(BANNER_WITH_BANG, BANNER_WITH_BANG, ignore_comments());
     assert!(!diff.has_changes);
 }
 
@@ -94,19 +75,6 @@ interface GigabitEthernet0/0/0
   description WAN uplink
 ";
 
-#[test]
-fn glued_single_character_delimiter_banner_survives_ignore_comments() {
-    let after = BANNER_WITH_GLUED_DELIMITER.replace("Authorized use only", "CHANGED banner text");
-
-    let diff = diff(BANNER_WITH_GLUED_DELIMITER, &after, ignore_comments());
-
-    assert!(diff.has_changes, "banner text change must be visible");
-    assert_eq!(
-        edit_texts(&diff),
-        vec!["! Authorized use only", "! CHANGED banner text"],
-    );
-}
-
 const BANNER_WITH_GLUED_CARET: &str = "\
 banner motd ^Warning restricted
 ! Authorized use only
@@ -116,34 +84,66 @@ interface GigabitEthernet0/0/0
 ";
 
 #[test]
-fn glued_plain_caret_delimiter_banner_survives_ignore_comments() {
-    let after = BANNER_WITH_GLUED_CARET.replace("Authorized use only", "CHANGED banner text");
+fn banner_text_change_survives_ignore_comments() {
+    for (config, from, to, expected) in [
+        (
+            BANNER_WITH_BANG,
+            "! contact noc@example.net",
+            "! contact soc@example.net",
+            ["! contact noc@example.net", "! contact soc@example.net"],
+        ),
+        // glued single-character delimiter
+        (
+            BANNER_WITH_GLUED_DELIMITER,
+            "Authorized use only",
+            "CHANGED banner text",
+            ["! Authorized use only", "! CHANGED banner text"],
+        ),
+        // glued plain caret delimiter
+        (
+            BANNER_WITH_GLUED_CARET,
+            "Authorized use only",
+            "CHANGED banner text",
+            ["! Authorized use only", "! CHANGED banner text"],
+        ),
+        // standalone caret escape ^C with a caret in the body
+        (
+            "hostname edge-1\nbanner motd ^C\nPress ^ for help\n! Authorized use only\n^C\ninterface GigabitEthernet0/0/0\n  description WAN uplink\n",
+            "Authorized use only",
+            "CHANGED banner text",
+            ["! Authorized use only", "! CHANGED banner text"],
+        ),
+        // standalone caret escape ^Z with a caret in the body
+        (
+            "hostname edge-1\nbanner motd ^Z\nPress ^ for help\n! Authorized use only\n^Z\ninterface GigabitEthernet0/0/0\n  description WAN uplink\n",
+            "Authorized use only",
+            "CHANGED banner text",
+            ["! Authorized use only", "! CHANGED banner text"],
+        ),
+        // standalone caret escape ^A with a caret in the body
+        (
+            "hostname edge-1\nbanner motd ^A\nPress ^ for help\n! Authorized use only\n^A\ninterface GigabitEthernet0/0/0\n  description WAN uplink\n",
+            "Authorized use only",
+            "CHANGED banner text",
+            ["! Authorized use only", "! CHANGED banner text"],
+        ),
+        // standalone caret escape ^^ with a caret in the body
+        (
+            "hostname edge-1\nbanner motd ^^\nPress ^ for help\n! Authorized use only\n^^\ninterface GigabitEthernet0/0/0\n  description WAN uplink\n",
+            "Authorized use only",
+            "CHANGED banner text",
+            ["! Authorized use only", "! CHANGED banner text"],
+        ),
+    ] {
+        let after = config.replace(from, to);
 
-    let diff = diff(BANNER_WITH_GLUED_CARET, &after, ignore_comments());
+        let diff = diff(config, &after, ignore_comments());
 
-    assert!(diff.has_changes, "banner text change must be visible");
-    assert_eq!(
-        edit_texts(&diff),
-        vec!["! Authorized use only", "! CHANGED banner text"],
-    );
-}
-
-#[test]
-fn standalone_caret_escape_banner_with_a_caret_in_its_body_survives_ignore_comments() {
-    for delimiter in ["^C", "^Z", "^A", "^^"] {
-        let before = format!(
-            "hostname edge-1\nbanner motd {delimiter}\nPress ^ for help\n! Authorized use only\n{delimiter}\ninterface GigabitEthernet0/0/0\n  description WAN uplink\n"
+        assert!(
+            diff.has_changes,
+            "banner text change must be visible: {config:?}"
         );
-        let after = before.replace("Authorized use only", "CHANGED banner text");
-
-        let diff = diff(&before, &after, ignore_comments());
-
-        assert!(diff.has_changes, "{delimiter}");
-        assert_eq!(
-            edit_texts(&diff),
-            vec!["! Authorized use only", "! CHANGED banner text"],
-            "{delimiter}",
-        );
+        assert_eq!(edit_texts(&diff), expected, "{config:?}");
     }
 }
 
@@ -237,13 +237,12 @@ fn banner_body_change_is_reported_under_keyed_stable() {
 
     let shadowed = diff(BANNER_SHADOWING_AN_INTERFACE, &after, keyed_stable());
 
-    assert!(shadowed.has_changes);
-    assert!(
-        edit_texts(&shadowed)
-            .iter()
-            .any(|text| text.contains("do not disable")),
-        "changed banner line must appear in the diff: {:?}",
+    assert_eq!(
         edit_texts(&shadowed),
+        vec![
+            "  is the WAN port, do not shut",
+            "  is the WAN port, do not disable"
+        ],
     );
 }
 
@@ -260,7 +259,10 @@ fn whitespace_normalization_does_not_mask_banner_text_changes() {
         NormalizationStep::TrimTrailingWhitespace,
     ]);
 
-    assert!(diff(before, after, options).has_changes);
+    assert_eq!(
+        edit_texts(&diff(before, after, options)),
+        vec!["\tascii  art", "    ascii art "],
+    );
 }
 
 #[test]
@@ -270,5 +272,10 @@ fn ignore_blank_lines_keeps_a_blank_banner_line() {
 
     let options = NormalizeOptions::new(vec![NormalizationStep::IgnoreBlankLines]);
 
-    assert!(diff(before, after, options).has_changes);
+    let diff = diff(before, after, options);
+    assert!(
+        matches!(&diff.edits[..], [Edit::Delete { lines, .. }] if lines.len() == 1 && lines[0].text.is_empty()),
+        "{:?}",
+        diff.edits,
+    );
 }

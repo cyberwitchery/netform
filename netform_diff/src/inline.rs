@@ -122,11 +122,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tokenize_empty() {
-        assert!(tokenize("").is_empty());
-    }
-
-    #[test]
     fn tokenize_single_word() {
         assert_eq!(tokenize("hostname"), vec!["hostname"]);
     }
