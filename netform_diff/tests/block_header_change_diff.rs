@@ -2,6 +2,9 @@
 //! headers can collide on one key; the engine compares matched headers
 //! directly (see the engine's `diff_matched_segment`).  `class-map
 //! match-any/match-all VOICE` and `router ospfv3 1/2` are such collisions.
+//! tagged `router eigrp <as>` (NX-OS, EOS) and `router isis <tag>` (IOS
+//! family) key on their instance id.  every case below differs only in the
+//! header line.
 
 use netform_diff::{Diff, Edit, NormalizeOptions, diff_documents};
 
@@ -25,62 +28,79 @@ fn edit_texts(diff: &Diff) -> Vec<String> {
     out
 }
 
-#[test]
-fn iosxe_class_map_match_type_change_is_detected() {
-    let before = "class-map match-any VOICE\n  match dscp ef\n";
-    let after = "class-map match-all VOICE\n  match dscp ef\n";
-
-    let left = netform_dialects::iosxe::parse(before);
-    let right = netform_dialects::iosxe::parse(after);
-    let diff = diff_documents(&left, &right, NormalizeOptions::default()).unwrap();
-
-    assert!(
-        diff.has_changes,
-        "changing the class-map match type must be a detected change, not a silent no-op"
-    );
-    assert!(
-        diff.stats.replaces >= 1,
-        "the header change should surface as a Replace: {:?}",
-        diff.stats
-    );
-
-    let texts = edit_texts(&diff);
-    assert!(
-        texts.iter().any(|t| t.contains("match-any VOICE")),
-        "old class-map header should appear in the diff: {texts:?}"
-    );
-    assert!(
-        texts.iter().any(|t| t.contains("match-all VOICE")),
-        "new class-map header should appear in the diff: {texts:?}"
-    );
-}
+/// (case, dialect parser, header before, header after, unchanged body,
+/// headers collide on one key)
+type Case = (
+    &'static str,
+    fn(&str) -> netform_ir::Document,
+    &'static str,
+    &'static str,
+    &'static str,
+    bool,
+);
 
 #[test]
-fn iosxe_ospfv3_process_id_change_is_detected() {
-    let before = "router ospfv3 1\n  router-id 10.0.0.1\n";
-    let after = "router ospfv3 2\n  router-id 10.0.0.1\n";
+fn a_header_only_change_is_one_replace_of_the_header() {
+    // `collides` marks headers that share one key: they must surface as one
+    // replace of the header line alone.
+    let cases: &[Case] = &[
+        (
+            "iosxe class-map match type",
+            netform_dialects::iosxe::parse,
+            "class-map match-any VOICE",
+            "class-map match-all VOICE",
+            "\n  match dscp ef\n",
+            true,
+        ),
+        (
+            "iosxe ospfv3 process id",
+            netform_dialects::iosxe::parse,
+            "router ospfv3 1",
+            "router ospfv3 2",
+            "\n  router-id 10.0.0.1\n",
+            true,
+        ),
+        (
+            "nxos eigrp as",
+            netform_dialects::nxos::parse,
+            "router eigrp 100",
+            "router eigrp 200",
+            "\n  router-id 10.0.0.1\n",
+            false,
+        ),
+        (
+            "eos eigrp as",
+            netform_dialects::eos::parse,
+            "router eigrp 100",
+            "router eigrp 200",
+            "\n  router-id 10.0.0.1\n",
+            false,
+        ),
+        (
+            "iosxe isis tag",
+            netform_dialects::iosxe::parse,
+            "router isis AREA-A",
+            "router isis AREA-B",
+            "\n  net 49.0001.0000.0000.0001.00\n",
+            false,
+        ),
+    ];
+    for &(name, parse, before, after, body, collides) in cases {
+        let left = parse(&format!("{before}{body}"));
+        let right = parse(&format!("{after}{body}"));
+        let diff = diff_documents(&left, &right, NormalizeOptions::default()).unwrap();
 
-    let left = netform_dialects::iosxe::parse(before);
-    let right = netform_dialects::iosxe::parse(after);
-    let diff = diff_documents(&left, &right, NormalizeOptions::default()).unwrap();
-
-    assert!(
-        diff.has_changes,
-        "changing the OSPFv3 process id must be a detected change, not a silent no-op"
-    );
-    assert!(
-        diff.stats.replaces >= 1,
-        "the header change should surface as a Replace: {:?}",
-        diff.stats
-    );
-
-    let texts = edit_texts(&diff);
-    assert!(
-        texts.iter().any(|t| t.contains("ospfv3 1")),
-        "old OSPFv3 header should appear in the diff: {texts:?}"
-    );
-    assert!(
-        texts.iter().any(|t| t.contains("ospfv3 2")),
-        "new OSPFv3 header should appear in the diff: {texts:?}"
-    );
+        let texts = edit_texts(&diff);
+        if collides {
+            assert_eq!(texts, vec![before, after], "{name}");
+            assert_eq!(diff.stats.replaces, 1, "{name}: {:?}", diff.stats);
+        } else {
+            assert!(diff.has_changes, "{name}");
+            assert!(
+                texts.iter().any(|t| t.contains(before)),
+                "{name}: {texts:?}"
+            );
+            assert!(texts.iter().any(|t| t.contains(after)), "{name}: {texts:?}");
+        }
+    }
 }

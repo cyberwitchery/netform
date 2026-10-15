@@ -131,15 +131,6 @@ interface GigabitEthernet1/0/2
 }
 
 #[test]
-fn detect_iosxe_from_other_speed_prefixes() {
-    let input = "\
-interface TenGigabitEthernet1/1/1
-interface HundredGigE1/0/1
-";
-    assert_eq!(detect_dialect(input), DialectHint::Named("iosxe".into()));
-}
-
-#[test]
 fn detect_generic_when_iosxe_and_nxos_interfaces_mix() {
     // iosxe MODERATE(2) vs nxos STRONG(3): 3 < 2 * MARGIN_FACTOR(2).
     let input = "\

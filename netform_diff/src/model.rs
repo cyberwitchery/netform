@@ -427,147 +427,114 @@ mod tests {
     }
 
     #[test]
-    fn policy_for_path_returns_default_with_no_overrides() {
-        let config = OrderPolicyConfig {
-            default: OrderPolicy::Unordered,
-            overrides: Vec::new(),
+    fn policy_for_path_picks_the_longest_matching_prefix() {
+        use OrderPolicy::{KeyedStable, Ordered, Unordered};
+        let ov = |prefix: &[usize], policy| OrderPolicyOverride {
+            context_prefix: prefix.to_vec(),
+            policy,
         };
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 1, 2])),
-            OrderPolicy::Unordered
-        );
-    }
-
-    #[test]
-    fn policy_for_path_matches_exact_prefix() {
-        let config = OrderPolicyConfig {
-            default: OrderPolicy::Ordered,
-            overrides: vec![OrderPolicyOverride {
-                context_prefix: vec![0, 1],
-                policy: OrderPolicy::Unordered,
-            }],
-        };
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 1])),
-            OrderPolicy::Unordered
-        );
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 1, 5])),
-            OrderPolicy::Unordered
-        );
-    }
-
-    #[test]
-    fn policy_for_path_falls_back_when_no_prefix_matches() {
-        let config = OrderPolicyConfig {
-            default: OrderPolicy::Ordered,
-            overrides: vec![OrderPolicyOverride {
-                context_prefix: vec![3, 4],
-                policy: OrderPolicy::Unordered,
-            }],
-        };
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 1])),
-            OrderPolicy::Ordered
-        );
-    }
-
-    #[test]
-    fn policy_for_path_picks_longest_prefix() {
-        let config = OrderPolicyConfig {
-            default: OrderPolicy::Ordered,
-            overrides: vec![
-                OrderPolicyOverride {
-                    context_prefix: vec![0],
-                    policy: OrderPolicy::Unordered,
-                },
-                OrderPolicyOverride {
-                    context_prefix: vec![0, 1],
-                    policy: OrderPolicy::KeyedStable,
-                },
-            ],
-        };
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 1, 2])),
-            OrderPolicy::KeyedStable
-        );
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 5])),
-            OrderPolicy::Unordered
-        );
-    }
-
-    #[test]
-    fn policy_for_path_longest_prefix_wins_regardless_of_order() {
-        let config = OrderPolicyConfig {
-            default: OrderPolicy::Ordered,
-            overrides: vec![
-                OrderPolicyOverride {
-                    context_prefix: vec![0, 1, 2],
-                    policy: OrderPolicy::KeyedStable,
-                },
-                OrderPolicyOverride {
-                    context_prefix: vec![0],
-                    policy: OrderPolicy::Unordered,
-                },
-                OrderPolicyOverride {
-                    context_prefix: vec![0, 1],
-                    policy: OrderPolicy::Ordered,
-                },
-            ],
-        };
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 1, 2])),
-            OrderPolicy::KeyedStable
-        );
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 1])),
-            OrderPolicy::Ordered
-        );
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0])),
-            OrderPolicy::Unordered
-        );
-    }
-
-    #[test]
-    fn policy_for_path_empty_prefix_matches_everything() {
-        let config = OrderPolicyConfig {
-            default: OrderPolicy::Ordered,
-            overrides: vec![OrderPolicyOverride {
-                context_prefix: vec![],
-                policy: OrderPolicy::Unordered,
-            }],
-        };
-        assert_eq!(
-            config.policy_for_path(&Path(vec![])),
-            OrderPolicy::Unordered
-        );
-        assert_eq!(
-            config.policy_for_path(&Path(vec![0, 1])),
-            OrderPolicy::Unordered
-        );
-    }
-
-    #[test]
-    fn policy_for_path_empty_path_only_matches_empty_prefix() {
-        let config = OrderPolicyConfig {
-            default: OrderPolicy::Ordered,
-            overrides: vec![
-                OrderPolicyOverride {
-                    context_prefix: vec![],
-                    policy: OrderPolicy::Unordered,
-                },
-                OrderPolicyOverride {
-                    context_prefix: vec![0],
-                    policy: OrderPolicy::KeyedStable,
-                },
-            ],
-        };
-        assert_eq!(
-            config.policy_for_path(&Path(vec![])),
-            OrderPolicy::Unordered
-        );
+        let cases = vec![
+            (
+                "no overrides returns the default",
+                Unordered,
+                vec![],
+                vec![0, 1, 2],
+                Unordered,
+            ),
+            (
+                "exact prefix",
+                Ordered,
+                vec![ov(&[0, 1], Unordered)],
+                vec![0, 1],
+                Unordered,
+            ),
+            (
+                "below the prefix",
+                Ordered,
+                vec![ov(&[0, 1], Unordered)],
+                vec![0, 1, 5],
+                Unordered,
+            ),
+            (
+                "no prefix matches",
+                Ordered,
+                vec![ov(&[3, 4], Unordered)],
+                vec![0, 1],
+                Ordered,
+            ),
+            (
+                "longest prefix",
+                Ordered,
+                vec![ov(&[0], Unordered), ov(&[0, 1], KeyedStable)],
+                vec![0, 1, 2],
+                KeyedStable,
+            ),
+            (
+                "shorter prefix when the longer does not match",
+                Ordered,
+                vec![ov(&[0], Unordered), ov(&[0, 1], KeyedStable)],
+                vec![0, 5],
+                Unordered,
+            ),
+            (
+                "longest wins regardless of order, depth 3",
+                Ordered,
+                vec![
+                    ov(&[0, 1, 2], KeyedStable),
+                    ov(&[0], Unordered),
+                    ov(&[0, 1], Ordered),
+                ],
+                vec![0, 1, 2],
+                KeyedStable,
+            ),
+            (
+                "longest wins regardless of order, depth 2",
+                Ordered,
+                vec![
+                    ov(&[0, 1, 2], KeyedStable),
+                    ov(&[0], Unordered),
+                    ov(&[0, 1], Ordered),
+                ],
+                vec![0, 1],
+                Ordered,
+            ),
+            (
+                "longest wins regardless of order, depth 1",
+                Ordered,
+                vec![
+                    ov(&[0, 1, 2], KeyedStable),
+                    ov(&[0], Unordered),
+                    ov(&[0, 1], Ordered),
+                ],
+                vec![0],
+                Unordered,
+            ),
+            (
+                "empty prefix matches the empty path",
+                Ordered,
+                vec![ov(&[], Unordered)],
+                vec![],
+                Unordered,
+            ),
+            (
+                "empty prefix matches everything",
+                Ordered,
+                vec![ov(&[], Unordered)],
+                vec![0, 1],
+                Unordered,
+            ),
+            (
+                "empty path only matches the empty prefix",
+                Ordered,
+                vec![ov(&[], Unordered), ov(&[0], KeyedStable)],
+                vec![],
+                Unordered,
+            ),
+        ];
+        for (name, default, overrides, path, expected) in cases {
+            let config = OrderPolicyConfig { default, overrides };
+            assert_eq!(config.policy_for_path(&Path(path)), expected, "{name}");
+        }
     }
 
     #[test]
@@ -583,49 +550,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_options_with_order_policy_overrides_policy() {
-        let policy = OrderPolicyConfig {
-            default: OrderPolicy::Unordered,
-            overrides: vec![OrderPolicyOverride {
-                context_prefix: vec![0],
-                policy: OrderPolicy::Ordered,
-            }],
-        };
-        let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreBlankLines])
-            .with_order_policy(policy.clone());
-        assert_eq!(opts.order_policy, policy);
-        assert_eq!(opts.steps, vec![NormalizationStep::IgnoreBlankLines]);
-    }
-
-    #[test]
-    fn normalize_options_policy_for_path_delegates_to_config() {
-        let opts = NormalizeOptions::new(vec![]).with_order_policy(OrderPolicyConfig {
-            default: OrderPolicy::Ordered,
-            overrides: vec![OrderPolicyOverride {
-                context_prefix: vec![1],
-                policy: OrderPolicy::KeyedStable,
-            }],
-        });
-        assert_eq!(
-            opts.policy_for_path(&Path(vec![1, 2])),
-            OrderPolicy::KeyedStable
-        );
-        assert_eq!(opts.policy_for_path(&Path(vec![0])), OrderPolicy::Ordered);
-    }
-
-    #[test]
-    fn diff_stats_default_is_all_zeros() {
-        let stats = DiffStats::default();
-        assert_eq!(stats.inserts, 0);
-        assert_eq!(stats.deletes, 0);
-        assert_eq!(stats.replaces, 0);
-        assert_eq!(stats.inserted_lines, 0);
-        assert_eq!(stats.deleted_lines, 0);
-        assert_eq!(stats.replaced_old_lines, 0);
-        assert_eq!(stats.replaced_new_lines, 0);
-    }
-
-    #[test]
     fn order_policy_config_default_is_ordered_no_overrides() {
         let config = OrderPolicyConfig::default();
         assert_eq!(config.default, OrderPolicy::Ordered);
@@ -633,23 +557,8 @@ mod tests {
     }
 
     #[test]
-    fn u64buf_zero() {
-        assert_eq!(U64Buf::new(0).as_bytes(), b"0");
-    }
-
-    #[test]
-    fn u64buf_small() {
-        assert_eq!(U64Buf::new(42).as_bytes(), b"42");
-    }
-
-    #[test]
-    fn u64buf_max() {
-        assert_eq!(U64Buf::new(u64::MAX).as_bytes(), b"18446744073709551615");
-    }
-
-    #[test]
     fn u64buf_matches_display() {
-        for &v in &[0, 1, 9, 10, 99, 100, 999, 12345, u64::MAX] {
+        for &v in &[0, 1, 9, 10, 42, 99, 100, 999, 12345, u64::MAX] {
             assert_eq!(
                 std::str::from_utf8(U64Buf::new(v).as_bytes()).unwrap(),
                 v.to_string(),

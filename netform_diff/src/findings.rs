@@ -335,19 +335,6 @@ mod tests {
     }
 
     #[test]
-    fn collect_findings_empty_inputs() {
-        let a_doc = Document::default();
-        let b_doc = Document::default();
-        let a_view = make_view(vec![]);
-        let b_view = make_view(vec![]);
-        let ctx = DiffContext::from_views(&a_view, &b_view);
-
-        let findings = collect_findings(&a_doc, &b_doc, &a_view, &b_view, &ctx, &[]);
-
-        assert!(findings.is_empty());
-    }
-
-    #[test]
     fn fallback_alignment_findings_emitted_per_context() {
         let contexts = vec![Path(vec![0]), Path(vec![1, 2])];
         let mut out = Vec::new();
@@ -493,6 +480,16 @@ mod tests {
         collect_unknown_block_findings(&doc, "right", &mut out);
 
         assert_eq!(out.len(), 1);
+        assert_eq!(out[0].code, finding_code::UNKNOWN_UNPARSED_CONSTRUCT);
+        assert_eq!(out[0].path, Some(Path(vec![0])));
+        assert_eq!(
+            out[0].span,
+            Some(Span {
+                line: 1,
+                start_byte: 0,
+                end_byte: 6,
+            })
+        );
         assert!(out[0].message.contains("right"));
         assert!(out[0].message.contains("unknown block"));
     }

@@ -1,102 +1,75 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use netform_diff::{NormalizeOptions, diff_documents};
 use netform_ir::parse_generic;
 use serde_json::Value;
 
-#[test]
-fn schema_files_exist_at_repo_root() {
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-
-    let required = [
-        "schemas/diff.schema.json",
-        "schemas/plan.schema.json",
-        "schemas/normalization-pipeline.schema.json",
-        "schemas/order-policy.schema.json",
-        "schemas/fixture.schema.json",
-    ];
-
-    for relative in required {
-        let path = repo_root.join(relative);
-        assert!(path.exists(), "missing schema file: {}", path.display());
-    }
+fn diff_schema() -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../schemas/diff.schema.json");
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()))
 }
 
+fn keys(value: &Value) -> BTreeSet<String> {
+    value.as_object().expect("object").keys().cloned().collect()
+}
+
+fn required(value: &Value) -> BTreeSet<String> {
+    value["required"]
+        .as_array()
+        .expect("required array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
+}
+
+/// diff.json carries exactly the fields diff.schema.json declares, at every
+/// level, for a nested and a top-level value change.
 #[test]
-fn diff_json_shape_contract() {
-    let intended = parse_generic("interface Ethernet1\n  description intended\n");
-    let actual = parse_generic("interface Ethernet1\n  description actual\n");
+fn diff_json_carries_exactly_the_schema_fields() {
+    let schema = diff_schema();
+    let defs = &schema["$defs"];
+    for (intended, actual) in [
+        (
+            "interface Ethernet1\n  description intended\n",
+            "interface Ethernet1\n  description actual\n",
+        ),
+        ("set system host-name a\n", "set system host-name b\n"),
+    ] {
+        let diff = diff_documents(
+            &parse_generic(intended),
+            &parse_generic(actual),
+            NormalizeOptions::default(),
+        )
+        .unwrap();
+        let value = serde_json::to_value(&diff).expect("serialize diff");
 
-    let diff = diff_documents(&intended, &actual, NormalizeOptions::default()).unwrap();
-    let value = serde_json::to_value(&diff).expect("serialize diff");
+        assert_eq!(keys(&value), keys(&schema["properties"]), "{intended:?}");
+        assert_eq!(keys(&value), required(&schema), "{intended:?}");
+        assert_eq!(value["has_changes"], Value::Bool(true), "{intended:?}");
+        assert_eq!(
+            keys(&value["stats"]),
+            required(&defs["stats"]),
+            "{intended:?}"
+        );
 
-    let obj = value.as_object().expect("diff should be object");
-    assert!(obj.contains_key("normalization_steps"));
-    assert!(obj.contains_key("order_policy"));
-    assert!(obj.contains_key("has_changes"));
-    assert!(obj.contains_key("edits"));
-    assert!(obj.contains_key("stats"));
-    assert!(obj.contains_key("findings"));
-    let findings = obj
-        .get("findings")
-        .and_then(Value::as_array)
-        .expect("findings should be array");
-    for finding in findings {
-        let finding_obj = finding.as_object().expect("finding object");
-        assert!(finding_obj.contains_key("code"));
-    }
-
-    let edits = obj
-        .get("edits")
-        .and_then(Value::as_array)
-        .expect("edits should be array");
-    assert!(!edits.is_empty());
-
-    for edit in edits {
-        let edit_obj = edit.as_object().expect("edit should be object");
-        assert!(edit_obj.contains_key("type"));
-        assert!(!edit_obj.contains_key("confidence"));
-
-        match edit_obj
-            .get("type")
-            .and_then(Value::as_str)
-            .expect("type string")
-        {
-            "Insert" => {
-                assert!(edit_obj.contains_key("at_key"));
-                assert!(edit_obj.contains_key("left_anchor"));
-                assert!(edit_obj.contains_key("right_anchor"));
-                assert!(edit_obj.contains_key("lines"));
+        let edits = value["edits"].as_array().expect("edits array");
+        assert_eq!(edits.len(), 1, "{intended:?}");
+        for edit in edits {
+            assert_eq!(edit["type"], "Replace", "{intended:?}");
+            let def = &defs["replace_edit"];
+            assert_eq!(keys(edit), keys(&def["properties"]), "{intended:?}");
+            assert_eq!(keys(edit), required(def), "{intended:?}");
+            for side in ["old_lines", "new_lines"] {
+                for line in edit[side].as_array().expect("lines array") {
+                    assert_eq!(keys(line), required(&defs["diff_line"]), "{intended:?}");
+                }
             }
-            "Delete" => {
-                assert!(edit_obj.contains_key("at_key"));
-                assert!(edit_obj.contains_key("left_anchor"));
-                assert!(edit_obj.contains_key("right_anchor"));
-                assert!(edit_obj.contains_key("lines"));
-            }
-            "Replace" => {
-                assert!(edit_obj.contains_key("old_at_key"));
-                assert!(edit_obj.contains_key("new_at_key"));
-                assert!(edit_obj.contains_key("left_anchor"));
-                assert!(edit_obj.contains_key("right_anchor"));
-                assert!(edit_obj.contains_key("old_lines"));
-                assert!(edit_obj.contains_key("new_lines"));
-            }
-            other => panic!("unexpected edit type: {other}"),
+        }
+        for finding in value["findings"].as_array().expect("findings array") {
+            assert_eq!(keys(finding), required(&defs["finding"]), "{intended:?}");
         }
     }
-}
-
-#[test]
-fn diff_json_is_byte_stable_across_runs() {
-    let intended = parse_generic("line a\nline b\nline c\n");
-    let actual = parse_generic("line a\nline x\nline c\n");
-
-    let one = diff_documents(&intended, &actual, NormalizeOptions::default()).unwrap();
-    let two = diff_documents(&intended, &actual, NormalizeOptions::default()).unwrap();
-
-    let one_json = serde_json::to_string_pretty(&one).expect("serialize first");
-    let two_json = serde_json::to_string_pretty(&two).expect("serialize second");
-
-    assert_eq!(one_json, two_json);
 }

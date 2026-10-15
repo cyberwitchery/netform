@@ -6,6 +6,7 @@ use netform_ir::parse_generic;
 #[test]
 fn round_trip_all_testdata_files() {
     let dir = Path::new("testdata");
+    let mut checked = 0;
     for entry in fs::read_dir(dir).expect("read testdata") {
         let entry = entry.expect("dir entry");
         let path = entry.path();
@@ -18,6 +19,8 @@ fn round_trip_all_testdata_files() {
                 "round-trip mismatch for {}",
                 path.display()
             );
+            checked += 1;
         }
     }
+    assert_eq!(checked, 2);
 }

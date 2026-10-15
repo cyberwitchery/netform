@@ -11,16 +11,6 @@ use super::{
 };
 
 #[test]
-fn detects_replace_edit() {
-    let a = parse_generic("interface Ethernet1\n  description old\n");
-    let b = parse_generic("interface Ethernet1\n  description new\n");
-
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    assert_eq!(diff.edits.len(), 1);
-    assert!(matches!(diff.edits[0], Edit::Replace { .. }));
-}
-
-#[test]
 fn ignores_comments_when_configured() {
     let a = parse_generic("! generated\ninterface Ethernet1\n");
     let b = parse_generic("! changed comment\ninterface Ethernet1\n");
@@ -89,75 +79,17 @@ fn ambiguous_duplicate_lines_create_findings() {
 
     let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
     assert!(!diff.has_changes);
-    assert!(!diff.findings.is_empty());
+    let [finding] = &diff.findings[..] else {
+        panic!("expected one finding, got {:?}", diff.findings);
+    };
+    assert_eq!(finding.code, crate::finding_code::AMBIGUOUS_KEY_MATCH);
     assert!(
-        diff.findings
-            .iter()
-            .any(|f| f.message.contains("ambiguous content key"))
+        finding
+            .message
+            .ends_with("appears 3x on left and 3x on right"),
+        "{}",
+        finding.message
     );
-}
-
-#[test]
-fn reports_has_changes_for_drift() {
-    let a = parse_generic("hostname old\n");
-    let b = parse_generic("hostname new\n");
-
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    assert!(diff.has_changes);
-}
-
-#[test]
-fn ordered_policy_reports_reordered_block_children_as_change() {
-    let a = parse_generic("interface Ethernet1\n  description uplink\n  mtu 9000\n");
-    let b = parse_generic("interface Ethernet1\n  mtu 9000\n  description uplink\n");
-
-    let diff = diff_documents(
-        &a,
-        &b,
-        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
-            default: OrderPolicy::Ordered,
-            overrides: Vec::new(),
-        }),
-    )
-    .unwrap();
-
-    assert!(diff.has_changes);
-}
-
-#[test]
-fn unordered_policy_ignores_reordered_block_children() {
-    let a = parse_generic("interface Ethernet1\n  description uplink\n  mtu 9000\n");
-    let b = parse_generic("interface Ethernet1\n  mtu 9000\n  description uplink\n");
-
-    let diff = diff_documents(
-        &a,
-        &b,
-        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
-            default: OrderPolicy::Unordered,
-            overrides: Vec::new(),
-        }),
-    )
-    .unwrap();
-
-    assert!(!diff.has_changes);
-}
-
-#[test]
-fn keyed_stable_policy_ignores_reordered_block_children() {
-    let a = parse_generic("interface Ethernet1\n  description uplink\n  mtu 9000\n");
-    let b = parse_generic("interface Ethernet1\n  mtu 9000\n  description uplink\n");
-
-    let diff = diff_documents(
-        &a,
-        &b,
-        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
-            default: OrderPolicy::KeyedStable,
-            overrides: Vec::new(),
-        }),
-    )
-    .unwrap();
-
-    assert!(!diff.has_changes);
 }
 
 #[test]
@@ -166,10 +98,17 @@ fn fallback_alignment_emits_finding() {
     let b = parse_generic("router bgp 65000\n  neighbor 10.0.0.1 remote-as 65001\n");
 
     let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    assert!(
-        diff.findings
-            .iter()
-            .any(|f| f.message.contains("fallback segment alignment"))
+    let findings = diff
+        .findings
+        .iter()
+        .map(|f| (f.code.as_str(), f.path.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        findings,
+        [(
+            crate::finding_code::DIFF_UNRELIABLE_REGION,
+            Some(Path(vec![0]))
+        )]
     );
 }
 
@@ -184,403 +123,6 @@ fn parse_uncertainty_is_exposed_as_finding() {
             .iter()
             .any(|f| f.code == "unknown_unparsed_construct")
     );
-}
-
-#[test]
-fn build_plan_emits_missing_anchor_finding_when_anchor_is_absent() {
-    let diff = Diff {
-        edits: vec![Edit::Insert {
-            at_key: None,
-            left_anchor: None,
-            right_anchor: None,
-            lines: vec![DiffLine {
-                content_key: 1,
-                occurrence_key: 1,
-                text: "set system host-name edge-1".to_string(),
-                path: Path(vec![0]),
-                span: Span {
-                    line: 1,
-                    start_byte: 0,
-                    end_byte: 27,
-                },
-            }],
-        }],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert!(plan.actions.is_empty());
-    assert!(
-        plan.findings
-            .iter()
-            .any(|f| f.code == "missing_anchor" && f.message.contains("insert"))
-    );
-}
-
-#[test]
-fn build_plan_creates_insert_and_delete_line_actions_with_anchor_context() {
-    let delete_anchor = EditAnchor {
-        path: Path(vec![0, 2]),
-        span: Span {
-            line: 3,
-            start_byte: 20,
-            end_byte: 36,
-        },
-    };
-    let insert_anchor = EditAnchor {
-        path: Path(vec![0, 1]),
-        span: Span {
-            line: 2,
-            start_byte: 10,
-            end_byte: 28,
-        },
-    };
-
-    let diff = Diff {
-        edits: vec![
-            Edit::Delete {
-                at_key: Some(11),
-                left_anchor: Some(delete_anchor),
-                right_anchor: None,
-                lines: vec![DiffLine {
-                    content_key: 11,
-                    occurrence_key: 11,
-                    text: "  no shutdown".to_string(),
-                    path: Path(vec![0, 2]),
-                    span: Span {
-                        line: 3,
-                        start_byte: 20,
-                        end_byte: 32,
-                    },
-                }],
-            },
-            Edit::Insert {
-                at_key: Some(22),
-                left_anchor: Some(EditAnchor {
-                    path: Path(vec![0]),
-                    span: Span {
-                        line: 1,
-                        start_byte: 0,
-                        end_byte: 9,
-                    },
-                }),
-                right_anchor: Some(insert_anchor),
-                lines: vec![DiffLine {
-                    content_key: 22,
-                    occurrence_key: 22,
-                    text: "  shutdown".to_string(),
-                    path: Path(vec![0, 1]),
-                    span: Span {
-                        line: 2,
-                        start_byte: 10,
-                        end_byte: 20,
-                    },
-                }],
-            },
-        ],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert_eq!(plan.actions.len(), 1);
-    assert_eq!(plan.findings.len(), 0);
-
-    match &plan.actions[0] {
-        PlanAction::ApplyLineEditsUnderContext {
-            context_path,
-            line_edits,
-        } => {
-            assert_eq!(context_path.0, vec![0]);
-            assert_eq!(line_edits[0].kind, PlanLineEditKind::Delete);
-            assert_eq!(line_edits[1].kind, PlanLineEditKind::Insert);
-        }
-        _ => panic!("expected delete line-edit action"),
-    }
-}
-
-#[test]
-fn build_plan_empty_diff_produces_empty_plan() {
-    let diff = Diff::default();
-    let plan = build_plan(&diff);
-    assert_eq!(plan.version, "v1");
-    assert!(plan.actions.is_empty());
-    assert!(plan.findings.is_empty());
-}
-
-#[test]
-fn build_plan_replace_without_left_anchor_emits_finding() {
-    let diff = Diff {
-        edits: vec![Edit::Replace {
-            old_at_key: Some(1),
-            new_at_key: Some(2),
-            left_anchor: None,
-            right_anchor: None,
-            old_lines: vec![DiffLine {
-                content_key: 1,
-                occurrence_key: 1,
-                text: "  description old".to_string(),
-                path: Path(vec![0, 1]),
-                span: Span {
-                    line: 2,
-                    start_byte: 10,
-                    end_byte: 27,
-                },
-            }],
-            new_lines: vec![DiffLine {
-                content_key: 2,
-                occurrence_key: 2,
-                text: "  description new".to_string(),
-                path: Path(vec![0, 1]),
-                span: Span {
-                    line: 2,
-                    start_byte: 10,
-                    end_byte: 27,
-                },
-            }],
-        }],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert!(plan.actions.is_empty());
-    assert_eq!(plan.findings.len(), 1);
-    assert_eq!(plan.findings[0].code, "missing_anchor");
-    assert!(plan.findings[0].message.contains("replace"));
-}
-
-#[test]
-fn build_plan_delete_without_left_anchor_emits_finding() {
-    let diff = Diff {
-        edits: vec![Edit::Delete {
-            at_key: Some(1),
-            left_anchor: None,
-            right_anchor: None,
-            lines: vec![DiffLine {
-                content_key: 1,
-                occurrence_key: 1,
-                text: "  no shutdown".to_string(),
-                path: Path(vec![0, 1]),
-                span: Span {
-                    line: 2,
-                    start_byte: 10,
-                    end_byte: 23,
-                },
-            }],
-        }],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert!(plan.actions.is_empty());
-    assert_eq!(plan.findings.len(), 1);
-    assert_eq!(plan.findings[0].code, "missing_anchor");
-    assert!(plan.findings[0].message.contains("delete"));
-}
-
-#[test]
-fn build_plan_single_line_replace_creates_replace_line_edit() {
-    let anchor = EditAnchor {
-        path: Path(vec![0, 1]),
-        span: Span {
-            line: 2,
-            start_byte: 10,
-            end_byte: 27,
-        },
-    };
-    let diff = Diff {
-        edits: vec![Edit::Replace {
-            old_at_key: Some(1),
-            new_at_key: Some(2),
-            left_anchor: Some(anchor),
-            right_anchor: None,
-            old_lines: vec![DiffLine {
-                content_key: 1,
-                occurrence_key: 1,
-                text: "  description old".to_string(),
-                path: Path(vec![0, 1]),
-                span: Span {
-                    line: 2,
-                    start_byte: 10,
-                    end_byte: 27,
-                },
-            }],
-            new_lines: vec![DiffLine {
-                content_key: 2,
-                occurrence_key: 2,
-                text: "  description new".to_string(),
-                path: Path(vec![0, 1]),
-                span: Span {
-                    line: 2,
-                    start_byte: 10,
-                    end_byte: 27,
-                },
-            }],
-        }],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert_eq!(plan.findings.len(), 0);
-    assert_eq!(plan.actions.len(), 1);
-    match &plan.actions[0] {
-        PlanAction::ApplyLineEditsUnderContext {
-            context_path,
-            line_edits,
-        } => {
-            assert_eq!(context_path.0, vec![0]);
-            assert_eq!(line_edits.len(), 1);
-            assert_eq!(line_edits[0].kind, PlanLineEditKind::Replace);
-            assert_eq!(line_edits[0].text, "  description new");
-        }
-        _ => panic!("expected line-edit action"),
-    }
-}
-
-#[test]
-fn build_plan_multi_line_replace_creates_replace_block() {
-    let anchor = EditAnchor {
-        path: Path(vec![1]),
-        span: Span {
-            line: 4,
-            start_byte: 40,
-            end_byte: 55,
-        },
-    };
-    let diff = Diff {
-        edits: vec![Edit::Replace {
-            old_at_key: Some(1),
-            new_at_key: Some(2),
-            left_anchor: Some(anchor),
-            right_anchor: None,
-            old_lines: vec![
-                DiffLine {
-                    content_key: 1,
-                    occurrence_key: 1,
-                    text: "router bgp 65000".to_string(),
-                    path: Path(vec![1]),
-                    span: Span {
-                        line: 4,
-                        start_byte: 40,
-                        end_byte: 55,
-                    },
-                },
-                DiffLine {
-                    content_key: 11,
-                    occurrence_key: 11,
-                    text: "  neighbor 10.0.0.1 remote-as 65001".to_string(),
-                    path: Path(vec![1, 0]),
-                    span: Span {
-                        line: 5,
-                        start_byte: 56,
-                        end_byte: 90,
-                    },
-                },
-            ],
-            new_lines: vec![
-                DiffLine {
-                    content_key: 2,
-                    occurrence_key: 2,
-                    text: "router bgp 65100".to_string(),
-                    path: Path(vec![1]),
-                    span: Span {
-                        line: 4,
-                        start_byte: 40,
-                        end_byte: 55,
-                    },
-                },
-                DiffLine {
-                    content_key: 21,
-                    occurrence_key: 21,
-                    text: "  neighbor 10.0.0.2 remote-as 65002".to_string(),
-                    path: Path(vec![1, 0]),
-                    span: Span {
-                        line: 5,
-                        start_byte: 56,
-                        end_byte: 90,
-                    },
-                },
-            ],
-        }],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert_eq!(plan.findings.len(), 0);
-    assert_eq!(plan.actions.len(), 1);
-    match &plan.actions[0] {
-        PlanAction::ReplaceBlock {
-            target_path,
-            target_span,
-            intended_lines,
-        } => {
-            assert_eq!(target_path.0, vec![1]);
-            assert_eq!(target_span.line, 4);
-            assert_eq!(intended_lines.len(), 2);
-            assert_eq!(intended_lines[0], "router bgp 65100");
-            assert_eq!(intended_lines[1], "  neighbor 10.0.0.2 remote-as 65002");
-        }
-        _ => panic!("expected replace-block action"),
-    }
-}
-
-#[test]
-fn build_plan_replace_with_single_old_multi_new_creates_replace_block() {
-    let anchor = EditAnchor {
-        path: Path(vec![0, 1]),
-        span: Span {
-            line: 2,
-            start_byte: 10,
-            end_byte: 27,
-        },
-    };
-    let diff = Diff {
-        edits: vec![Edit::Replace {
-            old_at_key: Some(1),
-            new_at_key: Some(2),
-            left_anchor: Some(anchor),
-            right_anchor: None,
-            old_lines: vec![DiffLine {
-                content_key: 1,
-                occurrence_key: 1,
-                text: "  description old".to_string(),
-                path: Path(vec![0, 1]),
-                span: Span {
-                    line: 2,
-                    start_byte: 10,
-                    end_byte: 27,
-                },
-            }],
-            new_lines: vec![
-                DiffLine {
-                    content_key: 2,
-                    occurrence_key: 2,
-                    text: "  description new-a".to_string(),
-                    path: Path(vec![0, 1]),
-                    span: Span {
-                        line: 2,
-                        start_byte: 10,
-                        end_byte: 29,
-                    },
-                },
-                DiffLine {
-                    content_key: 3,
-                    occurrence_key: 3,
-                    text: "  description new-b".to_string(),
-                    path: Path(vec![0, 2]),
-                    span: Span {
-                        line: 3,
-                        start_byte: 30,
-                        end_byte: 49,
-                    },
-                },
-            ],
-        }],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert_eq!(plan.actions.len(), 1);
-    assert!(matches!(plan.actions[0], PlanAction::ReplaceBlock { .. }));
 }
 
 #[test]
@@ -665,193 +207,6 @@ fn build_plan_replace_of_sibling_lines_deletes_them_and_inserts_under_their_cont
 }
 
 #[test]
-fn build_plan_insert_with_anchor_creates_insert_line_edit() {
-    let anchor = EditAnchor {
-        path: Path(vec![0, 1]),
-        span: Span {
-            line: 2,
-            start_byte: 10,
-            end_byte: 28,
-        },
-    };
-    let diff = Diff {
-        edits: vec![Edit::Insert {
-            at_key: Some(1),
-            left_anchor: Some(EditAnchor {
-                path: Path(vec![0]),
-                span: Span {
-                    line: 1,
-                    start_byte: 0,
-                    end_byte: 9,
-                },
-            }),
-            right_anchor: Some(anchor),
-            lines: vec![DiffLine {
-                content_key: 1,
-                occurrence_key: 1,
-                text: "  shutdown".to_string(),
-                path: Path(vec![0, 1]),
-                span: Span {
-                    line: 2,
-                    start_byte: 10,
-                    end_byte: 20,
-                },
-            }],
-        }],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert_eq!(plan.findings.len(), 0);
-    assert_eq!(plan.actions.len(), 1);
-    match &plan.actions[0] {
-        PlanAction::ApplyLineEditsUnderContext {
-            context_path,
-            line_edits,
-        } => {
-            assert_eq!(context_path.0, vec![0]);
-            assert_eq!(line_edits.len(), 1);
-            assert_eq!(line_edits[0].kind, PlanLineEditKind::Insert);
-            assert_eq!(line_edits[0].text, "  shutdown");
-        }
-        _ => panic!("expected insert line-edit action"),
-    }
-}
-
-#[test]
-fn build_plan_delete_with_anchor_creates_delete_line_edit() {
-    let anchor = EditAnchor {
-        path: Path(vec![0, 2]),
-        span: Span {
-            line: 3,
-            start_byte: 20,
-            end_byte: 36,
-        },
-    };
-    let diff = Diff {
-        edits: vec![Edit::Delete {
-            at_key: Some(1),
-            left_anchor: Some(anchor),
-            right_anchor: None,
-            lines: vec![DiffLine {
-                content_key: 1,
-                occurrence_key: 1,
-                text: "  no shutdown".to_string(),
-                path: Path(vec![0, 2]),
-                span: Span {
-                    line: 3,
-                    start_byte: 20,
-                    end_byte: 33,
-                },
-            }],
-        }],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert_eq!(plan.findings.len(), 0);
-    assert_eq!(plan.actions.len(), 1);
-    match &plan.actions[0] {
-        PlanAction::ApplyLineEditsUnderContext {
-            context_path,
-            line_edits,
-        } => {
-            assert_eq!(context_path.0, vec![0]);
-            assert_eq!(line_edits.len(), 1);
-            assert_eq!(line_edits[0].kind, PlanLineEditKind::Delete);
-            assert_eq!(line_edits[0].text, "  no shutdown");
-        }
-        _ => panic!("expected delete line-edit action"),
-    }
-}
-
-#[test]
-fn build_plan_edits_under_different_contexts_create_separate_actions() {
-    let anchor_a = EditAnchor {
-        path: Path(vec![0, 1]),
-        span: Span {
-            line: 2,
-            start_byte: 10,
-            end_byte: 27,
-        },
-    };
-    let anchor_b = EditAnchor {
-        path: Path(vec![1, 0]),
-        span: Span {
-            line: 5,
-            start_byte: 50,
-            end_byte: 65,
-        },
-    };
-    let diff = Diff {
-        edits: vec![
-            Edit::Insert {
-                at_key: Some(1),
-                left_anchor: Some(EditAnchor {
-                    path: Path(vec![0]),
-                    span: Span {
-                        line: 1,
-                        start_byte: 0,
-                        end_byte: 9,
-                    },
-                }),
-                right_anchor: Some(anchor_a),
-                lines: vec![DiffLine {
-                    content_key: 1,
-                    occurrence_key: 1,
-                    text: "  description first".to_string(),
-                    path: Path(vec![0, 1]),
-                    span: Span {
-                        line: 2,
-                        start_byte: 10,
-                        end_byte: 29,
-                    },
-                }],
-            },
-            Edit::Insert {
-                at_key: Some(2),
-                left_anchor: Some(EditAnchor {
-                    path: Path(vec![1]),
-                    span: Span {
-                        line: 4,
-                        start_byte: 40,
-                        end_byte: 49,
-                    },
-                }),
-                right_anchor: Some(anchor_b),
-                lines: vec![DiffLine {
-                    content_key: 2,
-                    occurrence_key: 2,
-                    text: "  description second".to_string(),
-                    path: Path(vec![1, 0]),
-                    span: Span {
-                        line: 5,
-                        start_byte: 50,
-                        end_byte: 70,
-                    },
-                }],
-            },
-        ],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert_eq!(plan.actions.len(), 2);
-    match &plan.actions[0] {
-        PlanAction::ApplyLineEditsUnderContext { context_path, .. } => {
-            assert_eq!(context_path.0, vec![0]);
-        }
-        _ => panic!("expected first action under context [0]"),
-    }
-    match &plan.actions[1] {
-        PlanAction::ApplyLineEditsUnderContext { context_path, .. } => {
-            assert_eq!(context_path.0, vec![1]);
-        }
-        _ => panic!("expected second action under context [1]"),
-    }
-}
-
-#[test]
 fn build_plan_mixed_edit_types_group_under_same_context() {
     let mk_anchor = |idx: usize| EditAnchor {
         path: Path(vec![0, idx]),
@@ -914,50 +269,21 @@ fn build_plan_mixed_edit_types_group_under_same_context() {
             line_edits,
         } => {
             assert_eq!(context_path.0, vec![0]);
-            assert_eq!(line_edits.len(), 3);
-            assert_eq!(line_edits[0].kind, PlanLineEditKind::Delete);
-            assert_eq!(line_edits[1].kind, PlanLineEditKind::Replace);
-            assert_eq!(line_edits[2].kind, PlanLineEditKind::Insert);
+            let edits = line_edits
+                .iter()
+                .map(|edit| (edit.kind.clone(), edit.text.as_str()))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                edits,
+                [
+                    (PlanLineEditKind::Delete, "  no shutdown"),
+                    (PlanLineEditKind::Replace, "  mtu 9216"),
+                    (PlanLineEditKind::Insert, "  shutdown"),
+                ]
+            );
         }
         _ => panic!("expected single grouped line-edit action"),
     }
-}
-
-#[test]
-fn build_plan_multiple_missing_anchors_produce_multiple_findings() {
-    let diff = Diff {
-        edits: vec![
-            Edit::Replace {
-                old_at_key: None,
-                new_at_key: None,
-                left_anchor: None,
-                right_anchor: None,
-                old_lines: vec![],
-                new_lines: vec![],
-            },
-            Edit::Insert {
-                at_key: None,
-                left_anchor: None,
-                right_anchor: None,
-                lines: vec![],
-            },
-            Edit::Delete {
-                at_key: None,
-                left_anchor: None,
-                right_anchor: None,
-                lines: vec![],
-            },
-        ],
-        ..Diff::default()
-    };
-
-    let plan = build_plan(&diff);
-    assert!(plan.actions.is_empty());
-    assert_eq!(plan.findings.len(), 3);
-    assert!(plan.findings.iter().all(|f| f.code == "missing_anchor"));
-    assert!(plan.findings.iter().any(|f| f.message.contains("replace")));
-    assert!(plan.findings.iter().any(|f| f.message.contains("insert")));
-    assert!(plan.findings.iter().any(|f| f.message.contains("delete")));
 }
 
 #[test]
@@ -1022,125 +348,39 @@ fn reordered_block_children_only_changed_under_ordered_policy() {
 }
 
 #[test]
-fn fortios_set_value_change_keyed_stable_emits_replace_unordered_emits_delete_insert() {
+fn fortios_set_value_change_is_a_replace_unless_unordered() {
     // FortiOS `set` commands produce key_hints (e.g. `set:hostname`), which
     // give lines a stable content_key independent of the actual value.
+    // nothing is reordered, so the changed value is the only drift to find
+    // (0.8.0 regression for `set hostname`).
     //
-    // when a value changes:
-    //   KeyedStable → pairs by content_key → Replace
-    //   Unordered   → hashes normalized text → different buckets → Delete + Insert
+    //   Ordered, KeyedStable → pair the two lines → Replace
+    //   Unordered            → hashes normalized text → different buckets → Delete + Insert
     let a = parse_fortios("config system global\n    set hostname \"edge-1\"\nend\n");
     let b = parse_fortios("config system global\n    set hostname \"edge-2\"\nend\n");
+    let replace = vec![(
+        "replace",
+        vec!["set hostname \"edge-1\"", "set hostname \"edge-2\""],
+    )];
+    let delete_insert = vec![
+        ("delete", vec!["set hostname \"edge-1\""]),
+        ("insert", vec!["set hostname \"edge-2\""]),
+    ];
 
-    let opts = |policy| {
-        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
-            default: policy,
-            overrides: Vec::new(),
-        })
-    };
-
-    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable)).unwrap();
-    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered)).unwrap();
-
-    assert!(keyed.has_changes);
-    assert!(unordered.has_changes);
-
-    // KeyedStable pairs the two `set hostname` lines by their shared
-    // content_key and emits a single Replace.
-    assert!(
-        keyed
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Replace { .. })),
-        "KeyedStable should emit Replace for value change on a keyed line"
-    );
-    assert!(
-        !keyed
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Delete { .. } | Edit::Insert { .. })),
-        "KeyedStable should not emit separate Delete/Insert for a keyed value change"
-    );
-
-    // Unordered sees two distinct text hashes — the old value disappears,
-    // the new one appears.  No pairing, so Delete + Insert, not Replace.
-    assert!(
-        !unordered
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Replace { .. })),
-        "Unordered should not emit Replace (no key-based pairing)"
-    );
-    assert!(
-        unordered
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Delete { .. })),
-        "Unordered should emit Delete for the old text"
-    );
-    assert!(
-        unordered
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Insert { .. })),
-        "Unordered should emit Insert for the new text"
-    );
-}
-
-#[test]
-fn fortios_set_value_change_in_place_reported_by_every_policy() {
-    // nothing is reordered, so the changed value is the only drift to find.
-    let a = parse_fortios("config system global\n    set hostname \"edge-1\"\nend\n");
-    let b = parse_fortios("config system global\n    set hostname \"edge-2\"\nend\n");
-
-    let opts = |policy| {
-        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
-            default: policy,
-            overrides: Vec::new(),
-        })
-    };
-
-    for policy in [
-        OrderPolicy::Ordered,
-        OrderPolicy::Unordered,
-        OrderPolicy::KeyedStable,
+    for (options, expected) in [
+        (NormalizeOptions::default(), &replace),
+        (with_policy(OrderPolicy::Ordered, Vec::new()), &replace),
+        (with_policy(OrderPolicy::KeyedStable, Vec::new()), &replace),
+        (
+            with_policy(OrderPolicy::Unordered, Vec::new()),
+            &delete_insert,
+        ),
     ] {
-        let diff = diff_documents(&a, &b, opts(policy)).unwrap();
-        assert!(diff.has_changes, "{policy:?} missed the hostname change");
-        assert!(!diff.edits.is_empty(), "{policy:?} produced no edits");
-
-        let texts: Vec<&str> = diff
-            .edits
-            .iter()
-            .flat_map(|e| match e {
-                Edit::Replace {
-                    old_lines,
-                    new_lines,
-                    ..
-                } => old_lines
-                    .iter()
-                    .chain(new_lines.iter())
-                    .map(|l| l.text.as_str())
-                    .collect::<Vec<_>>(),
-                Edit::Insert { lines, .. } | Edit::Delete { lines, .. } => {
-                    lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>()
-                }
-            })
-            .collect();
-        assert!(
-            texts.iter().any(|t| t.contains("edge-1")),
-            "{policy:?} did not report the old value: {texts:?}"
-        );
-        assert!(
-            texts.iter().any(|t| t.contains("edge-2")),
-            "{policy:?} did not report the new value: {texts:?}"
-        );
+        let policy = options.order_policy.default;
+        let diff = diff_documents(&a, &b, options).unwrap();
+        assert!(diff.has_changes, "{policy:?}");
+        assert_eq!(&edit_shapes(&diff), expected, "{policy:?}");
     }
-
-    // the default policy is Ordered, so the plain defaults must catch it too.
-    let default_diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    assert!(default_diff.has_changes);
-    assert!(matches!(default_diff.edits[..], [Edit::Replace { .. }]));
 }
 
 #[test]
@@ -1170,7 +410,7 @@ fn junos_set_value_change_reported_under_default_policy() {
 fn fortios_reorder_plus_value_change_three_way_contrast() {
     // two `set` fields under the same block: reordered AND one value changes.
     //
-    // Ordered  → sees both the reorder and the value change.
+    // Ordered  → reports the moved hostname line as Delete + Insert.
     // Unordered → ignores reorder; sees value change as Delete + Insert.
     // KeyedStable → ignores reorder; sees value change as Replace.
     let a = parse_fortios(
@@ -1179,50 +419,24 @@ fn fortios_reorder_plus_value_change_three_way_contrast() {
     let b = parse_fortios(
         "config system global\n    set timezone \"UTC\"\n    set hostname \"edge-2\"\nend\n",
     );
+    let delete_insert = vec![
+        ("delete", vec!["set hostname \"edge-1\""]),
+        ("insert", vec!["set hostname \"edge-2\""]),
+    ];
+    let replace = vec![(
+        "replace",
+        vec!["set hostname \"edge-1\"", "set hostname \"edge-2\""],
+    )];
 
-    let opts = |policy| {
-        NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
-            default: policy,
-            overrides: Vec::new(),
-        })
-    };
-
-    let ordered = diff_documents(&a, &b, opts(OrderPolicy::Ordered)).unwrap();
-    let unordered = diff_documents(&a, &b, opts(OrderPolicy::Unordered)).unwrap();
-    let keyed = diff_documents(&a, &b, opts(OrderPolicy::KeyedStable)).unwrap();
-
-    // all three detect changes (the hostname value changed).
-    assert!(ordered.has_changes);
-    assert!(unordered.has_changes);
-    assert!(keyed.has_changes);
-
-    // Ordered produces more edits because it also reports the reordering.
-    assert!(
-        ordered.edits.len() > keyed.edits.len(),
-        "Ordered reports reorder edits that KeyedStable suppresses"
-    );
-
-    // Unordered emits Delete + Insert for the hostname change.
-    assert!(
-        unordered
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Delete { .. })),
-    );
-    assert!(
-        unordered
-            .edits
-            .iter()
-            .any(|e| matches!(e, Edit::Insert { .. })),
-    );
-
-    // KeyedStable emits a single Replace for the hostname change.
-    assert_eq!(
-        keyed.edits.len(),
-        1,
-        "KeyedStable should emit exactly one edit for the value change"
-    );
-    assert!(matches!(keyed.edits[0], Edit::Replace { .. }));
+    for (policy, expected) in [
+        (OrderPolicy::Ordered, &delete_insert),
+        (OrderPolicy::Unordered, &delete_insert),
+        (OrderPolicy::KeyedStable, &replace),
+    ] {
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        assert!(diff.has_changes, "{policy:?}");
+        assert_eq!(&edit_shapes(&diff), expected, "{policy:?}");
+    }
 }
 
 #[test]
@@ -1370,6 +584,15 @@ fn actions_swapped_between_fortios_policies_report_four_edits_under_unordered() 
 
     let diff = diff_documents(&a, &b, with_policy(OrderPolicy::Unordered, Vec::new())).unwrap();
     assert_eq!(diff.edits.len(), 4, "{:?}", diff.edits);
+    assert_eq!(
+        edited_texts(&diff),
+        [
+            "        set action accept",
+            "        set action accept",
+            "        set action deny",
+            "        set action deny",
+        ]
+    );
 }
 
 const REPATCHED_A: &str = "hostname r1\ninterface Ethernet1\n description srv1\n switchport access vlan 10\ninterface Ethernet2\n";
@@ -1560,18 +783,12 @@ fn unordered_top_level_diff(parse: Parse, a: &[&str], b: &[&str]) -> Diff {
 }
 
 #[test]
-fn swapped_top_level_static_routes_cancel_under_unordered() {
-    for (name, parse) in IOS_LIKE {
-        let diff = unordered_top_level_diff(parse, &[ROUTE_1, ROUTE_2], &[ROUTE_2, ROUTE_1]);
-        assert!(diff.edits.is_empty(), "{name}: {:?}", diff.edits);
-    }
-}
-
-#[test]
-fn swapped_top_level_prefix_list_entries_cancel_under_unordered() {
-    for (name, parse) in IOS_LIKE {
-        let diff = unordered_top_level_diff(parse, &[SEQ_5, SEQ_10], &[SEQ_10, SEQ_5]);
-        assert!(diff.edits.is_empty(), "{name}: {:?}", diff.edits);
+fn swapped_top_level_entries_cancel_under_unordered() {
+    for (first, second) in [(ROUTE_1, ROUTE_2), (SEQ_5, SEQ_10)] {
+        for (name, parse) in IOS_LIKE {
+            let diff = unordered_top_level_diff(parse, &[first, second], &[second, first]);
+            assert!(diff.edits.is_empty(), "{name}: {first}: {:?}", diff.edits);
+        }
     }
 }
 

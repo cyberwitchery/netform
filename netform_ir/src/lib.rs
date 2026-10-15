@@ -1199,166 +1199,103 @@ mod tests {
     }
 
     #[test]
-    fn common_key_hint_vlan() {
-        assert_eq!(common_hint("vlan 100"), Some("vlan:100".into()));
-    }
-
-    #[test]
-    fn common_key_hint_vlan_configuration() {
-        assert_eq!(
-            common_hint("vlan configuration 10"),
-            Some("vlan-configuration:10".into()),
-        );
-        assert_eq!(common_hint("vlan 100"), Some("vlan:100".into()));
-    }
-
-    #[test]
-    fn common_key_hint_route_map() {
-        assert_eq!(
-            common_hint("route-map REDISTRIBUTE permit 10"),
-            Some("route-map:REDISTRIBUTE:permit:10".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_class_map() {
-        assert_eq!(
-            common_hint("class-map match-all VOICE"),
-            Some("class-map:VOICE".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_policy_map() {
-        assert_eq!(
-            common_hint("policy-map QOS-POLICY"),
-            Some("policy-map:QOS-POLICY".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_access_list_has_no_hint() {
-        // see key_hint_numbered_access_list_has_no_hint.
-        assert_eq!(common_hint("access-list 100 permit ip any any"), None);
-    }
-
-    #[test]
-    fn common_key_hint_crypto() {
-        assert_eq!(
-            common_hint("crypto ikev2 proposal PROP-1"),
-            Some("crypto:ikev2:proposal:PROP-1".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_spanning_tree() {
-        assert_eq!(
-            common_hint("spanning-tree vlan 1-100 priority 4096"),
-            Some("spanning-tree:vlan:1-100".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_line() {
-        assert_eq!(common_hint("line vty 0 4"), Some("line:vty:0:4".into()));
-    }
-
-    #[test]
-    fn common_key_hint_monitor() {
-        assert_eq!(
-            common_hint("monitor session 1"),
-            Some("monitor-session:1".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_ntp() {
-        assert_eq!(
-            common_hint("ntp server 10.0.0.1"),
-            Some("ntp:server:10.0.0.1".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_ipv6() {
-        assert_eq!(
-            common_hint("ipv6 access-list BLOCK-BOGONS"),
-            Some("ipv6-access-list:BLOCK-BOGONS".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_none_for_dialect_specific() {
-        // constructs handled by dialect-specific functions should return None.
-        assert_eq!(common_hint("interface Ethernet1"), None);
-        assert_eq!(common_hint("vrf MGMT"), None);
-        assert_eq!(common_hint("router bgp 65001"), None);
-        assert_eq!(common_hint("ip access-list extended ACL"), None);
+    fn common_key_hint_table() {
+        for (line, expected) in [
+            ("vlan 100", Some("vlan:100")),
+            // 0.8.0: `vlan configuration` keys apart from `vlan`.
+            ("vlan configuration 10", Some("vlan-configuration:10")),
+            (
+                "route-map REDISTRIBUTE permit 10",
+                Some("route-map:REDISTRIBUTE:permit:10"),
+            ),
+            ("class-map match-all VOICE", Some("class-map:VOICE")),
+            (
+                "class-map match-any WEB-TRAFFIC",
+                Some("class-map:WEB-TRAFFIC"),
+            ),
+            ("class-map SIMPLE", Some("class-map:SIMPLE")),
+            // 0.10.1: typed class-maps and policy-maps key on type and name.
+            (
+                "class-map type qos match-all CM-VOICE",
+                Some("class-map:qos:CM-VOICE"),
+            ),
+            (
+                "class-map type control-plane match-any copp-s-bgp",
+                Some("class-map:control-plane:copp-s-bgp"),
+            ),
+            (
+                "class-map type network-qos c-nq1",
+                Some("class-map:network-qos:c-nq1"),
+            ),
+            (
+                "class-map type control subscriber match-none CM-SUB",
+                Some("class-map:control:subscriber:CM-SUB"),
+            ),
+            ("policy-map QOS-POLICY", Some("policy-map:QOS-POLICY")),
+            ("policy-map type qos PM-IN", Some("policy-map:qos:PM-IN")),
+            (
+                "policy-map type control-plane copp-system-p",
+                Some("policy-map:control-plane:copp-system-p"),
+            ),
+            (
+                "policy-map type control subscriber PM-SUB",
+                Some("policy-map:control:subscriber:PM-SUB"),
+            ),
+            // see key_hint_numbered_access_list_has_no_hint.
+            ("access-list 100 permit ip any any", None),
+            (
+                "crypto ikev2 proposal PROP-1",
+                Some("crypto:ikev2:proposal:PROP-1"),
+            ),
+            (
+                "crypto map VPN-MAP 10 ipsec-isakmp",
+                Some("crypto:map:VPN-MAP"),
+            ),
+            (
+                "crypto ipsec transform-set AES-SHA esp-aes esp-sha-hmac",
+                Some("crypto:ipsec:transform-set:AES-SHA"),
+            ),
+            (
+                "spanning-tree vlan 1-100 priority 4096",
+                Some("spanning-tree:vlan:1-100"),
+            ),
+            ("spanning-tree mode rapid-pvst", None),
+            ("line vty 0 4", Some("line:vty:0:4")),
+            ("monitor session 1", Some("monitor-session:1")),
+            ("monitor copp-system-p-policy", None),
+            ("ntp server 10.0.0.1", Some("ntp:server:10.0.0.1")),
+            ("ntp peer 10.0.0.2", Some("ntp:peer:10.0.0.2")),
+            ("ntp source-interface mgmt0", None),
+            (
+                "ipv6 access-list BLOCK-BOGONS",
+                Some("ipv6-access-list:BLOCK-BOGONS"),
+            ),
+            (
+                "ipv6 prefix-list DEFAULT-V6-ONLY",
+                Some("ipv6-prefix-list:DEFAULT-V6-ONLY"),
+            ),
+            (
+                "ipv6 route 2001:db8::/32 Null0",
+                Some("ipv6-route:2001:db8::/32"),
+            ),
+            (
+                "ipv6 route vrf MGMT ::/0 GigabitEthernet0/0 fe80::1",
+                Some("ipv6-route:MGMT:::/0"),
+            ),
+            ("ipv6 unicast-routing", None),
+            // constructs handled by dialect-specific functions.
+            ("interface Ethernet1", None),
+            ("vrf MGMT", None),
+            ("router bgp 65001", None),
+            ("ip access-list extended ACL", None),
+        ] {
+            assert_eq!(common_hint(line), expected.map(String::from), "{line}");
+        }
     }
 
     #[test]
     fn common_key_hint_none_on_empty() {
         assert_eq!(common_key_hint(None), None);
-    }
-
-    #[test]
-    fn common_key_hint_class_map_match_any() {
-        assert_eq!(
-            common_hint("class-map match-any WEB-TRAFFIC"),
-            Some("class-map:WEB-TRAFFIC".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_class_map_bare() {
-        assert_eq!(
-            common_hint("class-map SIMPLE"),
-            Some("class-map:SIMPLE".into())
-        );
-    }
-
-    #[test]
-    fn common_key_hint_typed_class_map() {
-        assert_eq!(
-            common_hint("class-map type qos match-all CM-VOICE"),
-            Some("class-map:qos:CM-VOICE".into()),
-        );
-        assert_eq!(
-            common_hint("class-map type control-plane match-any copp-s-bgp"),
-            Some("class-map:control-plane:copp-s-bgp".into()),
-        );
-        assert_eq!(
-            common_hint("class-map type network-qos c-nq1"),
-            Some("class-map:network-qos:c-nq1".into()),
-        );
-        assert_eq!(
-            common_hint("class-map type control subscriber match-none CM-SUB"),
-            Some("class-map:control:subscriber:CM-SUB".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_typed_policy_map() {
-        assert_eq!(
-            common_hint("policy-map type qos PM-IN"),
-            Some("policy-map:qos:PM-IN".into()),
-        );
-        assert_eq!(
-            common_hint("policy-map type control-plane copp-system-p"),
-            Some("policy-map:control-plane:copp-system-p".into()),
-        );
-        assert_eq!(
-            common_hint("policy-map type control subscriber PM-SUB"),
-            Some("policy-map:control:subscriber:PM-SUB".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_crypto_map() {
-        assert_eq!(
-            common_hint("crypto map VPN-MAP 10 ipsec-isakmp"),
-            Some("crypto:map:VPN-MAP".into()),
-        );
     }
 
     #[test]
@@ -1370,128 +1307,53 @@ mod tests {
     }
 
     #[test]
-    fn common_key_hint_crypto_ipsec() {
-        assert_eq!(
-            common_hint("crypto ipsec transform-set AES-SHA esp-aes esp-sha-hmac"),
-            Some("crypto:ipsec:transform-set:AES-SHA".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_ipv6_prefix_list() {
-        assert_eq!(
-            common_hint("ipv6 prefix-list DEFAULT-V6-ONLY"),
-            Some("ipv6-prefix-list:DEFAULT-V6-ONLY".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_ipv6_route() {
-        assert_eq!(
-            common_hint("ipv6 route 2001:db8::/32 Null0"),
-            Some("ipv6-route:2001:db8::/32".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_ipv6_route_vrf() {
-        assert_eq!(
-            common_hint("ipv6 route vrf MGMT ::/0 GigabitEthernet0/0 fe80::1"),
-            Some("ipv6-route:MGMT:::/0".into()),
-        );
-    }
-
-    #[test]
-    fn common_key_hint_ipv6_no_match() {
-        assert_eq!(common_hint("ipv6 unicast-routing"), None);
-    }
-
-    #[test]
-    fn common_key_hint_spanning_tree_no_match() {
-        assert_eq!(common_hint("spanning-tree mode rapid-pvst"), None);
-    }
-
-    #[test]
-    fn common_key_hint_monitor_no_session() {
-        assert_eq!(common_hint("monitor copp-system-p-policy"), None);
-    }
-
-    #[test]
-    fn common_key_hint_ntp_peer() {
-        assert_eq!(
-            common_hint("ntp peer 10.0.0.2"),
-            Some("ntp:peer:10.0.0.2".into())
-        );
-    }
-
-    #[test]
-    fn common_key_hint_ntp_no_match() {
-        assert_eq!(common_hint("ntp source-interface mgmt0"), None);
-    }
-
-    #[test]
-    fn literal_region_delimiter_form() {
-        assert_eq!(
-            ios_like_literal_region("banner motd ^C"),
-            Some(LiteralTerminator::Contains("^C".into())),
-        );
-        assert_eq!(
-            ios_like_literal_region("banner login #"),
-            Some(LiteralTerminator::Contains("#".into())),
-        );
-    }
-
-    #[test]
-    fn literal_region_accepts_control_byte_delimiter() {
-        assert_eq!(
-            ios_like_literal_region("banner motd \u{3}"),
-            Some(LiteralTerminator::Contains("\u{3}".into())),
-        );
-    }
-
-    #[test]
-    fn literal_region_delimiter_less_eos_form() {
-        assert_eq!(
-            ios_like_literal_region("banner motd"),
-            Some(LiteralTerminator::ExactLine("EOF".into())),
-        );
-    }
-
-    #[test]
-    fn literal_region_declines_self_contained_banner() {
-        assert_eq!(ios_like_literal_region("banner motd ^C Hi there ^C"), None);
-        assert_eq!(ios_like_literal_region("banner motd ^CHi^C"), None);
-        assert_eq!(ios_like_literal_region("banner motd ^C^C"), None);
-        assert_eq!(ios_like_literal_region("banner motd #Hi#"), None);
-    }
-
-    #[test]
-    fn literal_region_keeps_multi_character_delimiters_whole() {
-        assert_eq!(
-            ios_like_literal_region("banner motd EOF"),
-            Some(LiteralTerminator::Contains("EOF".into())),
-        );
-        assert_eq!(ios_like_literal_region("banner motd \u{3}Hi\u{3}"), None,);
-    }
-
-    #[test]
-    fn literal_region_splits_caret_delimiter_from_glued_text() {
-        assert_eq!(
-            ios_like_literal_region("banner motd ^CHi"),
-            Some(LiteralTerminator::Contains("^C".into())),
-        );
-    }
-
-    #[test]
-    fn literal_region_splits_a_plain_caret_delimiter_from_glued_text() {
-        assert_eq!(
-            ios_like_literal_region("banner motd ^Warning restricted"),
-            Some(LiteralTerminator::Contains("^".into())),
-        );
-        assert_eq!(
-            ios_like_literal_region("banner motd ^1st line"),
-            Some(LiteralTerminator::Contains("^".into())),
-        );
+    fn literal_region_table() {
+        let contains = |d: &str| Some(LiteralTerminator::Contains(d.into()));
+        for (line, expected) in [
+            ("banner motd ^C", contains("^C")),
+            ("banner login #", contains("#")),
+            ("banner motd \u{3}", contains("\u{3}")),
+            ("   banner motd ^C", contains("^C")),
+            // the delimiter-less EOS form closes on an exact `EOF` line.
+            (
+                "banner motd",
+                Some(LiteralTerminator::ExactLine("EOF".into())),
+            ),
+            // self-contained banners.
+            ("banner motd ^C Hi there ^C", None),
+            ("banner motd ^CHi^C", None),
+            ("banner motd ^C^C", None),
+            ("banner motd #Hi#", None),
+            ("banner motd \u{3}Hi\u{3}", None),
+            // multi-character delimiters stay whole.
+            ("banner motd EOF", contains("EOF")),
+            // delimiters glued to the text.
+            ("banner motd ^CHi", contains("^C")),
+            ("banner motd ^Warning restricted", contains("^")),
+            ("banner motd ^1st line", contains("^")),
+            // `^Z` + `danger` and `^` + `Zdanger` are indistinguishable (see `delimiter_opener`).
+            ("banner motd ^Zdanger", contains("^")),
+            ("banner motd #Warning restricted", contains("#")),
+            ("banner login @Hi", contains("@")),
+            ("banner motd \u{3}Warning", contains("\u{3}")),
+            // a one-line banner whose text contains a space.
+            ("banner motd #Hello world#", None),
+            ("banner motd ^CHello world^C", None),
+            ("banner motd ^Hello world^", None),
+            ("banner exec %Please log out at %the end%", None),
+            ("banner motd \u{3}Hello world\u{3}", None),
+            ("banner motd #Hello world", contains("#")),
+            ("banner motd ^CHello world", contains("^C")),
+            ("banner motd ^Hello world", contains("^")),
+            // not banner lines.
+            ("interface Ethernet1", None),
+            ("bannermotd ^C", None),
+            ("no banner motd", None),
+            ("banner", None),
+            ("banner   ", None),
+        ] {
+            assert_eq!(ios_like_literal_region(line), expected, "{line:?}");
+        }
     }
 
     #[test]
@@ -1508,83 +1370,6 @@ mod tests {
                 "{delimiter}",
             );
         }
-    }
-
-    #[test]
-    fn literal_region_splits_a_non_c_caret_escape_glued_to_its_text() {
-        // `^Z` + `danger` and `^` + `Zdanger` are indistinguishable (see `delimiter_opener`).
-        assert_eq!(
-            ios_like_literal_region("banner motd ^Zdanger"),
-            Some(LiteralTerminator::Contains("^".into())),
-        );
-    }
-
-    #[test]
-    fn literal_region_splits_punctuation_delimiter_from_glued_text() {
-        assert_eq!(
-            ios_like_literal_region("banner motd #Warning restricted"),
-            Some(LiteralTerminator::Contains("#".into())),
-        );
-        assert_eq!(
-            ios_like_literal_region("banner login @Hi"),
-            Some(LiteralTerminator::Contains("@".into())),
-        );
-        assert_eq!(
-            ios_like_literal_region("banner motd \u{3}Warning"),
-            Some(LiteralTerminator::Contains("\u{3}".into())),
-        );
-    }
-
-    #[test]
-    fn literal_region_declines_a_one_line_banner_whose_text_contains_a_space() {
-        assert_eq!(ios_like_literal_region("banner motd #Hello world#"), None);
-        assert_eq!(ios_like_literal_region("banner motd ^CHello world^C"), None);
-        assert_eq!(ios_like_literal_region("banner motd ^Hello world^"), None);
-        assert_eq!(
-            ios_like_literal_region("banner exec %Please log out at %the end%"),
-            None,
-        );
-        assert_eq!(
-            ios_like_literal_region("banner motd \u{3}Hello world\u{3}"),
-            None,
-        );
-        assert_eq!(
-            ios_like_literal_region("banner motd #Hello world"),
-            Some(LiteralTerminator::Contains("#".into())),
-        );
-        assert_eq!(
-            ios_like_literal_region("banner motd ^CHello world"),
-            Some(LiteralTerminator::Contains("^C".into())),
-        );
-        assert_eq!(
-            ios_like_literal_region("banner motd ^Hello world"),
-            Some(LiteralTerminator::Contains("^".into())),
-        );
-    }
-
-    #[test]
-    fn literal_region_opens_when_text_starts_on_the_banner_line() {
-        assert_eq!(
-            ios_like_literal_region("banner motd ^C Authorized use only"),
-            Some(LiteralTerminator::Contains("^C".into())),
-        );
-    }
-
-    #[test]
-    fn literal_region_declines_non_banner_lines() {
-        assert_eq!(ios_like_literal_region("interface Ethernet1"), None);
-        assert_eq!(ios_like_literal_region("bannermotd ^C"), None);
-        assert_eq!(ios_like_literal_region("no banner motd"), None);
-        assert_eq!(ios_like_literal_region("banner"), None);
-        assert_eq!(ios_like_literal_region("banner   "), None);
-    }
-
-    #[test]
-    fn literal_region_ignores_leading_indentation() {
-        assert_eq!(
-            ios_like_literal_region("   banner motd ^C"),
-            Some(LiteralTerminator::Contains("^C".into())),
-        );
     }
 
     #[test]

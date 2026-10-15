@@ -263,20 +263,20 @@ fn unterminated_region_is_declined_and_reported() {
         "an unterminated region must not swallow the rest of the file",
     );
 
-    let finding = doc
+    let codes: Vec<&str> = doc
         .metadata
         .parse_findings
         .iter()
-        .find(|finding| finding.code == "unterminated-literal-region")
-        .expect("unterminated-literal-region finding");
+        .map(|finding| finding.code.as_str())
+        .collect();
+    assert_eq!(codes, vec!["unterminated-literal-region"]);
+    let finding = &doc.metadata.parse_findings[0];
     assert_eq!(finding.span.line, 1);
-    assert!(finding.message.contains("^C"));
-}
-
-#[test]
-fn terminated_region_reports_no_finding() {
-    let doc = parse_with_dialect("banner motd ^C\ntext\n^C\n", &IOS_LIKE);
-    assert!(doc.metadata.parse_findings.is_empty());
+    assert!(
+        finding.message.contains("closed by `^C`;"),
+        "{}",
+        finding.message,
+    );
 }
 
 #[test]

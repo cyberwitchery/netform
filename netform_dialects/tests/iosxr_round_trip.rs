@@ -150,6 +150,17 @@ fn a_second_terminator_is_not_swallowed_by_an_already_footed_block() {
 
     assert_eq!(doc.render(), cfg);
     assert_eq!(doc.roots.len(), 2);
+    let Some(Node::Block(policy)) = doc.node(doc.roots[0]) else {
+        panic!("expected the route-policy block at the first root");
+    };
+    assert_eq!(
+        policy.footer.as_ref().map(|f| f.raw.as_str()),
+        Some("end-policy"),
+    );
+    assert!(matches!(
+        doc.node(doc.roots[1]),
+        Some(Node::Line(line)) if line.raw == "end-policy"
+    ));
 }
 
 #[test]

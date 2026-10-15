@@ -57,6 +57,7 @@ fn line(doc: &Document, id: NodeId) -> &netform_ir::LineNode {
 fn certificate_body_stays_inside_the_edit_block() {
     let doc = parse(CERTIFICATE);
 
+    assert_eq!(doc.render(), CERTIFICATE);
     assert_eq!(doc.roots.len(), 1);
     let config = block(&doc, doc.roots[0]);
     assert_eq!(config.header.raw, "config vpn certificate local");
@@ -135,11 +136,6 @@ fn body_lines_carry_no_tokenization_or_key_hint() {
         checked += 1;
     }
     assert_eq!(checked, 3);
-}
-
-#[test]
-fn round_trip_stays_byte_identical() {
-    assert_eq!(parse(CERTIFICATE).render(), CERTIFICATE);
 }
 
 #[test]

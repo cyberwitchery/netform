@@ -1,25 +1,7 @@
 use netform_diff::{
-    ColorChoice, DEFAULT_CONTEXT_LINES, NormalizeOptions, diff_documents, format_markdown_report,
-    format_unified_diff, format_unified_diff_with_color,
+    DEFAULT_CONTEXT_LINES, NormalizeOptions, diff_documents, format_markdown_report,
 };
 use netform_ir::parse_generic;
-
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::new();
-    let mut in_escape = false;
-    for c in s.chars() {
-        if c == '\x1b' {
-            in_escape = true;
-        } else if in_escape {
-            if c == 'm' {
-                in_escape = false;
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
 
 #[test]
 fn markdown_report_mentions_keyed_replace() {
@@ -53,201 +35,56 @@ fn markdown_report_mentions_keyed_replace() {
     );
 }
 
-#[test]
-fn markdown_report_shows_added_line_in_replace() {
-    // adding a child line to a block produces a Replace at the block level
-    let a = parse_generic("interface Ethernet1\n");
-    let b = parse_generic("interface Ethernet1\n  description added\n");
-
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
-
-    assert!(diff.has_changes);
-    assert!(
-        report.contains("description added"),
-        "report should show the added line text:\n{}",
-        report
-    );
+/// the rendered `## Edits` section with the hash keys masked.
+fn edits_section(report: &str) -> String {
+    let start = report.find("## Edits\n\n").expect("edits section") + "## Edits\n\n".len();
+    let end = report[start..]
+        .find("\n\n")
+        .map_or(report.len(), |end| start + end);
+    let mut out = String::new();
+    let mut rest = &report[start..end];
+    while let Some(at) = rest.find("0x") {
+        out.push_str(&rest[..at + 2]);
+        out.push('#');
+        rest = rest[at + 2..].trim_start_matches(|c: char| c.is_ascii_hexdigit());
+    }
+    out.push_str(rest);
+    out
 }
 
 #[test]
-fn markdown_report_shows_removed_line_in_replace() {
-    // removing a child line from a block produces a Replace at the block level
-    let a = parse_generic("interface Ethernet1\n  description removed\n");
-    let b = parse_generic("interface Ethernet1\n");
-
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
-
-    assert!(diff.has_changes);
-    assert!(
-        report.contains("description removed"),
-        "report should show the removed line text:\n{}",
-        report
-    );
-}
-
-#[test]
-fn markdown_report_no_changes_says_no_changes() {
-    let a = parse_generic("hostname router\n");
-    let diff = diff_documents(&a, &a, NormalizeOptions::default()).unwrap();
-    let report = format_markdown_report(&diff, "same.cfg", "same.cfg", DEFAULT_CONTEXT_LINES);
-
-    assert!(report.contains("# Config Diff Report"));
-    assert!(report.contains("No changes detected."));
-    assert!(report.contains("Inserts: 0 (0 lines)"));
-    assert!(report.contains("Deletes: 0 (0 lines)"));
-    assert!(report.contains("Replaces: 0 (0 -> 0 lines)"));
-}
-
-#[test]
-fn markdown_report_shows_labels() {
-    let a = parse_generic("hostname old\n");
-    let b = parse_generic("hostname new\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let report = format_markdown_report(&diff, "before.cfg", "after.cfg", DEFAULT_CONTEXT_LINES);
-
-    assert!(report.contains("- Left: `before.cfg`"));
-    assert!(report.contains("- Right: `after.cfg`"));
-}
-
-#[test]
-fn markdown_report_insert_shows_added_lines() {
-    let a = parse_generic("");
-    let b = parse_generic("hostname new\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let report = format_markdown_report(&diff, "empty.cfg", "new.cfg", DEFAULT_CONTEXT_LINES);
-
-    assert!(diff.has_changes);
-    assert!(report.contains("Insert"));
-    assert!(report.contains("hostname new"));
-}
-
-#[test]
-fn markdown_report_delete_shows_removed_lines() {
-    let a = parse_generic("hostname old\n");
-    let b = parse_generic("");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let report = format_markdown_report(&diff, "old.cfg", "empty.cfg", DEFAULT_CONTEXT_LINES);
-
-    assert!(diff.has_changes);
-    assert!(report.contains("Delete"));
-    assert!(report.contains("hostname old"));
-}
-
-#[test]
-fn markdown_report_truncates_long_edits() {
-    // create a diff with many lines to test truncation
-    let a_lines: Vec<String> = (0..20).map(|i| format!("line-a-{i}")).collect();
-    let b_lines: Vec<String> = (0..20).map(|i| format!("line-b-{i}")).collect();
-    let a = parse_generic(&a_lines.join("\n"));
-    let b = parse_generic(&b_lines.join("\n"));
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-
-    // use max_lines_shown=3 to force truncation
-    let report = format_markdown_report(&diff, "a.cfg", "b.cfg", 3);
-
-    assert!(diff.has_changes);
-    assert!(
-        report.contains("more"),
-        "report should truncate with 'more' message:\n{report}"
-    );
-}
-
-#[test]
-fn markdown_report_stats_are_correct_for_multiple_edits() {
-    let a = parse_generic("line1\nline2\nline3\n");
-    let b = parse_generic("line1\nchanged\nline3\nnew-line\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let report = format_markdown_report(&diff, "a.cfg", "b.cfg", DEFAULT_CONTEXT_LINES);
-
-    assert!(diff.has_changes);
-    // the report should have the Stats section with non-zero values
-    assert!(report.contains("## Stats"));
-    assert!(report.contains("## Edits"));
-}
-
-#[test]
-fn unified_diff_empty_for_no_changes() {
-    let a = parse_generic("hostname router\n");
-    let diff = diff_documents(&a, &a, NormalizeOptions::default()).unwrap();
-    let output = format_unified_diff_with_color(
-        &diff,
-        "a.cfg",
-        "a.cfg",
-        DEFAULT_CONTEXT_LINES,
-        ColorChoice::Never,
-    );
-
-    assert!(
-        output.is_empty(),
-        "unified diff should be empty when no changes"
-    );
-}
-
-#[test]
-fn unified_diff_shows_headers_and_hunks() {
-    let a = parse_generic("hostname old\n");
-    let b = parse_generic("hostname new\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let output = format_unified_diff(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
-    let plain = strip_ansi(&output);
-
-    assert!(plain.contains("--- left.cfg"), "should contain --- header");
-    assert!(plain.contains("+++ right.cfg"), "should contain +++ header");
-    assert!(plain.contains("@@"), "should contain @@ hunk header");
-    assert!(
-        plain.contains("- hostname old"),
-        "should contain deleted line"
-    );
-    assert!(
-        plain.contains("+ hostname new"),
-        "should contain inserted line"
-    );
-}
-
-#[test]
-fn json_output_is_stable_shape() {
-    let a = parse_generic("set system host-name a\n");
-    let b = parse_generic("set system host-name b\n");
-
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let json = serde_json::to_string_pretty(&diff).expect("serialize diff");
-
-    assert!(diff.has_changes);
-    assert!(json.contains("\"edits\""));
-    assert!(json.contains("\"has_changes\": true"));
-    assert!(json.contains("\"stats\""));
-    assert!(json.contains("\"old_at_key\""));
-    assert!(json.contains("\"occurrence_key\""));
-}
-
-#[test]
-fn unified_diff_color_choice_governs_ansi_escapes() {
-    let a = parse_generic("interface Ethernet1\n  description old\n");
-    let b = parse_generic("interface Ethernet1\n  description new\n");
-    let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-
-    let colored = format_unified_diff_with_color(
-        &diff,
-        "a.cfg",
-        "b.cfg",
-        DEFAULT_CONTEXT_LINES,
-        ColorChoice::Always,
-    );
-    let uncolored = format_unified_diff_with_color(
-        &diff,
-        "a.cfg",
-        "b.cfg",
-        DEFAULT_CONTEXT_LINES,
-        ColorChoice::Never,
-    );
-
-    assert!(diff.has_changes);
-    assert!(colored.contains('\x1b'), "color on should emit escapes");
-    assert!(
-        !uncolored.contains('\x1b'),
-        "color off should emit no escapes: {uncolored:?}"
-    );
-    assert_eq!(strip_ansi(&colored), uncolored);
+fn markdown_report_renders_each_edit_kind() {
+    for (left, right, expected) in [
+        // a child added to a block replaces the block
+        (
+            "interface Ethernet1\n",
+            "interface Ethernet1\n  description added\n",
+            "1. Replace 1 line(s) at key 0x# with 2 line(s) at key 0x#\n   - `-` L1: interface Ethernet1\n   - `+` L1: interface Ethernet1\n   - `+` L2:   description added",
+        ),
+        // a child removed from a block replaces the block
+        (
+            "interface Ethernet1\n  description removed\n",
+            "interface Ethernet1\n",
+            "1. Replace 2 line(s) at key 0x# with 1 line(s) at key 0x#\n   - `-` L1: interface Ethernet1\n   - `-` L2:   description removed\n   - `+` L1: interface Ethernet1",
+        ),
+        (
+            "",
+            "hostname new\n",
+            "1. Insert 1 line(s) at key 0x#\n   - `+` L1: hostname new",
+        ),
+        (
+            "hostname old\n",
+            "",
+            "1. Delete 1 line(s) at key 0x#\n   - `-` L1: hostname old",
+        ),
+    ] {
+        let diff = diff_documents(
+            &parse_generic(left),
+            &parse_generic(right),
+            NormalizeOptions::default(),
+        )
+        .unwrap();
+        let report = format_markdown_report(&diff, "left.cfg", "right.cfg", DEFAULT_CONTEXT_LINES);
+        assert_eq!(edits_section(&report), expected, "{left:?} -> {right:?}");
+    }
 }

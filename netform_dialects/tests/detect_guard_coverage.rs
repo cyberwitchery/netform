@@ -51,10 +51,10 @@ fn the_guard_does_not_cost_the_dialects_their_own_interface_names() {
     for (entry, types) in shadowed_vendors() {
         for ty in types {
             let input = format!("interface {ty}1\n");
-            assert_ne!(
-                detect_dialect(&input),
-                DialectHint::Named("iosxr".into()),
-                "{} carries `{ty}`, and a bare `interface {ty}1` reads as IOS XR",
+            let got = detect_dialect(&input);
+            assert!(
+                got == DialectHint::Named(entry.name.into()) || got == DialectHint::Generic,
+                "{} carries `{ty}`, and a bare `interface {ty}1` reads as {got:?}",
                 entry.name,
             );
         }

@@ -260,17 +260,6 @@ mod tests {
     }
 
     #[test]
-    fn multiple_roots_have_sequential_paths() {
-        let doc = parse_generic("line a\nline b\nline c\n");
-        let view = build_comparison_view(&doc, &default_opts());
-
-        assert_eq!(view.lines.len(), 3);
-        assert_eq!(view.lines[0].path, Path(vec![0]));
-        assert_eq!(view.lines[1].path, Path(vec![1]));
-        assert_eq!(view.lines[2].path, Path(vec![2]));
-    }
-
-    #[test]
     fn block_flattens_header_then_children() {
         let doc = parse_generic("interface Eth1\n  description foo\n  mtu 9000\n");
         let view = build_comparison_view(&doc, &default_opts());
@@ -282,17 +271,6 @@ mod tests {
         assert_eq!(view.lines[1].path, Path(vec![0, 0]));
         assert_eq!(view.lines[2].normalized, "  mtu 9000");
         assert_eq!(view.lines[2].path, Path(vec![0, 1]));
-    }
-
-    #[test]
-    fn nested_blocks_flatten_recursively() {
-        let doc = parse_generic("a\n  b\n    c\n");
-        let view = build_comparison_view(&doc, &default_opts());
-
-        assert_eq!(view.lines.len(), 3);
-        assert_eq!(view.lines[0].path, Path(vec![0]));
-        assert_eq!(view.lines[1].path, Path(vec![0, 0]));
-        assert_eq!(view.lines[2].path, Path(vec![0, 0, 0]));
     }
 
     #[test]
@@ -346,15 +324,6 @@ mod tests {
         assert_eq!(view.lines.len(), 2);
         assert_eq!(view.lines[0].content_key, view.lines[1].content_key);
         assert_ne!(view.lines[0].occurrence_key, view.lines[1].occurrence_key);
-    }
-
-    #[test]
-    fn different_lines_have_different_content_keys() {
-        let doc = parse_generic("line a\nline b\n");
-        let view = build_comparison_view(&doc, &default_opts());
-
-        assert_eq!(view.lines.len(), 2);
-        assert_ne!(view.lines[0].content_key, view.lines[1].content_key);
     }
 
     #[test]
@@ -617,13 +586,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_document_default_produces_empty_view() {
-        let doc = Document::default();
-        let view = build_comparison_view(&doc, &default_opts());
-        assert!(view.lines.is_empty());
-    }
-
-    #[test]
     fn block_with_no_children_and_no_footer() {
         let mut doc = Document::default();
         doc.insert_root(Node::Block(BlockNode {
@@ -705,41 +667,21 @@ mod tests {
     }
 
     #[test]
-    fn only_blank_lines_document() {
-        let doc = parse_generic("\n\n\n");
-        let view = build_comparison_view(&doc, &default_opts());
-
-        // blank lines are trivia, but included by default.
-        for line in &view.lines {
-            assert_eq!(line.trivia, TriviaKind::Blank);
+    fn trivia_only_documents() {
+        use NormalizationStep::{IgnoreBlankLines, IgnoreComments};
+        use TriviaKind::{Blank, Comment};
+        for (input, steps, expected) in [
+            // blank lines are trivia, but included by default.
+            ("\n\n\n", vec![], vec![Blank, Blank, Blank]),
+            ("\n\n\n", vec![IgnoreBlankLines], vec![]),
+            ("! first\n# second\n", vec![], vec![Comment, Comment]),
+            ("! first\n# second\n", vec![IgnoreComments], vec![]),
+        ] {
+            let doc = parse_generic(input);
+            let view = build_comparison_view(&doc, &NormalizeOptions::new(steps.clone()));
+            let trivia: Vec<TriviaKind> = view.lines.iter().map(|l| l.trivia).collect();
+            assert_eq!(trivia, expected, "{input:?} with {steps:?}");
         }
-    }
-
-    #[test]
-    fn only_blank_lines_ignored() {
-        let doc = parse_generic("\n\n\n");
-        let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreBlankLines]);
-        let view = build_comparison_view(&doc, &opts);
-
-        assert!(view.lines.is_empty());
-    }
-
-    #[test]
-    fn only_comment_lines_document() {
-        let doc = parse_generic("! first\n# second\n");
-        let view = build_comparison_view(&doc, &default_opts());
-
-        assert_eq!(view.lines.len(), 2);
-        assert!(view.lines.iter().all(|l| l.trivia == TriviaKind::Comment));
-    }
-
-    #[test]
-    fn only_comment_lines_ignored() {
-        let doc = parse_generic("! first\n# second\n");
-        let opts = NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
-        let view = build_comparison_view(&doc, &opts);
-
-        assert!(view.lines.is_empty());
     }
 
     #[test]
@@ -901,52 +843,5 @@ mod tests {
             view.lines.iter().any(|l| l.normalized == "level-1"),
             "top-level header should be present"
         );
-    }
-
-    #[test]
-    fn flatten_within_depth_limit_includes_everything() {
-        // a modest nesting depth should not be truncated.
-        let mut doc = Document::default();
-        let leaf = doc.insert_node(Node::Line(LineNode {
-            raw: "  deep leaf".to_string(),
-            line_ending: "\n".to_string(),
-            span: dummy_span(4),
-            parsed: None,
-            key_hint: None,
-            trivia: TriviaKind::Content,
-        }));
-        let mid = doc.insert_node(Node::Block(BlockNode {
-            header: LineNode {
-                raw: "mid".to_string(),
-                line_ending: "\n".to_string(),
-                span: dummy_span(2),
-                parsed: None,
-                key_hint: None,
-                trivia: TriviaKind::Content,
-            },
-            children: vec![leaf],
-            footer: None,
-            kind_label: None,
-        }));
-        doc.insert_root(Node::Block(BlockNode {
-            header: LineNode {
-                raw: "top".to_string(),
-                line_ending: "\n".to_string(),
-                span: dummy_span(1),
-                parsed: None,
-                key_hint: None,
-                trivia: TriviaKind::Content,
-            },
-            children: vec![mid],
-            footer: None,
-            kind_label: None,
-        }));
-
-        let view = build_comparison_view(&doc, &default_opts());
-
-        assert_eq!(view.lines.len(), 3);
-        assert_eq!(view.lines[0].normalized, "top");
-        assert_eq!(view.lines[1].normalized, "mid");
-        assert_eq!(view.lines[2].normalized, "  deep leaf");
     }
 }

@@ -174,7 +174,7 @@ pub fn detect_dialect(input: &str) -> DialectHint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::parse_ios_like_parts;
+    use netform_ir::{ParsedLineParts, parse_ios_like_parts};
     use rules::KeyRuleAction;
 
     #[test]
@@ -265,5 +265,154 @@ mod tests {
             RULES.key_hint(parsed.as_ref()),
             Some("interface:ethernet:1".into()),
         );
+    }
+
+    type KeyHintFn = fn(Option<&ParsedLineParts>) -> Option<String>;
+
+    /// the IOS-family vendors whose key hints share the `ios_family_key_hint`
+    /// and `common_key_hint` arms.
+    const IOS_FAMILY: [(&str, KeyHintFn); 3] = [
+        ("eos", eos::key_hint),
+        ("iosxe", iosxe::key_hint),
+        ("nxos", nxos::key_hint),
+    ];
+
+    #[test]
+    fn ios_family_shared_key_hints() {
+        for (line, expected) in [
+            ("interface", None),
+            ("vlan 100", Some("vlan:100")),
+            ("vlan 1-100,200,300-400", Some("vlan:1-100,200,300-400")),
+            ("vrf MGMT", Some("vrf:MGMT")),
+            ("router bgp 65000", Some("router:bgp:65000")),
+            ("router ospf 1", Some("router:ospf:1")),
+            ("router ospf", Some("router:ospf")),
+            ("router eigrp 100", Some("router:eigrp:100")),
+            ("router eigrp ENTERPRISE", Some("router:eigrp:ENTERPRISE")),
+            ("router isis", Some("router:isis")),
+            ("router isis AREA-A", Some("router:isis:AREA-A")),
+            (
+                "route-map REDISTRIBUTE permit 10",
+                Some("route-map:REDISTRIBUTE:permit:10"),
+            ),
+            ("route-map EXPORT deny", Some("route-map:EXPORT:deny")),
+            ("ip access-list ACL-MGMT", Some("ip-access-list:ACL-MGMT")),
+            (
+                "ip access-list extended BLOCK-RFC1918",
+                Some("ip-access-list:extended:BLOCK-RFC1918"),
+            ),
+            (
+                "ip access-list standard ALLOW-SNMP",
+                Some("ip-access-list:standard:ALLOW-SNMP"),
+            ),
+            (
+                "ip prefix-list DEFAULT-ONLY",
+                Some("prefix-list:DEFAULT-ONLY"),
+            ),
+            // CIDR and dotted-mask static routes
+            (
+                "ip route 10.0.0.0/8 192.168.1.1",
+                Some("ip-route:10.0.0.0/8"),
+            ),
+            (
+                "ip route 10.0.0.0 255.0.0.0 192.168.1.1",
+                Some("ip-route:10.0.0.0"),
+            ),
+            (
+                "ip route vrf MGMT 0.0.0.0/0 10.0.0.1",
+                Some("ip-route:MGMT:0.0.0.0/0"),
+            ),
+            (
+                "ip route vrf MGMT 0.0.0.0 0.0.0.0 10.0.0.1",
+                Some("ip-route:MGMT:0.0.0.0"),
+            ),
+            ("monitor session 1", Some("monitor-session:1")),
+            ("monitor copp-system-p-policy", None),
+            ("monitor capture CAP1", None),
+            ("ntp server 10.0.0.1", Some("ntp:server:10.0.0.1")),
+            ("ntp peer 10.0.0.2", Some("ntp:peer:10.0.0.2")),
+            ("ntp source-interface Management1", None),
+            ("ntp source GigabitEthernet0/0/0", None),
+            ("class-map match-all VOICE", Some("class-map:VOICE")),
+            ("policy-map QOS-POLICY", Some("policy-map:QOS-POLICY")),
+            // typed class-maps and policy-maps key on type and name (0.10.1)
+            (
+                "class-map type qos match-any CM-VOICE",
+                Some("class-map:qos:CM-VOICE"),
+            ),
+            (
+                "class-map type pbr match-any CM-PBR",
+                Some("class-map:pbr:CM-PBR"),
+            ),
+            (
+                "class-map type inspect match-any CM-INSPECT",
+                Some("class-map:inspect:CM-INSPECT"),
+            ),
+            (
+                "class-map type control subscriber match-all CM-SUB",
+                Some("class-map:control:subscriber:CM-SUB"),
+            ),
+            (
+                "class-map type control-plane match-any copp-s-bgp",
+                Some("class-map:control-plane:copp-s-bgp"),
+            ),
+            (
+                "class-map type queuing match-any c-out-q3",
+                Some("class-map:queuing:c-out-q3"),
+            ),
+            ("policy-map type pbr PM-PBR", Some("policy-map:pbr:PM-PBR")),
+            (
+                "policy-map type quality-of-service PM-QOS",
+                Some("policy-map:quality-of-service:PM-QOS"),
+            ),
+            (
+                "policy-map type inspect PM-INSPECT",
+                Some("policy-map:inspect:PM-INSPECT"),
+            ),
+            (
+                "policy-map type control subscriber PM-SUB",
+                Some("policy-map:control:subscriber:PM-SUB"),
+            ),
+            (
+                "policy-map type control-plane copp-system-p",
+                Some("policy-map:control-plane:copp-system-p"),
+            ),
+            (
+                "policy-map type network-qos default-nq-policy",
+                Some("policy-map:network-qos:default-nq-policy"),
+            ),
+            (
+                "spanning-tree vlan 1-100 priority 4096",
+                Some("spanning-tree:vlan:1-100"),
+            ),
+            // iosxe claims `crypto` and falls through to the shared arms
+            (
+                "crypto ikev2 proposal PROP-1",
+                Some("crypto:ikev2:proposal:PROP-1"),
+            ),
+            (
+                "crypto ipsec transform-set MY-TSET",
+                Some("crypto:ipsec:transform-set:MY-TSET"),
+            ),
+            ("crypto map MY-MAP 10", Some("crypto:map:MY-MAP")),
+            ("line vty 0 4", Some("line:vty:0:4")),
+            ("line con 0", Some("line:con:0")),
+            ("hostname leaf-01", None),
+        ] {
+            for (name, key_hint) in IOS_FAMILY {
+                assert_eq!(
+                    key_hint(parse_ios_like_parts(line).as_ref()).as_deref(),
+                    expected,
+                    "{name}: {line}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ios_family_key_hint_is_none_on_empty() {
+        for (name, key_hint) in IOS_FAMILY {
+            assert_eq!(key_hint(None), None, "{name}");
+        }
     }
 }

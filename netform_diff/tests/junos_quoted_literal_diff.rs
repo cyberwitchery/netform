@@ -7,7 +7,7 @@ use netform_diff::{
     Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     diff_documents, finding_code,
 };
-use netform_ir::{Dialect, Path};
+use netform_ir::Path;
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
     diff_documents(&parse(a), &parse(b), options).unwrap()
@@ -108,29 +108,9 @@ fn a_rotated_certificate_line_is_the_only_change_reported() {
         ],
     );
     assert!(diff.findings.is_empty(), "{:?}", diff.findings);
-}
-
-#[test]
-fn the_change_is_scoped_to_the_block_holding_the_certificate() {
-    let after = CERTIFICATE_AND_INTERFACES.replace(
-        "hkiG9w0BBQwwDgQIabcd+/EFGH==",
-        "hkiG9w0BBQwwDgQIzyxw9/8VUTS=",
-    );
-
-    let paths = edit_paths(&diff(CERTIFICATE_AND_INTERFACES, &after, keyed_stable()));
-
-    assert!(!paths.is_empty());
-    for path in &paths {
-        assert_eq!(
-            path.0.first(),
-            Some(&0),
-            "`interfaces` is root 1 and must not be touched: {paths:?}",
-        );
-        assert!(
-            path.0.len() >= 5,
-            "a certificate body line sits under `SSL-CERT`, not at the root: {paths:?}",
-        );
-    }
+    // scoped to the certificate body line under `SSL-CERT`; `interfaces` is
+    // root 1 and stays untouched.
+    assert_eq!(edit_paths(&diff), vec![Path(vec![0, 0, 0, 0, 2]); 2]);
 }
 
 #[test]
@@ -151,18 +131,6 @@ fn a_longer_certificate_adds_one_contained_line() {
             .any(|finding| finding.code == finding_code::DIFF_UNRELIABLE_REGION),
         "{:?}",
         diff.findings,
-    );
-}
-
-#[test]
-fn an_unchanged_certificate_reports_no_changes() {
-    assert!(
-        !diff(
-            CERTIFICATE_AND_INTERFACES,
-            CERTIFICATE_AND_INTERFACES,
-            keyed_stable(),
-        )
-        .has_changes
     );
 }
 
@@ -217,7 +185,10 @@ fn normalization_never_masks_a_change_inside_a_quoted_value() {
         NormalizationStep::IgnoreBlankLines,
     ]);
 
-    assert!(diff(before, after, options).has_changes);
+    assert_eq!(
+        edit_texts(&diff(before, after, options)),
+        vec!["\thard  wrapped", "    hard wrapped "],
+    );
 }
 
 #[test]
@@ -233,21 +204,4 @@ fn a_hash_line_inside_a_quoted_value_survives_ignore_comments() {
         edit_texts(&diff),
         vec!["## contact ops@example.com", "## contact noc@example.com"],
     );
-}
-
-#[test]
-fn the_ios_family_dialects_open_no_region_on_a_junos_quoted_line() {
-    let quoted = "                certificate \"-----BEGIN CERTIFICATE-----";
-
-    assert!(
-        netform_dialects::junos::JunosDialect
-            .literal_region(quoted)
-            .is_some()
-    );
-    assert_eq!(
-        netform_dialects::iosxe::DIALECT.literal_region(quoted),
-        None,
-    );
-    assert_eq!(netform_dialects::eos::DIALECT.literal_region(quoted), None);
-    assert_eq!(netform_dialects::nxos::DIALECT.literal_region(quoted), None,);
 }

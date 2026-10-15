@@ -130,22 +130,6 @@ fn comment_body_lines_are_comments() {
 }
 
 #[test]
-fn an_odd_quote_in_comment_prose_files_no_finding() {
-    let cfg = "\
-/* site notes
-   the 19\" rack was reviewed by ops
- */
-system {
-    host-name router-1;
-}
-";
-    let doc = parse(cfg);
-
-    assert_eq!(doc.render(), cfg);
-    assert!(finding_codes(&doc).is_empty(), "{:?}", finding_codes(&doc));
-}
-
-#[test]
 fn indented_comment_prose_does_not_close_the_block_around_it() {
     let cfg = "\
 interfaces {

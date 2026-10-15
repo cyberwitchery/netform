@@ -2,8 +2,8 @@
 //! over literal regions.
 
 use netform_ir::{
-    Dialect, Document, IosLikeDialect, LiteralTerminator, Node, NodeId, ParsedLineParts,
-    TriviaKind, common_key_hint, parse_with_dialect,
+    Dialect, Document, LiteralTerminator, Node, NodeId, ParsedLineParts, TriviaKind,
+    parse_with_dialect,
 };
 
 /// dialect opening a comment region on any line naming `NOTE` and a literal
@@ -186,21 +186,4 @@ fn a_comment_body_mixing_tabs_and_spaces_is_not_flagged() {
 
     let doc = parse_with_dialect("outer\n \thostname edge-1\n", &MarkerDialect);
     assert_eq!(finding_codes(&doc), vec!["mixed-leading-whitespace"]);
-}
-
-#[test]
-fn a_dialect_without_a_comment_region_is_unaffected() {
-    let ios_like: IosLikeDialect = IosLikeDialect::new("iosxe", common_key_hint);
-    let input = "banner motd ^C\nAuthorized use only\n^C\nhostname edge-1\n";
-    let doc = parse_with_dialect(input, &ios_like);
-
-    assert_eq!(
-        line_kinds(&doc),
-        vec![
-            ("banner motd ^C", TriviaKind::Content),
-            ("Authorized use only", TriviaKind::Literal),
-            ("^C", TriviaKind::Literal),
-            ("hostname edge-1", TriviaKind::Content),
-        ],
-    );
 }

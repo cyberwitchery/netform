@@ -369,42 +369,33 @@ mod tests {
     }
 
     #[test]
-    fn auto_parse_junos_produces_dialect_key_hints() {
-        let input = "\
+    fn auto_parse_dispatches_to_the_detected_dialect() {
+        let cases: &[(&str, DialectHint, Option<&str>)] = &[
+            (
+                "\
 interfaces {
     ge-0/0/0 {
         mtu 9216;
     }
 }
-";
-        let doc = auto_parse(input);
-        assert_eq!(
-            doc.metadata.dialect_hint,
-            DialectHint::Named("junos".into())
-        );
-        // junos parser sets key_hint = "interfaces"; generic parser would not.
-        assert_eq!(first_root_key_hint(&doc), Some("interfaces".into()));
-    }
-
-    #[test]
-    fn auto_parse_nxos_produces_dialect_key_hints() {
-        let input = "\
+",
+                DialectHint::Named("junos".into()),
+                Some("interfaces"),
+            ),
+            (
+                "\
 feature bgp
 feature interface-vlan
 feature lacp
 interface Ethernet1/1
   description uplink
   no shutdown
-";
-        let doc = auto_parse(input);
-        assert_eq!(doc.metadata.dialect_hint, DialectHint::Named("nxos".into()),);
-        // nxos parser sets key_hint = "feature:bgp"; generic parser would not.
-        assert_eq!(first_root_key_hint(&doc), Some("feature:bgp".into()));
-    }
-
-    #[test]
-    fn auto_parse_eos_produces_dialect_key_hints() {
-        let input = "\
+",
+                DialectHint::Named("nxos".into()),
+                Some("feature:bgp"),
+            ),
+            (
+                "\
 interface Ethernet1
    description uplink-spine-a
    mtu 9214
@@ -414,98 +405,67 @@ ip access-list ACL-EDGE-IN
    10 permit tcp 10.10.1.0/24 any eq https
    20 permit tcp 10.10.1.0/24 any eq ssh
    90 deny ip any any log
-";
-        let doc = auto_parse(input);
-        assert_eq!(doc.metadata.dialect_hint, DialectHint::Named("eos".into()),);
-        // eos parser sets key_hint = "interface:ethernet:1"; generic would not.
-        assert!(first_root_key_hint(&doc).is_some());
+",
+                DialectHint::Named("eos".into()),
+                Some("interface:ethernet:1"),
+            ),
+            // the generic parser produces no key hints.
+            ("hostname router\n", DialectHint::Generic, None),
+        ];
+        for (input, dialect, hint) in cases {
+            let doc = auto_parse(input);
+            assert_eq!(&doc.metadata.dialect_hint, dialect, "{input}");
+            assert_eq!(first_root_key_hint(&doc).as_deref(), *hint, "{input}");
+            assert_eq!(doc.render(), *input, "{input}");
+        }
     }
 
     #[test]
-    fn auto_parse_generic_fallback() {
-        let doc = auto_parse("hostname router\n");
-        assert_eq!(doc.metadata.dialect_hint, DialectHint::Generic);
-        // generic parser does not produce key hints.
-        assert_eq!(first_root_key_hint(&doc), None);
+    fn parse_policy_override_accepts_path_and_policy() {
+        for (input, prefix, policy) in [
+            ("0:unordered", vec![0], OrderPolicy::Unordered),
+            (
+                "0.1.2:keyed-stable",
+                vec![0, 1, 2],
+                OrderPolicy::KeyedStable,
+            ),
+            (":ordered", vec![], OrderPolicy::Ordered),
+        ] {
+            let result = parse_policy_override(input).unwrap();
+            assert_eq!(result.context_prefix, prefix, "{input}");
+            assert_eq!(result.policy, policy, "{input}");
+        }
     }
 
     #[test]
-    fn auto_parse_preserves_content() {
-        let input = "\
-interfaces {
-    ge-0/0/0 {
-        mtu 9216;
-    }
-}
-";
-        assert_eq!(auto_parse(input).render(), input);
+    fn parse_policy_override_rejects_malformed_input() {
+        // missing colon, bad path segment, unknown policy.
+        for input in ["0-unordered", "0.abc:unordered", "0:bogus"] {
+            assert!(parse_policy_override(input).is_err(), "{input}");
+        }
     }
 
     #[test]
-    fn parse_policy_override_simple() {
-        let result = parse_policy_override("0:unordered").unwrap();
-        assert_eq!(result.context_prefix, vec![0]);
-        assert_eq!(result.policy, OrderPolicy::Unordered);
-    }
-
-    #[test]
-    fn parse_policy_override_dotted_path() {
-        let result = parse_policy_override("0.1.2:keyed-stable").unwrap();
-        assert_eq!(result.context_prefix, vec![0, 1, 2]);
-        assert_eq!(result.policy, OrderPolicy::KeyedStable);
-    }
-
-    #[test]
-    fn parse_policy_override_empty_path() {
-        let result = parse_policy_override(":ordered").unwrap();
-        assert_eq!(result.context_prefix, Vec::<usize>::new());
-        assert_eq!(result.policy, OrderPolicy::Ordered);
-    }
-
-    #[test]
-    fn parse_policy_override_missing_colon() {
-        assert!(parse_policy_override("0-unordered").is_err());
-    }
-
-    #[test]
-    fn parse_policy_override_bad_segment() {
-        assert!(parse_policy_override("0.abc:unordered").is_err());
-    }
-
-    #[test]
-    fn parse_policy_override_bad_policy() {
-        assert!(parse_policy_override("0:bogus").is_err());
-    }
-
-    #[test]
-    fn color_flags_beat_the_terminal_check() {
-        assert_eq!(
-            resolve_color(true, false, false, false),
-            ColorChoice::Always
-        );
-        assert_eq!(resolve_color(false, true, false, true), ColorChoice::Never);
-    }
-
-    #[test]
-    fn without_flags_the_terminal_check_decides() {
-        assert_eq!(
-            resolve_color(false, false, false, true),
-            ColorChoice::Always
-        );
-        assert_eq!(
-            resolve_color(false, false, false, false),
-            ColorChoice::Never
-        );
-    }
-
-    #[test]
-    fn no_color_env_disables_color_on_a_terminal() {
-        assert_eq!(resolve_color(false, false, true, true), ColorChoice::Never);
-    }
-
-    #[test]
-    fn forcing_color_beats_no_color_env() {
-        assert_eq!(resolve_color(true, false, true, true), ColorChoice::Always);
-        assert_eq!(resolve_color(true, false, true, false), ColorChoice::Always);
+    fn resolve_color_truth_table() {
+        // (--color, --no-color, NO_COLOR set, stdout is a terminal)
+        for (color, no_color, no_color_env, tty, expected) in [
+            // flags beat the terminal check
+            (true, false, false, false, ColorChoice::Always),
+            (false, true, false, true, ColorChoice::Never),
+            // without flags the terminal check decides
+            (false, false, false, true, ColorChoice::Always),
+            (false, false, false, false, ColorChoice::Never),
+            // NO_COLOR disables color on a terminal
+            (false, false, true, true, ColorChoice::Never),
+            // forcing color beats NO_COLOR
+            (true, false, true, true, ColorChoice::Always),
+            (true, false, true, false, ColorChoice::Always),
+        ] {
+            assert_eq!(
+                resolve_color(color, no_color, no_color_env, tty),
+                expected,
+                "color={color} no_color={no_color} env={no_color_env} tty={tty}"
+            );
+        }
     }
 }

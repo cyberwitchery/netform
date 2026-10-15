@@ -367,196 +367,263 @@ mod tests {
         }
     }
 
+    fn lines(specs: &[(&str, &[usize], usize)]) -> Vec<DiffLine> {
+        specs
+            .iter()
+            .map(|(text, path, line)| diff_line(text, path.to_vec(), *line))
+            .collect()
+    }
+
     #[test]
-    fn single_line_replace_produces_line_edit() {
-        let diff = diff_with_edits(vec![Edit::Replace {
-            old_at_key: None,
-            new_at_key: None,
-            left_anchor: Some(anchor(vec![0, 1], 2)),
-            right_anchor: None,
-            old_lines: vec![diff_line("old", vec![0, 1], 2)],
-            new_lines: vec![diff_line("new", vec![0, 1], 2)],
-        }]);
+    fn a_single_line_edit_is_planned_under_its_left_context() {
+        let cases = [
+            (
+                "replace",
+                Edit::Replace {
+                    old_at_key: None,
+                    new_at_key: None,
+                    left_anchor: Some(anchor(vec![0, 1], 2)),
+                    right_anchor: None,
+                    old_lines: vec![diff_line("old", vec![0, 1], 2)],
+                    new_lines: vec![diff_line("new", vec![0, 1], 2)],
+                },
+                Path(vec![0]),
+                (PlanLineEditKind::Replace, "new"),
+            ),
+            (
+                // the left anchor ([0, 4]) differs from the right parent
+                // ([0, 1]), so placing inserts by their right-hand path fails.
+                "insert",
+                Edit::Insert {
+                    at_key: None,
+                    left_anchor: Some(anchor(vec![0, 4], 3)),
+                    right_anchor: Some(anchor(vec![0, 1, 2], 5)),
+                    lines: vec![diff_line("inserted line", vec![0, 1, 2], 5)],
+                },
+                Path(vec![0, 4]),
+                (PlanLineEditKind::Insert, "inserted line"),
+            ),
+            (
+                "delete",
+                Edit::Delete {
+                    at_key: None,
+                    left_anchor: Some(anchor(vec![0, 3], 10)),
+                    right_anchor: None,
+                    lines: vec![diff_line("deleted line", vec![0, 3], 10)],
+                },
+                Path(vec![0]),
+                (PlanLineEditKind::Delete, "deleted line"),
+            ),
+        ];
+        for (name, edit, context, expected) in cases {
+            let plan = build_plan(&diff_with_edits(vec![edit]));
 
-        let plan = build_plan(&diff);
-
-        assert_eq!(plan.version, "v1");
-        assert!(plan.findings.is_empty());
-        assert_eq!(plan.actions.len(), 1);
-        match &plan.actions[0] {
-            PlanAction::ApplyLineEditsUnderContext {
-                context_path,
-                line_edits,
-            } => {
-                assert_eq!(context_path, &Path(vec![0]));
-                assert_eq!(line_edits.len(), 1);
-                assert_eq!(line_edits[0].kind, PlanLineEditKind::Replace);
-                assert_eq!(line_edits[0].text, "new");
-            }
-            other => panic!("expected ApplyLineEditsUnderContext, got {other:?}"),
+            assert_eq!(plan.version, "v1", "{name}");
+            assert!(plan.findings.is_empty(), "{name}");
+            assert_eq!(plan.actions.len(), 1, "{name}");
+            assert_eq!(
+                line_edits(&plan.actions[0]),
+                (&context, vec![expected]),
+                "{name}"
+            );
         }
     }
 
     #[test]
-    fn multi_line_replace_produces_replace_block() {
-        let diff = diff_with_edits(vec![Edit::Replace {
-            old_at_key: None,
-            new_at_key: None,
-            left_anchor: Some(anchor(vec![0, 1], 2)),
-            right_anchor: None,
-            old_lines: vec![
-                diff_line("old1", vec![0, 1], 2),
-                diff_line("old2", vec![0, 1], 3),
-            ],
-            new_lines: vec![
-                diff_line("new1", vec![0, 1], 2),
-                diff_line("new2", vec![0, 1], 3),
-            ],
-        }]);
+    fn a_multi_line_replace_becomes_a_replace_block_at_its_left_anchor() {
+        let cases = [
+            (
+                "two lines for two",
+                vec![0, 1],
+                2,
+                lines(&[("old1", &[0, 1], 2), ("old2", &[0, 1], 3)]),
+                lines(&[("new1", &[0, 1], 2), ("new2", &[0, 1], 3)]),
+                vec!["new1", "new2"],
+            ),
+            (
+                "one line for two",
+                vec![0, 1],
+                2,
+                lines(&[("old", &[0, 1], 2)]),
+                lines(&[("new1", &[0, 1], 2), ("new2", &[0, 1], 3)]),
+                vec!["new1", "new2"],
+            ),
+            (
+                // the target is the anchor itself, not its parent
+                "two lines for one",
+                vec![0, 1, 2],
+                5,
+                lines(&[("a", &[0, 1, 2], 5), ("b", &[0, 1, 2], 6)]),
+                lines(&[("c", &[0, 1, 2], 5)]),
+                vec!["c"],
+            ),
+            (
+                "a header and its child",
+                vec![1],
+                4,
+                lines(&[
+                    ("router bgp 65000", &[1], 4),
+                    ("  neighbor 10.0.0.1 remote-as 65001", &[1, 0], 5),
+                ]),
+                lines(&[
+                    ("router bgp 65100", &[1], 4),
+                    ("  neighbor 10.0.0.2 remote-as 65002", &[1, 0], 5),
+                ]),
+                vec!["router bgp 65100", "  neighbor 10.0.0.2 remote-as 65002"],
+            ),
+            (
+                "one line for itself and a new sibling",
+                vec![0, 1],
+                2,
+                lines(&[("  description old", &[0, 1], 2)]),
+                lines(&[
+                    ("  description new-a", &[0, 1], 2),
+                    ("  description new-b", &[0, 2], 3),
+                ]),
+                vec!["  description new-a", "  description new-b"],
+            ),
+        ];
+        for (name, path, line, old_lines, new_lines, intended) in cases {
+            let diff = diff_with_edits(vec![Edit::Replace {
+                old_at_key: None,
+                new_at_key: None,
+                left_anchor: Some(anchor(path.clone(), line)),
+                right_anchor: None,
+                old_lines,
+                new_lines,
+            }]);
 
-        let plan = build_plan(&diff);
+            let plan = build_plan(&diff);
 
-        assert!(plan.findings.is_empty());
-        assert_eq!(plan.actions.len(), 1);
-        match &plan.actions[0] {
-            PlanAction::ReplaceBlock {
-                target_path,
-                target_span,
-                intended_lines,
-            } => {
-                assert_eq!(target_path, &Path(vec![0, 1]));
-                assert_eq!(target_span, &span(2));
-                assert_eq!(intended_lines, &["new1", "new2"]);
-            }
-            other => panic!("expected ReplaceBlock, got {other:?}"),
+            assert!(plan.findings.is_empty(), "{name}");
+            assert_eq!(
+                plan.actions,
+                vec![PlanAction::ReplaceBlock {
+                    target_path: Path(path),
+                    target_span: span(line),
+                    intended_lines: intended.iter().map(|text| text.to_string()).collect(),
+                }],
+                "{name}"
+            );
         }
     }
 
     #[test]
-    fn replace_one_old_many_new_produces_replace_block() {
-        let diff = diff_with_edits(vec![Edit::Replace {
-            old_at_key: None,
-            new_at_key: None,
-            left_anchor: Some(anchor(vec![0, 1], 2)),
-            right_anchor: None,
-            old_lines: vec![diff_line("old", vec![0, 1], 2)],
-            new_lines: vec![
-                diff_line("new1", vec![0, 1], 2),
-                diff_line("new2", vec![0, 1], 3),
-            ],
-        }]);
+    fn an_edit_without_its_anchor_produces_a_missing_anchor_finding() {
+        let cases = [
+            (
+                "replace",
+                vec![Edit::Replace {
+                    old_at_key: None,
+                    new_at_key: None,
+                    left_anchor: None,
+                    right_anchor: None,
+                    old_lines: vec![diff_line("old", vec![0], 1)],
+                    new_lines: vec![diff_line("new", vec![0], 1)],
+                }],
+                0,
+                vec![("replace", "left")],
+            ),
+            (
+                "insert",
+                vec![Edit::Insert {
+                    at_key: None,
+                    left_anchor: None,
+                    right_anchor: None,
+                    lines: vec![diff_line("new", vec![0], 1)],
+                }],
+                0,
+                vec![("insert", "right")],
+            ),
+            (
+                "delete",
+                vec![Edit::Delete {
+                    at_key: None,
+                    left_anchor: None,
+                    right_anchor: None,
+                    lines: vec![diff_line("gone", vec![0], 1)],
+                }],
+                0,
+                vec![("delete", "left")],
+            ),
+            (
+                // a nested insert whose context has no left-side counterpart
+                "nested insert",
+                vec![Edit::Insert {
+                    at_key: None,
+                    left_anchor: None,
+                    right_anchor: Some(anchor(vec![0, 1, 2], 5)),
+                    lines: vec![diff_line("orphan", vec![0, 1, 2], 5)],
+                }],
+                0,
+                vec![("insert", "left")],
+            ),
+            (
+                "all three",
+                vec![
+                    Edit::Replace {
+                        old_at_key: None,
+                        new_at_key: None,
+                        left_anchor: None,
+                        right_anchor: None,
+                        old_lines: vec![],
+                        new_lines: vec![],
+                    },
+                    Edit::Insert {
+                        at_key: None,
+                        left_anchor: None,
+                        right_anchor: None,
+                        lines: vec![],
+                    },
+                    Edit::Delete {
+                        at_key: None,
+                        left_anchor: None,
+                        right_anchor: None,
+                        lines: vec![],
+                    },
+                ],
+                0,
+                vec![("replace", "left"), ("insert", "right"), ("delete", "left")],
+            ),
+            (
+                // an anchorless edit does not drop the planned ones
+                "beside an anchored edit",
+                vec![
+                    Edit::Replace {
+                        old_at_key: None,
+                        new_at_key: None,
+                        left_anchor: Some(anchor(vec![0, 1], 2)),
+                        right_anchor: None,
+                        old_lines: vec![diff_line("old", vec![0, 1], 2)],
+                        new_lines: vec![diff_line("new", vec![0, 1], 2)],
+                    },
+                    Edit::Insert {
+                        at_key: None,
+                        left_anchor: None,
+                        right_anchor: None,
+                        lines: vec![diff_line("orphan", vec![0], 5)],
+                    },
+                ],
+                1,
+                vec![("insert", "right")],
+            ),
+        ];
+        for (name, edits, actions, expected) in cases {
+            let plan = build_plan(&diff_with_edits(edits));
 
-        let plan = build_plan(&diff);
-
-        assert_eq!(plan.actions.len(), 1);
-        assert!(matches!(plan.actions[0], PlanAction::ReplaceBlock { .. }));
-    }
-
-    #[test]
-    fn insert_is_planned_under_its_left_anchor() {
-        let diff = diff_with_edits(vec![Edit::Insert {
-            at_key: None,
-            left_anchor: Some(anchor(vec![0, 4], 3)),
-            right_anchor: Some(anchor(vec![0, 1, 2], 5)),
-            lines: vec![diff_line("inserted line", vec![0, 1, 2], 5)],
-        }]);
-
-        let plan = build_plan(&diff);
-
-        assert!(plan.findings.is_empty());
-        assert_eq!(plan.actions.len(), 1);
-        match &plan.actions[0] {
-            PlanAction::ApplyLineEditsUnderContext {
-                context_path,
-                line_edits,
-            } => {
-                assert_eq!(context_path, &Path(vec![0, 4]));
-                assert_eq!(line_edits.len(), 1);
-                assert_eq!(line_edits[0].kind, PlanLineEditKind::Insert);
-                assert_eq!(line_edits[0].text, "inserted line");
+            assert_eq!(plan.actions.len(), actions, "{name}");
+            assert_eq!(plan.findings.len(), expected.len(), "{name}");
+            for (finding, (kind, side)) in plan.findings.iter().zip(expected) {
+                assert_eq!(finding.code, finding_code::MISSING_ANCHOR, "{name}");
+                assert_eq!(finding.level, Some(FindingLevel::Warning), "{name}");
+                assert!(
+                    finding.message.contains(&format!("{kind} edit"))
+                        && finding.message.contains(&format!("{side} anchor")),
+                    "{name}: {}",
+                    finding.message
+                );
             }
-            other => panic!("expected ApplyLineEditsUnderContext, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn delete_with_anchor_produces_line_edit() {
-        let diff = diff_with_edits(vec![Edit::Delete {
-            at_key: None,
-            left_anchor: Some(anchor(vec![0, 3], 10)),
-            right_anchor: None,
-            lines: vec![diff_line("deleted line", vec![0, 3], 10)],
-        }]);
-
-        let plan = build_plan(&diff);
-
-        assert!(plan.findings.is_empty());
-        assert_eq!(plan.actions.len(), 1);
-        match &plan.actions[0] {
-            PlanAction::ApplyLineEditsUnderContext {
-                context_path,
-                line_edits,
-            } => {
-                assert_eq!(context_path, &Path(vec![0]));
-                assert_eq!(line_edits.len(), 1);
-                assert_eq!(line_edits[0].kind, PlanLineEditKind::Delete);
-                assert_eq!(line_edits[0].text, "deleted line");
-            }
-            other => panic!("expected ApplyLineEditsUnderContext, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn replace_without_anchor_produces_finding() {
-        let diff = diff_with_edits(vec![Edit::Replace {
-            old_at_key: None,
-            new_at_key: None,
-            left_anchor: None,
-            right_anchor: None,
-            old_lines: vec![diff_line("old", vec![0], 1)],
-            new_lines: vec![diff_line("new", vec![0], 1)],
-        }]);
-
-        let plan = build_plan(&diff);
-
-        assert!(plan.actions.is_empty());
-        assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
-        assert!(plan.findings[0].message.contains("replace"));
-    }
-
-    #[test]
-    fn insert_without_anchor_produces_finding() {
-        let diff = diff_with_edits(vec![Edit::Insert {
-            at_key: None,
-            left_anchor: None,
-            right_anchor: None,
-            lines: vec![diff_line("new", vec![0], 1)],
-        }]);
-
-        let plan = build_plan(&diff);
-
-        assert!(plan.actions.is_empty());
-        assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
-        assert!(plan.findings[0].message.contains("insert"));
-    }
-
-    #[test]
-    fn delete_without_anchor_produces_finding() {
-        let diff = diff_with_edits(vec![Edit::Delete {
-            at_key: None,
-            left_anchor: None,
-            right_anchor: None,
-            lines: vec![diff_line("gone", vec![0], 1)],
-        }]);
-
-        let plan = build_plan(&diff);
-
-        assert!(plan.actions.is_empty());
-        assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
-        assert!(plan.findings[0].message.contains("delete"));
     }
 
     #[test]
@@ -597,67 +664,6 @@ mod tests {
     }
 
     #[test]
-    fn edits_under_different_contexts_stay_separate() {
-        let diff = diff_with_edits(vec![
-            Edit::Insert {
-                at_key: None,
-                left_anchor: Some(anchor(vec![0, 1], 2)),
-                right_anchor: Some(anchor(vec![0, 1, 2], 3)),
-                lines: vec![diff_line("line a", vec![0, 1, 2], 3)],
-            },
-            Edit::Delete {
-                at_key: None,
-                left_anchor: Some(anchor(vec![0, 2, 5], 7)),
-                right_anchor: None,
-                lines: vec![diff_line("line b", vec![0, 2, 5], 7)],
-            },
-        ]);
-
-        let plan = build_plan(&diff);
-
-        assert!(plan.findings.is_empty());
-        assert_eq!(plan.actions.len(), 2);
-        match &plan.actions[0] {
-            PlanAction::ApplyLineEditsUnderContext { context_path, .. } => {
-                assert_eq!(context_path, &Path(vec![0, 1]));
-            }
-            other => panic!("expected ApplyLineEditsUnderContext, got {other:?}"),
-        }
-        match &plan.actions[1] {
-            PlanAction::ApplyLineEditsUnderContext { context_path, .. } => {
-                assert_eq!(context_path, &Path(vec![0, 2]));
-            }
-            other => panic!("expected ApplyLineEditsUnderContext, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn mixed_actions_and_findings() {
-        let diff = diff_with_edits(vec![
-            Edit::Replace {
-                old_at_key: None,
-                new_at_key: None,
-                left_anchor: Some(anchor(vec![0, 1], 2)),
-                right_anchor: None,
-                old_lines: vec![diff_line("old", vec![0, 1], 2)],
-                new_lines: vec![diff_line("new", vec![0, 1], 2)],
-            },
-            Edit::Insert {
-                at_key: None,
-                left_anchor: None,
-                right_anchor: None,
-                lines: vec![diff_line("orphan", vec![0], 5)],
-            },
-        ]);
-
-        let plan = build_plan(&diff);
-
-        assert_eq!(plan.actions.len(), 1);
-        assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
-    }
-
-    #[test]
     fn empty_diff_produces_empty_plan() {
         let diff = diff_with_edits(vec![]);
 
@@ -666,30 +672,6 @@ mod tests {
         assert_eq!(plan.version, "v1");
         assert!(plan.actions.is_empty());
         assert!(plan.findings.is_empty());
-    }
-
-    #[test]
-    fn replace_block_uses_anchor_path_not_parent() {
-        let diff = diff_with_edits(vec![Edit::Replace {
-            old_at_key: None,
-            new_at_key: None,
-            left_anchor: Some(anchor(vec![0, 1, 2], 5)),
-            right_anchor: None,
-            old_lines: vec![
-                diff_line("a", vec![0, 1, 2], 5),
-                diff_line("b", vec![0, 1, 2], 6),
-            ],
-            new_lines: vec![diff_line("c", vec![0, 1, 2], 5)],
-        }]);
-
-        let plan = build_plan(&diff);
-
-        match &plan.actions[0] {
-            PlanAction::ReplaceBlock { target_path, .. } => {
-                assert_eq!(target_path, &Path(vec![0, 1, 2]));
-            }
-            other => panic!("expected ReplaceBlock, got {other:?}"),
-        }
     }
 
     #[test]
@@ -856,22 +838,5 @@ mod tests {
                 ]
             )
         );
-    }
-
-    #[test]
-    fn nested_insert_without_left_context_produces_finding() {
-        let diff = diff_with_edits(vec![Edit::Insert {
-            at_key: None,
-            left_anchor: None,
-            right_anchor: Some(anchor(vec![0, 1, 2], 5)),
-            lines: vec![diff_line("orphan", vec![0, 1, 2], 5)],
-        }]);
-
-        let plan = build_plan(&diff);
-
-        assert!(plan.actions.is_empty());
-        assert_eq!(plan.findings.len(), 1);
-        assert_eq!(plan.findings[0].code, finding_code::MISSING_ANCHOR);
-        assert!(plan.findings[0].message.contains("left"));
     }
 }

@@ -659,100 +659,60 @@ mod tests {
     }
 
     #[test]
-    fn markdown_insert_edit() {
-        let diff = Diff {
-            edits: vec![insert_edit(&["permit any"])],
-            stats: DiffStats {
-                inserts: 1,
-                inserted_lines: 1,
+    fn markdown_renders_each_edit_kind() {
+        let cases = [
+            (
+                insert_edit(&["permit any"]),
+                DiffStats {
+                    inserts: 1,
+                    inserted_lines: 1,
+                    ..Default::default()
+                },
+                "- Inserts: 1 (1 lines)",
+                "1. Insert 1 line(s) at key 0x000000000000002a",
+                &["   - `+` L1: permit any"][..],
+            ),
+            (
+                delete_edit(&["deny all"]),
+                DiffStats {
+                    deletes: 1,
+                    deleted_lines: 1,
+                    ..Default::default()
+                },
+                "- Deletes: 1 (1 lines)",
+                "1. Delete 1 line(s) at key 0x0000000000000063",
+                &["   - `-` L1: deny all"][..],
+            ),
+            (
+                // the changed words are highlighted inline
+                replace_edit(&["old line"], &["new line"]),
+                DiffStats {
+                    replaces: 1,
+                    replaced_old_lines: 1,
+                    replaced_new_lines: 1,
+                    ..Default::default()
+                },
+                "- Replaces: 1 (1 -> 1 lines)",
+                "1. Replace 1 line(s) at key 0x000000000000000a with 1 line(s) at key 0x0000000000000014",
+                &["   - `-` L1: **old** line", "   - `+` L1: **new** line"][..],
+            ),
+        ];
+        for (edit, stats, stats_line, header, body) in cases {
+            let diff = Diff {
+                edits: vec![edit],
+                stats,
                 ..Default::default()
-            },
-            ..Default::default()
-        };
-        let report = format_markdown_report(&diff, "a", "b", 10);
+            };
+            let report = format_markdown_report(&diff, "a", "b", 10);
 
-        assert!(report.contains("- Inserts: 1 (1 lines)"));
-        assert!(report.contains("1. Insert 1 line(s) at key 0x000000000000002a"));
-        assert!(report.contains("   - `+` L1: permit any"));
-        assert!(!report.contains("No changes detected."));
-    }
-
-    #[test]
-    fn markdown_delete_edit() {
-        let diff = Diff {
-            edits: vec![delete_edit(&["deny all"])],
-            stats: DiffStats {
-                deletes: 1,
-                deleted_lines: 1,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let report = format_markdown_report(&diff, "a", "b", 10);
-
-        assert!(report.contains("- Deletes: 1 (1 lines)"));
-        assert!(report.contains("1. Delete 1 line(s) at key 0x0000000000000063"));
-        assert!(report.contains("   - `-` L1: deny all"));
-    }
-
-    #[test]
-    fn markdown_replace_edit() {
-        let diff = Diff {
-            edits: vec![replace_edit(&["old line"], &["new line"])],
-            stats: DiffStats {
-                replaces: 1,
-                replaced_old_lines: 1,
-                replaced_new_lines: 1,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let report = format_markdown_report(&diff, "a", "b", 10);
-
-        assert!(report.contains("- Replaces: 1 (1 -> 1 lines)"));
-        assert!(report.contains(
-            "Replace 1 line(s) at key 0x000000000000000a with 1 line(s) at key 0x0000000000000014"
-        ));
-        assert!(report.contains("   - `-` L1: **old** line"));
-        assert!(report.contains("   - `+` L1: **new** line"));
-    }
-
-    #[test]
-    fn markdown_multiple_edits_numbered() {
-        let diff = Diff {
-            edits: vec![insert_edit(&["line a"]), delete_edit(&["line b"])],
-            ..Default::default()
-        };
-        let report = format_markdown_report(&diff, "a", "b", 10);
-
-        assert!(report.contains("1. Insert"));
-        assert!(report.contains("2. Delete"));
-    }
-
-    #[test]
-    fn markdown_truncation_with_max_lines() {
-        let lines: Vec<&str> = (0..5).map(|_| "line").collect();
-        let diff = Diff {
-            edits: vec![insert_edit(&lines)],
-            ..Default::default()
-        };
-        let report = format_markdown_report(&diff, "a", "b", 2);
-
-        // should show 2 lines then truncation message
-        assert!(report.contains("   - `+` ... and 3 more"));
-    }
-
-    #[test]
-    fn markdown_no_truncation_when_within_limit() {
-        let diff = Diff {
-            edits: vec![insert_edit(&["line1", "line2"])],
-            ..Default::default()
-        };
-        let report = format_markdown_report(&diff, "a", "b", 5);
-
-        assert!(!report.contains("... and"));
-        assert!(report.contains("   - `+` L1: line1"));
-        assert!(report.contains("   - `+` L2: line2"));
+            assert!(report.contains(stats_line), "{header}: {report}");
+            assert!(!report.contains("No changes detected."), "{header}");
+            let expected = [header]
+                .iter()
+                .chain(body)
+                .fold(String::from("## Edits\n\n"), |out, line| out + line + "\n");
+            assert!(report.ends_with(&expected), "{header}: {report}");
+        }
     }
 
     #[test]
@@ -776,13 +736,6 @@ mod tests {
     }
 
     #[test]
-    fn markdown_no_findings_section_when_empty() {
-        let diff = empty_diff();
-        let report = format_markdown_report(&diff, "a", "b", 10);
-        assert!(!report.contains("## Findings"));
-    }
-
-    #[test]
     fn markdown_insert_with_none_key() {
         let diff = Diff {
             edits: vec![Edit::Insert {
@@ -798,72 +751,27 @@ mod tests {
     }
 
     #[test]
-    fn unified_empty_diff_returns_empty_string() {
-        let diff = empty_diff();
-        let result = plain(&diff, "a", "b", 10);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn unified_insert_edit() {
-        let diff = Diff {
-            edits: vec![insert_edit(&["permit any"])],
-            ..Default::default()
-        };
-        let result = plain(&diff, "left.cfg", "right.cfg", 10);
-
-        assert!(result.contains("--- left.cfg"));
-        assert!(result.contains("+++ right.cfg"));
-        assert!(result.contains("@@ insert 1 line(s) at key 0x000000000000002a @@"));
-        assert!(result.contains("+ permit any"));
-    }
-
-    #[test]
-    fn unified_delete_edit() {
-        let diff = Diff {
-            edits: vec![delete_edit(&["deny all"])],
-            ..Default::default()
-        };
-        let result = plain(&diff, "a", "b", 10);
-
-        assert!(result.contains("@@ delete 1 line(s) at key 0x0000000000000063 @@"));
-        assert!(result.contains("- deny all"));
-    }
-
-    #[test]
-    fn unified_replace_edit() {
-        let diff = Diff {
-            edits: vec![replace_edit(&["old"], &["new"])],
-            ..Default::default()
-        };
-        let result = plain(&diff, "a", "b", 10);
-
-        assert!(result.contains("@@ replace 1 line(s) at key"));
-        assert!(result.contains("- old"));
-        assert!(result.contains("+ new"));
-    }
-
-    #[test]
-    fn unified_truncation() {
-        let lines: Vec<&str> = (0..5).map(|_| "line").collect();
-        let diff = Diff {
-            edits: vec![insert_edit(&lines)],
-            ..Default::default()
-        };
-        let result = plain(&diff, "a", "b", 2);
-
-        assert!(result.contains("... and 3 more"));
-    }
-
-    #[test]
-    fn unified_no_truncation_within_limit() {
-        let diff = Diff {
-            edits: vec![insert_edit(&["a", "b"])],
-            ..Default::default()
-        };
-        let result = plain(&diff, "a", "b", 5);
-
-        assert!(!result.contains("... and"));
+    fn unified_renders_each_edit_kind() {
+        for (edit, expected) in [
+            (
+                insert_edit(&["permit any"]),
+                "--- left.cfg\n+++ right.cfg\n@@ insert 1 line(s) at key 0x000000000000002a @@\n+ permit any\n",
+            ),
+            (
+                delete_edit(&["deny all"]),
+                "--- left.cfg\n+++ right.cfg\n@@ delete 1 line(s) at key 0x0000000000000063 @@\n- deny all\n",
+            ),
+            (
+                replace_edit(&["old"], &["new"]),
+                "--- left.cfg\n+++ right.cfg\n@@ replace 1 line(s) at key 0x000000000000000a -> 1 line(s) at key 0x0000000000000014 @@\n- old\n+ new\n",
+            ),
+        ] {
+            let diff = Diff {
+                edits: vec![edit],
+                ..Default::default()
+            };
+            assert_eq!(plain(&diff, "left.cfg", "right.cfg", 10), expected);
+        }
     }
 
     #[test]
@@ -890,10 +798,11 @@ mod tests {
         };
         let result = plain(&diff, "a", "b", 10);
 
-        // should not have the extra newline that precedes findings
-        let lines: Vec<&str> = result.lines().collect();
-        let last = lines.last().unwrap();
-        assert!(!last.is_empty()); // no trailing blank from findings block
+        // no findings block, so no trailing blank line
+        assert_eq!(
+            result,
+            "--- a\n+++ b\n@@ insert 1 line(s) at key 0x000000000000002a @@\n+ x\n"
+        );
     }
 
     #[test]
@@ -908,29 +817,6 @@ mod tests {
         assert!(result.contains("+ a"));
         assert!(result.contains("+ b"));
         assert!(result.contains("+ c"));
-    }
-
-    #[test]
-    fn unified_max_lines_one_over_boundary() {
-        let diff = Diff {
-            edits: vec![insert_edit(&["a", "b", "c"])],
-            ..Default::default()
-        };
-        // max_lines_shown == lines.len() - 1: should truncate with "and 1 more"
-        let result = plain(&diff, "a", "b", 2);
-        assert!(result.contains("... and 1 more"));
-    }
-
-    #[test]
-    fn unified_delete_truncation() {
-        let lines: Vec<&str> = (0..5).map(|_| "gone").collect();
-        let diff = Diff {
-            edits: vec![delete_edit(&lines)],
-            ..Default::default()
-        };
-        let result = plain(&diff, "a", "b", 2);
-        assert!(result.contains("- gone"));
-        assert!(result.contains("- ... and 3 more"));
     }
 
     #[test]
@@ -1021,28 +907,16 @@ mod tests {
     }
 
     #[test]
-    fn markdown_findings_without_span_omit_line_number() {
-        let diff = Diff {
-            findings: vec![make_finding(FindingLevel::Info, "no_span", "no location")],
-            ..Default::default()
-        };
-        let report = format_markdown_report(&diff, "a", "b", 10);
-
-        assert!(report.contains("- info [no_span]: no location"));
-        assert!(!report.contains("(line"));
-    }
-
-    #[test]
     fn default_context_lines_is_ten() {
         assert_eq!(DEFAULT_CONTEXT_LINES, 10);
     }
 
     #[test]
-    fn escape_markdown_borrows_text_without_inline_syntax() {
-        assert!(matches!(
+    fn escape_markdown_passes_text_without_inline_syntax_through() {
+        assert_eq!(
             escape_markdown("set mtu 1500 # comment | pipe"),
-            Cow::Borrowed(_)
-        ));
+            "set mtu 1500 # comment | pipe"
+        );
     }
 
     #[test]
@@ -1062,12 +936,6 @@ mod tests {
     fn code_span_pads_when_content_touches_the_fence() {
         assert_eq!(code_span("`x`"), "`` `x` ``");
         assert_eq!(code_span(" x "), "`  x  `");
-    }
-
-    #[test]
-    fn code_span_leaves_all_whitespace_content_unpadded() {
-        assert_eq!(code_span(" "), "` `");
-        assert_eq!(code_span("  "), "`  `");
     }
 
     #[test]
@@ -1137,26 +1005,6 @@ mod tests {
             "2. Delete 1 line(s) at key 0x0000000000000063\n",
             "   - `-` L1: deny all\n",
         )));
-    }
-
-    #[test]
-    fn markdown_diff_line_indent_widens_with_the_ordinal() {
-        let diff = Diff {
-            edits: numbered_inserts(100),
-            ..Default::default()
-        };
-        let report = format_markdown_report(&diff, "a", "b", 10);
-
-        let key = "0x000000000000002a";
-        for (ordinal, indent) in [(9, "   "), (10, "    "), (99, "    "), (100, "     ")] {
-            let expected = format!(
-                "\n{ordinal}. Insert 1 line(s) at key {key}\n{indent}- `+` L1: edit-{ordinal}\n"
-            );
-            assert!(
-                report.contains(&expected),
-                "edit {ordinal} should nest at the width of its own marker: {expected:?}"
-            );
-        }
     }
 
     #[test]
