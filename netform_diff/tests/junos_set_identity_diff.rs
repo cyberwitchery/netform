@@ -1,10 +1,11 @@
-//! integration coverage for Junos `set`-style identity keys under keyed-stable.
+//! integration coverage for Junos `set`-style identity keys.
 //!
 //! the value-change cases pin identities that are deliberately kept coarse.
 
 use netform_dialects::junos::parse;
 use netform_diff::{
-    Diff, Edit, NormalizeOptions, OrderPolicy, OrderPolicyConfig, diff_documents, finding_code,
+    Diff, Edit, NormalizeOptions, OrderPolicy, OrderPolicyConfig, PlanAction, PlanLineEdit,
+    PlanLineEditKind, build_plan, diff_documents, finding_code,
 };
 
 fn keyed_stable() -> NormalizeOptions {
@@ -130,6 +131,22 @@ set system login user admin authentication encrypted-password \"$6$xyz\"
 ",
             "set system login user admin authentication encrypted-password \"$6$abc\"",
             "set system login user admin authentication encrypted-password \"$6$xyz\"",
+            false,
+        ),
+        (
+            "only the description value changed; mtu merely moved",
+            "\
+set interfaces ge-0/0/0 description uplink
+set interfaces ge-0/0/0 mtu 9192
+set interfaces ge-0/0/0 unit 0 family inet address 10.0.0.1/24
+",
+            "\
+set interfaces ge-0/0/0 mtu 9192
+set interfaces ge-0/0/0 description uplink-2
+set interfaces ge-0/0/0 unit 0 family inet address 10.0.0.1/24
+",
+            "set interfaces ge-0/0/0 description uplink",
+            "set interfaces ge-0/0/0 description uplink-2",
             false,
         ),
         (
@@ -274,5 +291,70 @@ set system name-server 8.8.8.8
             diff.edits
         );
         assert!(diff.findings.is_empty(), "{case}: {:?}", diff.findings);
+    }
+}
+
+#[test]
+fn a_removed_statement_reads_as_one_delete_of_that_statement() {
+    for (case, before, removed) in [
+        (
+            "bgp neighbor",
+            "\
+set protocols bgp group EXT type external
+set protocols bgp group EXT neighbor 192.0.2.1 peer-as 65100
+set protocols bgp group EXT neighbor 192.0.2.2 peer-as 65200
+",
+            "set protocols bgp group EXT neighbor 192.0.2.1 peer-as 65100",
+        ),
+        (
+            "prefix-list member",
+            "\
+set policy-options prefix-list INTERNAL 10.0.0.0/8
+set policy-options prefix-list INTERNAL 172.16.0.0/12
+set policy-options prefix-list INTERNAL 192.168.0.0/16
+",
+            "set policy-options prefix-list INTERNAL 10.0.0.0/8",
+        ),
+        (
+            "interface address",
+            "\
+set interfaces ge-0/0/0 unit 0 family inet address 10.0.0.1/24
+set interfaces ge-0/0/0 unit 0 family inet address 10.0.1.1/24
+set interfaces ge-0/0/0 description uplink
+",
+            "set interfaces ge-0/0/0 unit 0 family inet address 10.0.0.1/24",
+        ),
+    ] {
+        let after = before.replace(&format!("{removed}\n"), "");
+        let diff = diff_documents(&parse(before), &parse(&after), NormalizeOptions::default())
+            .expect("junos configs should diff");
+
+        let deleted: Vec<Vec<&str>> = diff
+            .edits
+            .iter()
+            .map(|edit| match edit {
+                Edit::Delete { lines, .. } => lines.iter().map(|l| l.text.as_str()).collect(),
+                other => panic!("{case}: expected only a delete, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(deleted, vec![vec![removed]], "{case}");
+        assert_no_ambiguous_keys(&diff);
+
+        let line_edits: Vec<PlanLineEdit> = build_plan(&diff)
+            .actions
+            .into_iter()
+            .flat_map(|action| match action {
+                PlanAction::ApplyLineEditsUnderContext { line_edits, .. } => line_edits,
+                other => panic!("{case}: expected line edits, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            line_edits,
+            vec![PlanLineEdit {
+                kind: PlanLineEditKind::Delete,
+                text: removed.to_string(),
+            }],
+            "{case}"
+        );
     }
 }

@@ -1,5 +1,9 @@
 # changelog
 
+## Unreleased
+
+- Junos `set` statements under `interfaces`, `routing-instances`, `protocols`, `firewall`, `vlans`, `applications`, `groups` and `policy-options` now each have their own identity. every statement under one interface, routing instance, protocol, firewall filter or policer, VLAN, application, group or policy-options object shared one key, so `ordered` (the default) and `keyed-stable` paired them by position: removing `set protocols bgp group EXT neighbor 192.0.2.1 peer-as 65100` from a group with a second neighbor was reported as a replace of that line by the other neighbor's and a delete of the other neighbor, with `ambiguous_key_match` warnings, and `--plan-json` planned a delete of the neighbor that stays and never removed the one that went. removing a BGP neighbor, a prefix-list member or an interface address now reads as one delete of that line. a single-valued leaf, such as an interface's `description` or `mtu`, a unit's `vlan-id`, a BGP group's `type` or a neighbor's `peer-as`, keeps its key when its value changes, so under `keyed-stable` an edited and moved `description` is one replace; every other statement under these sections is identified by its full text, as with `--dialect generic`
+
 ## [0.10.1] - 2026-10-14
 
 - `--order-policy unordered` now reports lines that move into a sibling block that has no children on the other side. moving `description srv1` and `switchport access vlan 10` from `interface Ethernet1` to an empty `interface Ethernet2` exited 0 with no edits, at the top level and inside a block such as `vrf definition X`, while `ordered` and `keyed-stable` exited 1; it is now reported as those two lines deleted under `interface Ethernet1` and inserted under `interface Ethernet2`. a block with no counterpart on the other side, such as a renamed `ip access-list`, is now reported whole instead of as its header alone, so `--plan-json` no longer plans the renamed block without its body
