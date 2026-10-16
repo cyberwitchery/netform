@@ -320,7 +320,7 @@ mod tests {
     fn key_hint_crypto_isakmp() {
         assert_eq!(
             hint("crypto isakmp policy 10"),
-            Some("crypto:isakmp:policy".into()),
+            Some("crypto:isakmp:policy:10".into()),
         );
     }
 

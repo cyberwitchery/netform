@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::fs;
 
 use netform_diff::{
-    Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig, Plan,
-    PlanAction, PlanLineEdit, PlanLineEditKind, build_comparison_view, build_plan, diff_documents,
+    Diff, DiffLine, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
+    Plan, PlanAction, PlanLineEdit, PlanLineEditKind, build_comparison_view, build_plan,
+    diff_documents,
 };
 use netform_ir::{Document, parse_generic};
 use proptest::prelude::*;
@@ -338,6 +339,142 @@ fn replaces_with_the_same_new_text_apply_to_their_own_lines() {
         parse_generic,
         &options_for(OrderPolicy::Ordered),
     );
+}
+
+/// each edited line's text with the kind of the edit it is in, sorted.
+fn edited_lines(diff: &Diff) -> Vec<(&'static str, &str)> {
+    let mut lines: Vec<_> = diff
+        .edits
+        .iter()
+        .flat_map(|edit| {
+            let (kind, lines): (_, Vec<&DiffLine>) = match edit {
+                Edit::Insert { lines, .. } => ("insert", lines.iter().collect()),
+                Edit::Delete { lines, .. } => ("delete", lines.iter().collect()),
+                Edit::Replace {
+                    old_lines,
+                    new_lines,
+                    ..
+                } => ("replace", old_lines.iter().chain(new_lines).collect()),
+            };
+            lines
+                .into_iter()
+                .map(move |line| (kind, line.text.as_str()))
+        })
+        .collect();
+    lines.sort_unstable();
+    lines
+}
+
+#[test]
+fn an_earlier_ios_family_sibling_is_removed_and_added_on_its_own() {
+    let rows: &[(&str, Parse, &str, &str)] = &[
+        (
+            "isakmp policy",
+            netform_dialects::iosxe::parse,
+            "crypto isakmp policy 10\n encryption aes\n",
+            "crypto isakmp policy 20\n encryption 3des\n",
+        ),
+        (
+            "isakmp key",
+            netform_dialects::iosxe::parse,
+            "crypto isakmp key K1 address 192.0.2.1\n",
+            "crypto isakmp key K2 address 192.0.2.2\n",
+        ),
+        (
+            "crypto map",
+            netform_dialects::iosxe::parse,
+            "crypto map CMAP 10 ipsec-isakmp\n set peer 192.0.2.1\n",
+            "crypto map CMAP 20 ipsec-isakmp\n set peer 192.0.2.2\n",
+        ),
+        (
+            "sa lifetime",
+            netform_dialects::iosxe::parse,
+            "crypto ipsec security-association lifetime seconds 3600\n",
+            "crypto ipsec security-association lifetime kilobytes 4608000\n",
+        ),
+        (
+            "ntp vrf",
+            netform_dialects::iosxr::parse,
+            "ntp server vrf MGMT 10.0.0.1\n",
+            "ntp server vrf MGMT 10.0.0.2\n",
+        ),
+        (
+            "prefix-list",
+            netform_dialects::nxos::parse,
+            "ip prefix-list PL seq 5 permit 10.0.0.0/8\n",
+            "ip prefix-list PL seq 10 permit 192.168.0.0/16\n",
+        ),
+        (
+            "ipv6 prefix-list",
+            netform_dialects::iosxe::parse,
+            "ipv6 prefix-list V6 seq 5 permit 2001:db8::/32\n",
+            "ipv6 prefix-list V6 seq 10 permit 2001:db9::/32\n",
+        ),
+        (
+            "community-list",
+            netform_dialects::iosxe::parse,
+            "ip community-list standard CL permit 65000:1\n",
+            "ip community-list standard CL permit 65000:2\n",
+        ),
+        (
+            "monitor session",
+            netform_dialects::iosxe::parse,
+            "monitor session 1 source interface GigabitEthernet1/0/1 both\n",
+            "monitor session 1 destination interface GigabitEthernet1/0/2\n",
+        ),
+        (
+            "spanning-tree vlan",
+            netform_dialects::iosxe::parse,
+            "spanning-tree vlan 10 priority 4096\n",
+            "spanning-tree vlan 10 hello-time 1\n",
+        ),
+        (
+            "route dotted mask",
+            netform_dialects::iosxe::parse,
+            "ip route 10.0.0.0 255.0.0.0 Null0\n",
+            "ip route 10.0.0.0 255.255.0.0 192.0.2.1\n",
+        ),
+        (
+            "route ecmp",
+            netform_dialects::eos::parse,
+            "ip route 10.0.0.0/8 192.0.2.1\n",
+            "ip route 10.0.0.0/8 192.0.2.2\n",
+        ),
+        (
+            "ipv6 route ecmp",
+            netform_dialects::nxos::parse,
+            "ipv6 route 2001:db8::/32 2001:db8:ffff::1\n",
+            "ipv6 route 2001:db8::/32 2001:db8:ffff::2\n",
+        ),
+        (
+            "route static bfd",
+            netform_dialects::iosxe::parse,
+            "ip route static bfd GigabitEthernet0/0 192.0.2.1\n",
+            "ip route static bfd GigabitEthernet0/1 192.0.2.5\n",
+        ),
+    ];
+    for &(family, parse, earlier, kept) in rows {
+        let with = format!("hostname r1\n{earlier}{kept}");
+        let without = format!("hostname r1\n{kept}");
+        let mut statement: Vec<&str> = earlier.lines().collect();
+        statement.sort_unstable();
+        for policy in POLICIES {
+            let options = options_for(policy);
+            for (left, right, kind) in [(&with, &without, "delete"), (&without, &with, "insert")] {
+                let diff =
+                    diff_documents(&parse(left), &parse(right), options.clone()).expect("diff");
+                assert_eq!(
+                    edited_lines(&diff),
+                    statement
+                        .iter()
+                        .map(|line| (kind, *line))
+                        .collect::<Vec<_>>(),
+                    "{family}, {policy:?}"
+                );
+                check_plan(left, right, parse, &options);
+            }
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]

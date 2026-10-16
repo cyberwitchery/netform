@@ -309,23 +309,38 @@ mod tests {
                 "ip prefix-list DEFAULT-ONLY",
                 Some("prefix-list:DEFAULT-ONLY"),
             ),
-            // CIDR and dotted-mask static routes
+            (
+                "ip prefix-list PL seq 5 permit 10.0.0.0/8",
+                Some("prefix-list:PL:5"),
+            ),
+            ("ip prefix-list PL permit 10.0.0.0/8", None),
+            ("ip community-list standard CL permit 65000:1", None),
+            // static routes key on vrf, destination and next hop
             (
                 "ip route 10.0.0.0/8 192.168.1.1",
-                Some("ip-route:10.0.0.0/8"),
+                Some("ip-route:10.0.0.0/8:192.168.1.1"),
             ),
             (
                 "ip route 10.0.0.0 255.0.0.0 192.168.1.1",
-                Some("ip-route:10.0.0.0"),
+                Some("ip-route:10.0.0.0/8:192.168.1.1"),
             ),
             (
                 "ip route vrf MGMT 0.0.0.0/0 10.0.0.1",
-                Some("ip-route:MGMT:0.0.0.0/0"),
+                Some("ip-route:MGMT:0.0.0.0/0:10.0.0.1"),
             ),
             (
                 "ip route vrf MGMT 0.0.0.0 0.0.0.0 10.0.0.1",
-                Some("ip-route:MGMT:0.0.0.0"),
+                Some("ip-route:MGMT:0.0.0.0/0:10.0.0.1"),
             ),
+            (
+                "ip route 10.0.0.0 255.0.0.0 GigabitEthernet0/0 192.168.1.1 200 name X",
+                Some("ip-route:10.0.0.0/8:GigabitEthernet0/0:192.168.1.1"),
+            ),
+            (
+                "ip route 0.0.0.0 0.0.0.0 192.168.1.1 track 1",
+                Some("ip-route:0.0.0.0/0:192.168.1.1"),
+            ),
+            ("ip route static bfd GigabitEthernet0/0 192.168.1.1", None),
             ("monitor session 1", Some("monitor-session:1")),
             ("monitor copp-system-p-policy", None),
             ("monitor capture CAP1", None),
@@ -383,7 +398,7 @@ mod tests {
             ),
             (
                 "spanning-tree vlan 1-100 priority 4096",
-                Some("spanning-tree:vlan:1-100"),
+                Some("spanning-tree:vlan:1-100:priority"),
             ),
             // iosxe claims `crypto` and falls through to the shared arms
             (
@@ -394,7 +409,7 @@ mod tests {
                 "crypto ipsec transform-set MY-TSET",
                 Some("crypto:ipsec:transform-set:MY-TSET"),
             ),
-            ("crypto map MY-MAP 10", Some("crypto:map:MY-MAP")),
+            ("crypto map MY-MAP 10", Some("crypto:map:MY-MAP:10")),
             ("line vty 0 4", Some("line:vty:0:4")),
             ("line con 0", Some("line:con:0")),
             ("hostname leaf-01", None),

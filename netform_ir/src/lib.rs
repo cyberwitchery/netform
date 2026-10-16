@@ -990,14 +990,8 @@ pub fn ios_family_key_hint(
                 Some(format!("ip-access-list:{kind}:{name}"))
             }
             [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
-            [next, name, ..] if next == "prefix-list" => Some(format!("prefix-list:{name}")),
-            [next, kind, name, ..] if next == "community-list" => {
-                Some(format!("ip-community-list:{kind}:{name}"))
-            }
-            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
-                Some(format!("ip-route:{vrf_name}:{prefix}"))
-            }
-            [next, prefix, ..] if next == "route" => Some(format!("ip-route:{prefix}")),
+            [next, rest @ ..] if next == "prefix-list" => prefix_list_key("prefix-list", rest),
+            [next, rest @ ..] if next == "route" => static_route_key("ip-route", rest),
             _ => None,
         },
         _ => None,
@@ -1044,22 +1038,44 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             .or_else(|| args.first().map(|name| format!("policy-map:{name}"))),
         "ipv6" => match args {
             [next, name, ..] if next == "access-list" => Some(format!("ipv6-access-list:{name}")),
-            [next, name, ..] if next == "prefix-list" => Some(format!("ipv6-prefix-list:{name}")),
-            [next, vrf_kw, vrf_name, prefix, ..] if next == "route" && vrf_kw == "vrf" => {
-                Some(format!("ipv6-route:{vrf_name}:{prefix}"))
-            }
-            [next, prefix, ..] if next == "route" => Some(format!("ipv6-route:{prefix}")),
+            [next, rest @ ..] if next == "prefix-list" => prefix_list_key("ipv6-prefix-list", rest),
+            [next, rest @ ..] if next == "route" => static_route_key("ipv6-route", rest),
             _ => None,
         },
         "crypto" => match args {
             [kind, sub, name, ..] if kind == "ikev2" => Some(format!("crypto:ikev2:{sub}:{name}")),
+            [kind, sub, name, param, ..]
+                if kind == "ipsec"
+                    && sub == "security-association"
+                    && matches!(name.as_str(), "lifetime" | "replay") =>
+            {
+                Some(format!("crypto:ipsec:{sub}:{name}:{param}"))
+            }
             [kind, sub, name, ..] if kind == "ipsec" => Some(format!("crypto:ipsec:{sub}:{name}")),
-            [kind, name, ..] if kind == "map" => Some(format!("crypto:map:{name}")),
+            [kind, name, seq, ..] if kind == "map" && is_number(seq) => {
+                Some(format!("crypto:map:{name}:{seq}"))
+            }
+            [kind, name] if kind == "map" => Some(format!("crypto:map:{name}")),
+            [kind, sub, rest @ ..]
+                if kind == "isakmp"
+                    && matches!(sub.as_str(), "policy" | "profile" | "peer" | "client") =>
+            {
+                Some(format!("crypto:isakmp:{sub}:{}", rest.join(":")))
+            }
+            [kind, sub, rest @ ..] if kind == "isakmp" && sub == "key" => {
+                let peer = rest
+                    .iter()
+                    .rposition(|word| word == "address" || word == "hostname")?;
+                Some(format!("crypto:isakmp:key:{}", rest[peer..].join(":")))
+            }
             [kind, num, ..] if kind == "isakmp" => Some(format!("crypto:isakmp:{num}")),
             _ => None,
         },
         "spanning-tree" => match args {
-            [next, id, ..] if next == "vlan" => Some(format!("spanning-tree:vlan:{id}")),
+            [next, id, param, ..] if next == "vlan" => {
+                Some(format!("spanning-tree:vlan:{id}:{param}"))
+            }
+            [next, id] if next == "vlan" => Some(format!("spanning-tree:vlan:{id}")),
             _ => None,
         },
         "line" => match args {
@@ -1068,12 +1084,15 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
             _ => None,
         },
         "monitor" => match args {
-            [sub, id, ..] if sub == "session" => Some(format!("monitor-session:{id}")),
+            [sub, id] if sub == "session" => Some(format!("monitor-session:{id}")),
+            [sub, id, kind, ..] if sub == "session" && kind == "type" => {
+                Some(format!("monitor-session:{id}"))
+            }
             _ => None,
         },
         "ntp" => match args {
-            [kind, addr, ..] if kind == "server" || kind == "peer" => {
-                Some(format!("ntp:{kind}:{addr}"))
+            [kind, rest @ ..] if kind == "server" || kind == "peer" => {
+                ntp_association_key(kind, rest)
             }
             _ => None,
         },
@@ -1098,6 +1117,88 @@ fn typed_map_key(head: &str, args: &[String]) -> Option<String> {
         return None;
     }
     Some(format!("{head}:{}:{name}", kind.join(":")))
+}
+
+/// key a prefix-list on its name, and each of its entries on its sequence number.
+fn prefix_list_key(kind: &str, args: &[String]) -> Option<String> {
+    match args {
+        [name] => Some(format!("{kind}:{name}")),
+        [name, keyword, seq, ..] if keyword == "seq" => Some(format!("{kind}:{name}:{seq}")),
+        [name, keyword, ..] if keyword == "description" => {
+            Some(format!("{kind}:{name}:description"))
+        }
+        _ => None,
+    }
+}
+
+/// key an ntp server or peer on its vrf and its address.
+fn ntp_association_key(kind: &str, args: &[String]) -> Option<String> {
+    let (vrf, args) = match args {
+        [keyword, vrf, rest @ ..] if keyword == "vrf" => (Some(vrf), rest),
+        _ => (None, args),
+    };
+    let address = match args {
+        [family, address, ..] if family == "ip" || family == "ipv6" => address,
+        [address, ..] => address,
+        [] => return None,
+    };
+    Some(match vrf {
+        Some(vrf) => format!("ntp:{kind}:{vrf}:{address}"),
+        None => format!("ntp:{kind}:{address}"),
+    })
+}
+
+/// key a static route on its vrf, its destination and its next hop.
+fn static_route_key(kind: &str, args: &[String]) -> Option<String> {
+    let mut key = kind.to_string();
+    let mut words = args;
+    if let [keyword, vrf, rest @ ..] = words
+        && keyword == "vrf"
+    {
+        key = format!("{key}:{vrf}");
+        words = rest;
+    }
+
+    let [destination, rest @ ..] = words else {
+        return None;
+    };
+    let address = destination
+        .split_once('/')
+        .map_or(destination.as_str(), |(address, _)| address);
+    if address.parse::<std::net::IpAddr>().is_err() {
+        return None;
+    }
+    key = format!("{key}:{destination}");
+    words = rest;
+    if let [mask, rest @ ..] = words
+        && !destination.contains('/')
+        && let Some(len) = ipv4_mask_length(mask)
+    {
+        key = format!("{key}/{len}");
+        words = rest;
+    }
+
+    let next_hop = words
+        .iter()
+        .take_while(|word| !is_number(word) && !ROUTE_ATTRIBUTES.contains(&word.as_str()));
+    for word in next_hop {
+        key.push(':');
+        key.push_str(word);
+    }
+    Some(key)
+}
+
+/// keywords that begin a static route's attributes, as a bare distance does.
+const ROUTE_ATTRIBUTES: &[&str] = &["name", "tag", "track", "permanent", "metric"];
+
+/// the prefix length of a contiguous dotted IPv4 mask.
+fn ipv4_mask_length(mask: &str) -> Option<u32> {
+    let bits = u32::from(mask.parse::<std::net::Ipv4Addr>().ok()?);
+    (bits.leading_ones() + bits.trailing_zeros() == 32).then_some(bits.leading_ones())
+}
+
+fn is_number(word: &str) -> bool {
+    !word.is_empty() && word.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// parse an interface name into `(canonical_type, id)` using the given type
@@ -1249,7 +1350,33 @@ mod tests {
             ),
             (
                 "crypto map VPN-MAP 10 ipsec-isakmp",
-                Some("crypto:map:VPN-MAP"),
+                Some("crypto:map:VPN-MAP:10"),
+            ),
+            ("crypto map VPN-MAP local-address GigabitEthernet0/0", None),
+            ("crypto isakmp policy 10", Some("crypto:isakmp:policy:10")),
+            (
+                "crypto isakmp profile IKE-PROF",
+                Some("crypto:isakmp:profile:IKE-PROF"),
+            ),
+            (
+                "crypto isakmp peer address 192.0.2.1",
+                Some("crypto:isakmp:peer:address:192.0.2.1"),
+            ),
+            (
+                "crypto isakmp client configuration group SALES",
+                Some("crypto:isakmp:client:configuration:group:SALES"),
+            ),
+            (
+                "crypto isakmp key 6 SECRET address 192.0.2.1",
+                Some("crypto:isakmp:key:address:192.0.2.1"),
+            ),
+            (
+                "crypto ipsec security-association lifetime seconds 3600",
+                Some("crypto:ipsec:security-association:lifetime:seconds"),
+            ),
+            (
+                "crypto ipsec security-association replay window-size 128",
+                Some("crypto:ipsec:security-association:replay:window-size"),
             ),
             (
                 "crypto ipsec transform-set AES-SHA esp-aes esp-sha-hmac",
@@ -1257,14 +1384,27 @@ mod tests {
             ),
             (
                 "spanning-tree vlan 1-100 priority 4096",
-                Some("spanning-tree:vlan:1-100"),
+                Some("spanning-tree:vlan:1-100:priority"),
             ),
             ("spanning-tree mode rapid-pvst", None),
             ("line vty 0 4", Some("line:vty:0:4")),
             ("monitor session 1", Some("monitor-session:1")),
+            (
+                "monitor session 2 type erspan-source",
+                Some("monitor-session:2"),
+            ),
+            ("monitor session 1 source interface Gi1/0/1 both", None),
             ("monitor copp-system-p-policy", None),
             ("ntp server 10.0.0.1", Some("ntp:server:10.0.0.1")),
             ("ntp peer 10.0.0.2", Some("ntp:peer:10.0.0.2")),
+            (
+                "ntp server vrf MGMT 10.0.0.1",
+                Some("ntp:server:MGMT:10.0.0.1"),
+            ),
+            (
+                "ntp server ip ntp1.example.com",
+                Some("ntp:server:ntp1.example.com"),
+            ),
             ("ntp source-interface mgmt0", None),
             (
                 "ipv6 access-list BLOCK-BOGONS",
@@ -1275,12 +1415,16 @@ mod tests {
                 Some("ipv6-prefix-list:DEFAULT-V6-ONLY"),
             ),
             (
+                "ipv6 prefix-list V6 seq 5 permit 2001:db8::/32",
+                Some("ipv6-prefix-list:V6:5"),
+            ),
+            (
                 "ipv6 route 2001:db8::/32 Null0",
-                Some("ipv6-route:2001:db8::/32"),
+                Some("ipv6-route:2001:db8::/32:Null0"),
             ),
             (
                 "ipv6 route vrf MGMT ::/0 GigabitEthernet0/0 fe80::1",
-                Some("ipv6-route:MGMT:::/0"),
+                Some("ipv6-route:MGMT:::/0:GigabitEthernet0/0:fe80::1"),
             ),
             ("ipv6 unicast-routing", None),
             // constructs handled by dialect-specific functions.
@@ -1296,14 +1440,6 @@ mod tests {
     #[test]
     fn common_key_hint_none_on_empty() {
         assert_eq!(common_key_hint(None), None);
-    }
-
-    #[test]
-    fn common_key_hint_crypto_isakmp() {
-        assert_eq!(
-            common_hint("crypto isakmp policy 10"),
-            Some("crypto:isakmp:policy".into()),
-        );
     }
 
     #[test]
