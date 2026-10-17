@@ -946,6 +946,8 @@ pub struct IosKeyHintConfig {
     /// router protocols (beyond BGP and OSPF) whose second argument should be
     /// included in the hint — e.g. `&["eigrp"]` for IOS XE.
     pub extra_router_protos: &'static [&'static str],
+    /// whether a static route's distance is part of its identity, as on EOS.
+    pub route_distance_is_identity: bool,
 }
 
 /// derive a key hint for constructs shared across IOS-family dialects.
@@ -991,7 +993,9 @@ pub fn ios_family_key_hint(
             }
             [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
             [next, rest @ ..] if next == "prefix-list" => prefix_list_key("prefix-list", rest),
-            [next, rest @ ..] if next == "route" => static_route_key("ip-route", rest),
+            [next, rest @ ..] if next == "route" => {
+                static_route_key("ip-route", rest, config.route_distance_is_identity)
+            }
             _ => None,
         },
         _ => None,
@@ -1039,7 +1043,7 @@ pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
         "ipv6" => match args {
             [next, name, ..] if next == "access-list" => Some(format!("ipv6-access-list:{name}")),
             [next, rest @ ..] if next == "prefix-list" => prefix_list_key("ipv6-prefix-list", rest),
-            [next, rest @ ..] if next == "route" => static_route_key("ipv6-route", rest),
+            [next, rest @ ..] if next == "route" => static_route_key("ipv6-route", rest, false),
             _ => None,
         },
         "crypto" => match args {
@@ -1148,8 +1152,8 @@ fn ntp_association_key(kind: &str, args: &[String]) -> Option<String> {
     })
 }
 
-/// key a static route on its vrf, its destination and its next hop.
-fn static_route_key(kind: &str, args: &[String]) -> Option<String> {
+/// key a static route on its vrf, destination and next hop, and its distance if that is identity.
+fn static_route_key(kind: &str, args: &[String], distance_is_identity: bool) -> Option<String> {
     let mut key = kind.to_string();
     let mut words = args;
     if let [keyword, vrf, rest @ ..] = words
@@ -1178,12 +1182,21 @@ fn static_route_key(kind: &str, args: &[String]) -> Option<String> {
         words = rest;
     }
 
-    let next_hop = words
+    let end = words
         .iter()
-        .take_while(|word| !is_number(word) && !ROUTE_ATTRIBUTES.contains(&word.as_str()));
+        .position(|word| is_number(word) || ROUTE_ATTRIBUTES.contains(&word.as_str()))
+        .unwrap_or(words.len());
+    let (next_hop, attributes) = words.split_at(end);
     for word in next_hop {
         key.push(':');
         key.push_str(word);
+    }
+    if let [distance, ..] = attributes
+        && distance_is_identity
+        && is_number(distance)
+    {
+        key.push(':');
+        key.push_str(distance);
     }
     Some(key)
 }
@@ -1353,6 +1366,7 @@ mod tests {
                 Some("crypto:map:VPN-MAP:10"),
             ),
             ("crypto map VPN-MAP local-address GigabitEthernet0/0", None),
+            ("crypto map VPN-MAP", Some("crypto:map:VPN-MAP")),
             ("crypto isakmp policy 10", Some("crypto:isakmp:policy:10")),
             (
                 "crypto isakmp profile IKE-PROF",
@@ -1371,6 +1385,10 @@ mod tests {
                 Some("crypto:isakmp:key:address:192.0.2.1"),
             ),
             (
+                "crypto isakmp key SECRET hostname peer.example.com",
+                Some("crypto:isakmp:key:hostname:peer.example.com"),
+            ),
+            (
                 "crypto ipsec security-association lifetime seconds 3600",
                 Some("crypto:ipsec:security-association:lifetime:seconds"),
             ),
@@ -1386,6 +1404,7 @@ mod tests {
                 "spanning-tree vlan 1-100 priority 4096",
                 Some("spanning-tree:vlan:1-100:priority"),
             ),
+            ("spanning-tree vlan 10", Some("spanning-tree:vlan:10")),
             ("spanning-tree mode rapid-pvst", None),
             ("line vty 0 4", Some("line:vty:0:4")),
             ("monitor session 1", Some("monitor-session:1")),

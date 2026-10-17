@@ -17,6 +17,7 @@ pub const RULES: IosRules = IosRules {
     ],
     vrf_keyword: "instance",
     extra_router_protos: &["eigrp", "isis"],
+    route_distance_is_identity: true,
     key_rules: &[
         KeyRule {
             head: "mlag",
@@ -243,6 +244,15 @@ mod tests {
                 Some("event-handler:lnterface-recovery"),
             ),
             ("peer-filter LEAF-PEERS", Some("peer-filter:LEAF-PEERS")),
+            // a static route's distance is part of its identity on eos
+            (
+                "ip route 4.4.4.4/32 Ethernet1 7",
+                Some("ip-route:4.4.4.4/32:Ethernet1:7"),
+            ),
+            (
+                "ip route vrf MGMT 10.0.0.0 255.0.0.0 192.168.1.1 200 name X",
+                Some("ip-route:MGMT:10.0.0.0/8:192.168.1.1:200"),
+            ),
         ] {
             assert_eq!(
                 key_hint(parse_ios_like_parts(line).as_ref()).as_deref(),

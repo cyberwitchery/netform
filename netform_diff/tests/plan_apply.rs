@@ -441,6 +441,12 @@ fn an_earlier_ios_family_sibling_is_removed_and_added_on_its_own() {
             "ip route 10.0.0.0/8 192.0.2.2\n",
         ),
         (
+            "route distance",
+            netform_dialects::eos::parse,
+            "ip route 4.4.4.4/32 Ethernet1\n",
+            "ip route 4.4.4.4/32 Ethernet1 7\n",
+        ),
+        (
             "ipv6 route ecmp",
             netform_dialects::nxos::parse,
             "ipv6 route 2001:db8::/32 2001:db8:ffff::1\n",

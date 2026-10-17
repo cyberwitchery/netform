@@ -19,6 +19,7 @@ pub const RULES: IosRules = IosRules {
     ],
     vrf_keyword: "context",
     extra_router_protos: &["eigrp", "isis"],
+    route_distance_is_identity: false,
     key_rules: &[
         KeyRule {
             head: "feature",
@@ -176,6 +177,10 @@ mod tests {
             ("role feature-group name", None),
             ("system jumbomtu 9216", Some("system:jumbomtu")),
             ("system default switchport", Some("system:default")),
+            (
+                "ip route 10.0.0.0/8 192.168.1.1 200",
+                Some("ip-route:10.0.0.0/8:192.168.1.1"),
+            ),
         ] {
             assert_eq!(
                 key_hint(parse_ios_like_parts(line).as_ref()).as_deref(),
