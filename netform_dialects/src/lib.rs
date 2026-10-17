@@ -49,6 +49,8 @@ pub struct IosRules {
     /// router protocols beyond BGP and OSPF whose second argument belongs in
     /// the hint.
     pub extra_router_protos: &'static [&'static str],
+    /// whether a static route's distance is part of its identity.
+    pub route_distance_is_identity: bool,
     /// vendor-specific rules, tried after the shared IOS-family arms.
     pub key_rules: &'static [KeyRule],
 }
@@ -60,6 +62,7 @@ impl IosRules {
             interface_types: self.interface_types,
             vrf_keyword: self.vrf_keyword,
             extra_router_protos: self.extra_router_protos,
+            route_distance_is_identity: self.route_distance_is_identity,
         }
     }
 
@@ -249,6 +252,7 @@ mod tests {
             interface_types: &["ethernet"],
             vrf_keyword: "instance",
             extra_router_protos: &[],
+            route_distance_is_identity: false,
             key_rules: &[KeyRule {
                 head: "interface",
                 guards: &[],
@@ -309,23 +313,42 @@ mod tests {
                 "ip prefix-list DEFAULT-ONLY",
                 Some("prefix-list:DEFAULT-ONLY"),
             ),
-            // CIDR and dotted-mask static routes
+            (
+                "ip prefix-list PL seq 5 permit 10.0.0.0/8",
+                Some("prefix-list:PL:5"),
+            ),
+            ("ip prefix-list PL permit 10.0.0.0/8", None),
+            (
+                "ip prefix-list PL description uplinks",
+                Some("prefix-list:PL:description"),
+            ),
+            ("ip community-list standard CL permit 65000:1", None),
+            // static routes key on vrf, destination and next hop
             (
                 "ip route 10.0.0.0/8 192.168.1.1",
-                Some("ip-route:10.0.0.0/8"),
+                Some("ip-route:10.0.0.0/8:192.168.1.1"),
             ),
             (
-                "ip route 10.0.0.0 255.0.0.0 192.168.1.1",
-                Some("ip-route:10.0.0.0"),
+                "ip route 10.0.0.0 255.0.0.0 192.168.1.1 tag 5",
+                Some("ip-route:10.0.0.0/8:192.168.1.1"),
             ),
             (
-                "ip route vrf MGMT 0.0.0.0/0 10.0.0.1",
-                Some("ip-route:MGMT:0.0.0.0/0"),
+                "ip route vrf MGMT 0.0.0.0/0 10.0.0.1 permanent",
+                Some("ip-route:MGMT:0.0.0.0/0:10.0.0.1"),
             ),
             (
-                "ip route vrf MGMT 0.0.0.0 0.0.0.0 10.0.0.1",
-                Some("ip-route:MGMT:0.0.0.0"),
+                "ip route vrf MGMT 0.0.0.0 0.0.0.0 10.0.0.1 metric 10",
+                Some("ip-route:MGMT:0.0.0.0/0:10.0.0.1"),
             ),
+            (
+                "ip route 10.0.0.0 255.0.0.0 GigabitEthernet0/0 192.168.1.1 name X 200",
+                Some("ip-route:10.0.0.0/8:GigabitEthernet0/0:192.168.1.1"),
+            ),
+            (
+                "ip route 0.0.0.0 0.0.0.0 192.168.1.1 track 1",
+                Some("ip-route:0.0.0.0/0:192.168.1.1"),
+            ),
+            ("ip route static bfd GigabitEthernet0/0 192.168.1.1", None),
             ("monitor session 1", Some("monitor-session:1")),
             ("monitor copp-system-p-policy", None),
             ("monitor capture CAP1", None),
@@ -383,7 +406,7 @@ mod tests {
             ),
             (
                 "spanning-tree vlan 1-100 priority 4096",
-                Some("spanning-tree:vlan:1-100"),
+                Some("spanning-tree:vlan:1-100:priority"),
             ),
             // iosxe claims `crypto` and falls through to the shared arms
             (
@@ -394,7 +417,7 @@ mod tests {
                 "crypto ipsec transform-set MY-TSET",
                 Some("crypto:ipsec:transform-set:MY-TSET"),
             ),
-            ("crypto map MY-MAP 10", Some("crypto:map:MY-MAP")),
+            ("crypto map MY-MAP 10", Some("crypto:map:MY-MAP:10")),
             ("line vty 0 4", Some("line:vty:0:4")),
             ("line con 0", Some("line:con:0")),
             ("hostname leaf-01", None),

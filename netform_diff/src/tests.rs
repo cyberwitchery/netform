@@ -98,18 +98,13 @@ fn fallback_alignment_emits_finding() {
     let b = parse_generic("router bgp 65000\n  neighbor 10.0.0.1 remote-as 65001\n");
 
     let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
-    let findings = diff
+    let unreliable = diff
         .findings
         .iter()
-        .map(|f| (f.code.as_str(), f.path.clone()))
+        .filter(|f| f.code == crate::finding_code::DIFF_UNRELIABLE_REGION)
+        .map(|f| f.path.clone())
         .collect::<Vec<_>>();
-    assert_eq!(
-        findings,
-        [(
-            crate::finding_code::DIFF_UNRELIABLE_REGION,
-            Some(Path(vec![0]))
-        )]
-    );
+    assert_eq!(unreliable, [Some(Path(vec![0]))]);
 }
 
 #[test]

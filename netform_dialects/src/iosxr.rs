@@ -22,6 +22,7 @@ pub const RULES: IosRules = IosRules {
     ],
     vrf_keyword: "vrf",
     extra_router_protos: &["isis"],
+    route_distance_is_identity: false,
     key_rules: &[
         KeyRule {
             head: "route-policy",
