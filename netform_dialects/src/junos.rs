@@ -144,25 +144,18 @@ fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 
 fn set_style_key_hint(args: &[&str]) -> Option<String> {
     match args {
-        ["interfaces", name, ..] => Some(format!("set-interface:{name}")),
-        ["routing-instances", name, ..] => Some(format!("set-routing-instance:{name}")),
-        ["protocols", "bgp", asn, ..] => Some(format!("set-protocols:bgp:{asn}")),
-        ["protocols", proto, ..] => Some(format!("set-protocols:{proto}")),
-        ["firewall", kind @ ("filter" | "policer"), name, ..] => {
-            Some(format!("set-firewall:{kind}:{name}"))
+        ["groups", name, rest @ ..] if !matches!(rest, ["groups", ..]) => {
+            set_style_key_hint(rest).map(|inner| format!("set-groups:{name}:{inner}"))
         }
-        ["vlans", name, ..] => Some(format!("set-vlan:{name}")),
-        ["applications", kind, name, ..] => Some(format!("set-applications:{kind}:{name}")),
-        ["groups", name, ..] => Some(format!("set-group:{name}")),
-        ["policy-options", kind, name, ..] => Some(format!("set-policy-options:{kind}:{name}")),
-        [
-            section @ ("system" | "security" | "snmp" | "chassis" | "class-of-service"
-            | "forwarding-options" | "routing-options"),
-            rest @ ..,
-        ] => set_identity_len(section, rest)
+        ["routing-instances", name, rest @ ..]
+            if matches!(rest, ["protocols" | "routing-options", ..]) =>
+        {
+            set_style_key_hint(rest).map(|inner| format!("set-routing-instances:{name}:{inner}"))
+        }
+        [section, rest @ ..] => set_identity_len(section, rest)
             .and_then(|len| rest.get(..len))
             .map(|identity| set_hint(section, identity)),
-        _ => None,
+        [] => None,
     }
 }
 
@@ -283,6 +276,70 @@ fn set_identity_len(section: &str, args: &[&str]) -> Option<usize> {
                 ..,
             ],
         ) => Some(6),
+
+        ("interfaces", [_, "description" | "mtu", _]) => Some(2),
+        ("interfaces", [_, "unit", _, "description" | "vlan-id", _]) => Some(4),
+        ("interfaces", [_, "unit", _, "family", _, "mtu", _]) => Some(6),
+        ("interfaces", [_, "unit", _, "family", _, "filter", "input" | "output", _]) => Some(7),
+
+        (
+            "routing-instances",
+            [
+                _,
+                "instance-type" | "route-distinguisher" | "description",
+                _,
+            ],
+        ) => Some(2),
+
+        (
+            "protocols",
+            [
+                "bgp",
+                "group",
+                _,
+                "type" | "peer-as" | "local-address" | "description",
+                _,
+            ],
+        ) => Some(4),
+        (
+            "protocols",
+            [
+                "bgp",
+                "group",
+                _,
+                "neighbor",
+                _,
+                "peer-as" | "local-address" | "description",
+                _,
+            ],
+        ) => Some(6),
+        ("protocols", ["ospf" | "ospf3", "area", _, "interface", _, "metric", _]) => Some(6),
+
+        (
+            "firewall",
+            [
+                "policer",
+                _,
+                "if-exceeding",
+                "bandwidth-limit" | "burst-size-limit",
+                _,
+            ],
+        ) => Some(4),
+
+        ("vlans", [_, "vlan-id" | "description" | "l3-interface", _]) => Some(2),
+        ("vlans", [_, "vxlan", "vni", _]) => Some(3),
+
+        (
+            "applications",
+            [
+                "application",
+                _,
+                "protocol" | "source-port" | "destination-port",
+                _,
+            ],
+        ) => Some(3),
+
+        ("policy-options", ["as-path", _, _]) => Some(2),
 
         _ => None,
     }
@@ -541,32 +598,44 @@ mod tests {
     fn key_hint_set_statements() {
         for (line, expected) in [
             (
-                "set interfaces ge-0/0/0 unit 0 family inet",
-                "set-interface:ge-0/0/0",
+                "set interfaces ge-0/0/0 mtu 9192",
+                "set-interfaces:ge-0/0/0:mtu",
+            ),
+            (
+                "set interfaces ge-0/0/1 unit 100 vlan-id 100",
+                "set-interfaces:ge-0/0/1:unit:100:vlan-id",
+            ),
+            (
+                "set interfaces ge-0/0/0 unit 0 family inet mtu 1500",
+                "set-interfaces:ge-0/0/0:unit:0:family:inet:mtu",
+            ),
+            (
+                "set interfaces lo0 unit 0 family inet filter input PROTECT-RE",
+                "set-interfaces:lo0:unit:0:family:inet:filter:input",
             ),
             (
                 "set routing-instances VRF1 instance-type vrf",
-                "set-routing-instance:VRF1",
+                "set-routing-instances:VRF1:instance-type",
             ),
             (
-                "set protocols bgp 65001 group PEERS",
-                "set-protocols:bgp:65001",
+                "set routing-instances VRF1 protocols bgp group CE neighbor 192.0.2.2 peer-as 64600",
+                "set-routing-instances:VRF1:set-protocols:bgp:group:CE:neighbor:192.0.2.2:peer-as",
             ),
             (
-                "set protocols ospf area 0.0.0.0 interface ge-0/0/0.0",
-                "set-protocols:ospf",
+                "set protocols bgp group EXT type external",
+                "set-protocols:bgp:group:EXT:type",
             ),
             (
-                "set protocols isis interface ge-0/0/0.0",
-                "set-protocols:isis",
+                "set protocols bgp group EXT neighbor 192.0.2.1 peer-as 65100",
+                "set-protocols:bgp:group:EXT:neighbor:192.0.2.1:peer-as",
             ),
             (
-                "set firewall filter PROTECT-RE term 10 from protocol tcp",
-                "set-firewall:filter:PROTECT-RE",
+                "set protocols ospf area 0.0.0.0 interface ge-0/0/0.0 metric 10",
+                "set-protocols:ospf:area:0.0.0.0:interface:ge-0/0/0.0:metric",
             ),
             (
                 "set firewall policer RATE-LIMIT if-exceeding bandwidth-limit 1m",
-                "set-firewall:policer:RATE-LIMIT",
+                "set-firewall:policer:RATE-LIMIT:if-exceeding:bandwidth-limit",
             ),
             (
                 "set security zones security-zone TRUST description \"trusted\"",
@@ -580,30 +649,22 @@ mod tests {
                 "set security policies default-policy deny-all",
                 "set-security:policies:default-policy",
             ),
-            ("set vlans VLAN100 vlan-id 100", "set-vlan:VLAN100"),
+            ("set vlans VLAN100 vlan-id 100", "set-vlans:VLAN100:vlan-id"),
             (
-                "set applications application HTTP protocol tcp destination-port 80",
-                "set-applications:application:HTTP",
+                "set vlans VLAN100 vxlan vni 10100",
+                "set-vlans:VLAN100:vxlan:vni",
             ),
             (
-                "set applications application-set WEB-APPS application HTTP",
-                "set-applications:application-set:WEB-APPS",
+                "set applications application HTTP destination-port 80",
+                "set-applications:application:HTTP:destination-port",
             ),
             (
-                "set groups GRP-DEFAULTS system services ssh",
-                "set-group:GRP-DEFAULTS",
+                "set groups re0 system host-name r1-re0",
+                "set-groups:re0:set-system:host-name",
             ),
             (
-                "set policy-options policy-statement EXPORT-BGP term 10 then accept",
-                "set-policy-options:policy-statement:EXPORT-BGP",
-            ),
-            (
-                "set policy-options prefix-list INTERNAL 10.0.0.0/8",
-                "set-policy-options:prefix-list:INTERNAL",
-            ),
-            (
-                "set policy-options community CUST-A members 65001:100",
-                "set-policy-options:community:CUST-A",
+                "set policy-options as-path TRANSIT \"^64500 .*\"",
+                "set-policy-options:as-path:TRANSIT",
             ),
             (
                 "set snmp community public authorization read-only",
@@ -726,7 +787,20 @@ mod tests {
             "set system ntp server 10.0.0.1",
             "set system authentication-order radius",
             "set system no-redirects",
+            "set interfaces ge-0/0/0 unit 0 family inet address 10.0.0.1/24",
+            "set routing-instances VRF1 interface ge-0/0/0.0",
+            "set protocols bgp group EXT neighbor 192.0.2.1",
+            "set protocols ospf area 0.0.0.0 interface ge-0/0/0.0",
+            "set firewall filter PROTECT-RE term 10 from protocol tcp",
+            "set firewall filter PROTECT-RE term 10 then accept",
+            "set applications application-set WEB-APPS application HTTP",
+            "set policy-options prefix-list INTERNAL 10.0.0.0/8",
+            "set policy-options community CUST-A members 65001:100",
+            "set policy-options policy-statement EXPORT-BGP term 10 then accept",
+            "set groups GRP-DEFAULTS system services ssh",
             // multi-value leaves.
+            "set protocols bgp group EXT import TRANSIT-IN",
+            "set routing-instances VRF1 vrf-target target:65001:1",
             "set system services ssh ciphers aes256-ctr",
             "set system services ssh macs hmac-sha2-256",
             "set system services ssh key-exchange ecdh-sha2-nistp256",
@@ -743,9 +817,41 @@ mod tests {
             "set routing-options rib inet6.0 static route ::/0",
             // unknown section.
             "set event-options policy DUMP-ON-SNMPD",
+            "set groups a groups b system host-name r1",
         ] {
             assert_eq!(hint(line), None, "{line}");
         }
+    }
+
+    #[test]
+    fn key_hint_set_statements_under_one_object_stay_distinct() {
+        assert_all_distinct(&[
+            "set interfaces ge-0/0/0 description uplink",
+            "set interfaces ge-0/0/0 mtu 9192",
+            "set interfaces ge-0/0/0 unit 0 description core",
+            "set interfaces ge-0/0/0 unit 0 family inet mtu 1500",
+            "set interfaces ge-0/0/0 unit 0 family inet6 mtu 1500",
+            "set interfaces lo0 unit 0 family inet filter input PROTECT-RE",
+            "set interfaces lo0 unit 0 family inet filter output EGRESS",
+            "set routing-instances VRF1 instance-type vrf",
+            "set routing-instances VRF1 route-distinguisher 65001:1",
+            "set routing-instances VRF2 route-distinguisher 65001:2",
+            "set protocols bgp group EXT type external",
+            "set protocols bgp group EXT peer-as 65100",
+            "set protocols bgp group EXT neighbor 192.0.2.1 peer-as 65100",
+            "set protocols bgp group EXT neighbor 192.0.2.2 peer-as 65200",
+            "set routing-instances VRF1 protocols bgp group EXT neighbor 192.0.2.1 peer-as 65100",
+            "set firewall policer LIMIT if-exceeding bandwidth-limit 1m",
+            "set firewall policer LIMIT if-exceeding burst-size-limit 15k",
+            "set vlans V100 vlan-id 100",
+            "set vlans V100 l3-interface irb.100",
+            "set vlans V200 vlan-id 200",
+            "set applications application WEB protocol tcp",
+            "set applications application WEB destination-port 8080",
+            "set groups re0 system host-name r1-re0",
+            "set groups re1 system host-name r1-re1",
+            "set system host-name r1",
+        ]);
     }
 
     #[test]
