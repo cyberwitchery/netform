@@ -26,6 +26,7 @@ pub const RULES: IosRules = IosRules {
     ],
     vrf_keyword: "definition",
     extra_router_protos: &["eigrp", "isis"],
+    route_distance_is_identity: false,
     key_rules: &[
         KeyRule {
             head: "crypto",
@@ -311,6 +312,10 @@ mod tests {
                 Some("zone-pair:ZP-IN-OUT"),
             ),
             ("zone-pair other", None),
+            (
+                "ip route 10.0.0.0 255.0.0.0 GigabitEthernet0/0 192.168.1.1 200 name X",
+                Some("ip-route:10.0.0.0/8:GigabitEthernet0/0:192.168.1.1"),
+            ),
         ] {
             assert_eq!(hint(line).as_deref(), expected, "{line}");
         }
@@ -320,7 +325,7 @@ mod tests {
     fn key_hint_crypto_isakmp() {
         assert_eq!(
             hint("crypto isakmp policy 10"),
-            Some("crypto:isakmp:policy".into()),
+            Some("crypto:isakmp:policy:10".into()),
         );
     }
 
