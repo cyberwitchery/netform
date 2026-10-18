@@ -366,7 +366,7 @@ fn edited_lines(diff: &Diff) -> Vec<(&'static str, &str)> {
 }
 
 #[test]
-fn an_earlier_ios_family_sibling_is_removed_and_added_on_its_own() {
+fn an_earlier_sibling_is_removed_and_added_on_its_own() {
     let rows: &[(&str, Parse, &str, &str)] = &[
         (
             "isakmp policy",
@@ -458,6 +458,30 @@ fn an_earlier_ios_family_sibling_is_removed_and_added_on_its_own() {
             "ip route static bfd GigabitEthernet0/0 192.0.2.1\n",
             "ip route static bfd GigabitEthernet0/1 192.0.2.5\n",
         ),
+        (
+            "junos ecmp next-hop",
+            netform_dialects::junos::parse,
+            "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1\n",
+            "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.2\n",
+        ),
+        (
+            "junos authentication-order",
+            netform_dialects::junos::parse,
+            "set system services telnet authentication-order tacplus\n",
+            "set system services telnet authentication-order password\n",
+        ),
+        (
+            "junos bfd-liveness-detection",
+            netform_dialects::junos::parse,
+            "set routing-options static route 10.0.0.0/8 bfd-liveness-detection minimum-interval 900\n",
+            "set routing-options static route 10.0.0.0/8 bfd-liveness-detection no-adaptation\n",
+        ),
+        (
+            "same-header block",
+            parse_generic,
+            "router bgp 1\n network 10.1.0.0/16\n",
+            "router bgp 1\n network 10.2.0.0/16\n",
+        ),
     ];
     for &(family, parse, earlier, kept) in rows {
         let with = format!("hostname r1\n{earlier}{kept}");
@@ -479,6 +503,33 @@ fn an_earlier_ios_family_sibling_is_removed_and_added_on_its_own() {
                 );
                 check_plan(left, right, parse, &options);
             }
+        }
+    }
+}
+
+#[test]
+fn reordered_same_key_siblings_report_nothing() {
+    let rows: &[(&str, Parse, &str, &str)] = &[
+        (
+            "junos ecmp next-hops",
+            netform_dialects::junos::parse,
+            "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1\n\
+             set routing-options static route 10.0.0.0/8 next-hop 192.0.2.2\n",
+            "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.2\n\
+             set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1\n",
+        ),
+        (
+            "fortios repeated field",
+            netform_dialects::fortios::parse,
+            "config system interface\n    edit \"port1\"\n        set member \"a\"\n        set member \"b\"\n        set member \"c\"\n    next\nend\n",
+            "config system interface\n    edit \"port1\"\n        set member \"c\"\n        set member \"a\"\n        set member \"b\"\n    next\nend\n",
+        ),
+    ];
+    for &(case, parse, left, right) in rows {
+        for policy in [OrderPolicy::KeyedStable, OrderPolicy::Unordered] {
+            let diff =
+                diff_documents(&parse(left), &parse(right), options_for(policy)).expect("diff");
+            assert!(!diff.has_changes, "{case}, {policy:?}: {:?}", diff.edits);
         }
     }
 }
