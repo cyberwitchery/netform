@@ -508,6 +508,21 @@ fn an_earlier_sibling_is_removed_and_added_on_its_own() {
 }
 
 #[test]
+fn a_changed_line_between_reshuffled_same_key_siblings_is_planned() {
+    let left = "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1\n\
+                set routing-options static route 10.0.0.0/8 bfd-liveness-detection minimum-interval 300\n\
+                set routing-options static route 10.0.0.0/8 next-hop 192.0.2.3\n";
+    let right = "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.2\n\
+                 set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1\n\
+                 set routing-options static route 10.0.0.0/8 bfd-liveness-detection minimum-interval 900\n";
+    let parse = netform_dialects::junos::parse;
+    for policy in POLICIES {
+        check_plan(left, right, parse, &options_for(policy));
+        check_plan(right, left, parse, &options_for(policy));
+    }
+}
+
+#[test]
 fn reordered_same_key_siblings_report_nothing() {
     let rows: &[(&str, Parse, &str, &str)] = &[
         (

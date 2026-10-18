@@ -873,6 +873,10 @@ fn line_diff_ordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Result<Vec<E
         match op {
             Op::Equal => {
                 flush(&mut edits, &mut pending_deletes, &mut pending_inserts);
+                edits.extend(diff_matched_lines(
+                    std::slice::from_ref(&a[i]),
+                    std::slice::from_ref(&b[j]),
+                ));
                 i += 1;
                 j += 1;
             }
@@ -2770,7 +2774,7 @@ mod tests {
         // two lines whose content_key matches (simulating dialect key_hints like
         // FortiOS `set hostname`) but whose normalized text differs.
         //
-        // Ordered sees matching content_keys → SES emits Equal → 0 edits.
+        // Ordered sees matching content_keys → SES emits Equal → a Replace per pair.
         // Unordered hashes normalized text → distinct buckets → Delete + Insert.
         // KeyedStable buckets by content_key → paired → text differs → Replace.
         let a = vec![
@@ -2782,12 +2786,10 @@ mod tests {
             cline("  set allowaccess https", 20, vec![0, 1]),
         ];
 
-        // Ordered: content_keys [10, 20] == [10, 20] → all Equal, no edits.
+        // Ordered: content_keys [10, 20] == [10, 20] → matched, each text change a Replace.
         let ordered = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
-        assert!(
-            ordered.is_empty(),
-            "Ordered matches by content_key; identical key sequences produce no edits"
-        );
+        assert_eq!(ordered.len(), 2);
+        assert!(ordered.iter().all(|e| matches!(e, Edit::Replace { .. })));
 
         // Unordered: four distinct text hashes → 2 Delete + 2 Insert.
         let unordered = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
