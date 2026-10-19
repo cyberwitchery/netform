@@ -142,16 +142,7 @@ fn diff_segment_level(
     let a_segments = segment_at(a_lines, depth);
     let b_segments = segment_at(b_lines, depth);
 
-    let a_keys = a_segments
-        .iter()
-        .map(|segment| segment.segment_key)
-        .collect::<Vec<_>>();
-    let b_keys = b_segments
-        .iter()
-        .map(|segment| segment.segment_key)
-        .collect::<Vec<_>>();
-
-    let ops = compute_ops(&a_keys, &b_keys)?;
+    let ops = align_segments(&a_segments, &b_segments)?;
 
     let a_count = a_segments.len();
     let b_count = b_segments.len();
@@ -241,6 +232,127 @@ fn diff_segment_level(
         fallback_contexts.extend(unreliable);
     }
     Ok(())
+}
+
+/// aligns siblings by key, re-pairing each run of same-key matches identical siblings first.
+fn align_segments(a: &[Segment], b: &[Segment]) -> Result<Vec<Op>, DiffError> {
+    let keys = |segments: &[Segment]| {
+        segments
+            .iter()
+            .map(|segment| segment.segment_key)
+            .collect::<Vec<_>>()
+    };
+    let matches = matched_pairs(&compute_ops(&keys(a), &keys(b))?);
+
+    let mut pairs = Vec::with_capacity(matches.len());
+    let mut start = 0;
+    while start < matches.len() {
+        let key = a[matches[start].0].segment_key;
+        let end = matches[start..]
+            .iter()
+            .position(|&(left, _)| a[left].segment_key != key)
+            .map_or(matches.len(), |offset| start + offset);
+        let (a_from, b_from) = pairs
+            .last()
+            .map_or((0, 0), |&(left, right)| (left + 1, right + 1));
+        let (a_to, b_to) = matches.get(end).copied().unwrap_or((a.len(), b.len()));
+        let with_key = |segments: &[Segment], range: std::ops::Range<usize>| {
+            range
+                .filter(|&index| segments[index].segment_key == key)
+                .collect::<Vec<_>>()
+        };
+        pairs.extend(pair_identical_first(
+            a,
+            b,
+            &with_key(a, a_from..a_to),
+            &with_key(b, b_from..b_to),
+        )?);
+        start = end;
+    }
+    Ok(ops_from_pairs(a.len(), b.len(), &pairs))
+}
+
+/// the (left, right) index of every segment pair `ops` matches.
+fn matched_pairs(ops: &[Op]) -> Vec<(usize, usize)> {
+    let (mut left, mut right) = (0, 0);
+    let mut pairs = Vec::new();
+    for op in ops {
+        match op {
+            Op::Equal => {
+                pairs.push((left, right));
+                left += 1;
+                right += 1;
+            }
+            Op::Delete => left += 1,
+            Op::Insert => right += 1,
+        }
+    }
+    pairs
+}
+
+/// pairs identical siblings first, then the rest by position between those pairs.
+fn pair_identical_first(
+    a: &[Segment],
+    b: &[Segment],
+    left: &[usize],
+    right: &[usize],
+) -> Result<Vec<(usize, usize)>, DiffError> {
+    let fingerprints = |segments: &[Segment], indices: &[usize]| {
+        indices
+            .iter()
+            .map(|&index| segment_fingerprint(&segments[index]))
+            .collect::<Vec<_>>()
+    };
+    let ops = compute_ops(&fingerprints(a, left), &fingerprints(b, right))?;
+
+    let mut pairs = Vec::new();
+    let (mut gap_left, mut gap_right) = (Vec::new(), Vec::new());
+    let (mut i, mut j) = (0, 0);
+    for op in ops {
+        match op {
+            Op::Equal => {
+                pairs.extend(gap_left.drain(..).zip(gap_right.drain(..)));
+                pairs.push((left[i], right[j]));
+                i += 1;
+                j += 1;
+            }
+            Op::Delete => {
+                gap_left.push(left[i]);
+                i += 1;
+            }
+            Op::Insert => {
+                gap_right.push(right[j]);
+                j += 1;
+            }
+        }
+    }
+    pairs.extend(gap_left.into_iter().zip(gap_right));
+    Ok(pairs)
+}
+
+/// hashes a segment's lines in order, so equal fingerprints mean identical siblings.
+fn segment_fingerprint(segment: &Segment) -> u64 {
+    let mut hasher = xxhash_rust::xxh3::Xxh3Default::new();
+    for line in &segment.lines {
+        hasher.update(&line.path.0.len().to_le_bytes());
+        hasher.update(line.normalized.as_bytes());
+    }
+    hasher.digest()
+}
+
+/// the edit script that matches exactly `pairs`, given in increasing order on both sides.
+fn ops_from_pairs(a_len: usize, b_len: usize, pairs: &[(usize, usize)]) -> Vec<Op> {
+    let mut ops = Vec::with_capacity(a_len + b_len);
+    let (mut i, mut j) = (0, 0);
+    for &(left, right) in pairs {
+        ops.extend(std::iter::repeat_n(Op::Delete, left - i));
+        ops.extend(std::iter::repeat_n(Op::Insert, right - j));
+        ops.push(Op::Equal);
+        (i, j) = (left + 1, right + 1);
+    }
+    ops.extend(std::iter::repeat_n(Op::Delete, a_len - i));
+    ops.extend(std::iter::repeat_n(Op::Insert, b_len - j));
+    ops
 }
 
 /// emits edits for two segments matched as the same sibling.
@@ -761,6 +873,10 @@ fn line_diff_ordered(a: &[ComparisonLine], b: &[ComparisonLine]) -> Result<Vec<E
         match op {
             Op::Equal => {
                 flush(&mut edits, &mut pending_deletes, &mut pending_inserts);
+                edits.extend(diff_matched_lines(
+                    std::slice::from_ref(&a[i]),
+                    std::slice::from_ref(&b[j]),
+                ));
                 i += 1;
                 j += 1;
             }
@@ -815,40 +931,28 @@ where
 
     let mut edits = Vec::new();
     for key in all_keys {
-        let mut left = a_buckets.remove(&key).unwrap_or_default();
-        let mut right = b_buckets.remove(&key).unwrap_or_default();
-
-        left.sort_by(|a, b| {
-            a.occurrence_key
-                .cmp(&b.occurrence_key)
-                .then_with(|| a.path.0.cmp(&b.path.0))
-        });
-        right.sort_by(|a, b| {
-            a.occurrence_key
-                .cmp(&b.occurrence_key)
-                .then_with(|| a.path.0.cmp(&b.path.0))
-        });
-
-        let common = left.len().min(right.len());
-
+        // a key's lines can differ in text (FortiOS `set` fields), so only equal text cancels.
+        let mut unmatched: HashMap<&str, VecDeque<&ComparisonLine>> = HashMap::new();
+        for line in b_buckets.remove(&key).unwrap_or_default() {
+            unmatched
+                .entry(&line.normalized)
+                .or_default()
+                .push_back(line);
+        }
         let mut bucket_deletes = Vec::new();
-        let mut bucket_inserts = Vec::new();
-
-        // paired lines share a content key but may differ in text (e.g.
-        // FortiOS `set` lines matched by field name with different values).
-        for idx in 0..common {
-            if left[idx].normalized != right[idx].normalized {
-                bucket_deletes.push(to_diff_line(left[idx]));
-                bucket_inserts.push(to_diff_line(right[idx]));
+        for line in a_buckets.remove(&key).unwrap_or_default() {
+            let cancelled = unmatched
+                .get_mut(line.normalized.as_str())
+                .and_then(VecDeque::pop_front);
+            if cancelled.is_none() {
+                bucket_deletes.push(to_diff_line(line));
             }
         }
-
-        for line in left.into_iter().skip(common) {
-            bucket_deletes.push(to_diff_line(line));
-        }
-        for line in right.into_iter().skip(common) {
-            bucket_inserts.push(to_diff_line(line));
-        }
+        let bucket_inserts = unmatched
+            .into_values()
+            .flatten()
+            .map(to_diff_line)
+            .collect();
 
         edits.extend(finalize_chunked_edits(bucket_deletes, bucket_inserts));
     }
@@ -2670,7 +2774,7 @@ mod tests {
         // two lines whose content_key matches (simulating dialect key_hints like
         // FortiOS `set hostname`) but whose normalized text differs.
         //
-        // Ordered sees matching content_keys → SES emits Equal → 0 edits.
+        // Ordered sees matching content_keys → SES emits Equal → a Replace per pair.
         // Unordered hashes normalized text → distinct buckets → Delete + Insert.
         // KeyedStable buckets by content_key → paired → text differs → Replace.
         let a = vec![
@@ -2682,12 +2786,10 @@ mod tests {
             cline("  set allowaccess https", 20, vec![0, 1]),
         ];
 
-        // Ordered: content_keys [10, 20] == [10, 20] → all Equal, no edits.
+        // Ordered: content_keys [10, 20] == [10, 20] → matched, each text change a Replace.
         let ordered = line_diff(&a, &b, OrderPolicy::Ordered).unwrap();
-        assert!(
-            ordered.is_empty(),
-            "Ordered matches by content_key; identical key sequences produce no edits"
-        );
+        assert_eq!(ordered.len(), 2);
+        assert!(ordered.iter().all(|e| matches!(e, Edit::Replace { .. })));
 
         // Unordered: four distinct text hashes → 2 Delete + 2 Insert.
         let unordered = line_diff(&a, &b, OrderPolicy::Unordered).unwrap();
