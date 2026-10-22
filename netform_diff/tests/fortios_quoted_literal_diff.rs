@@ -7,7 +7,7 @@ use netform_diff::{
     Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     diff_documents, finding_code,
 };
-use netform_ir::{Dialect, Path};
+use netform_ir::{Dialect, Path, parse_with_dialect};
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
     diff_documents(&parse(a), &parse(b), options).unwrap()
@@ -169,9 +169,6 @@ end
 
 #[test]
 fn normalization_never_masks_a_change_inside_a_quoted_value() {
-    let before = "config system global\n    set comment \"top\n\thard  wrapped\nbottom\"\nend\n";
-    let after = "config system global\n    set comment \"top\n    hard wrapped \nbottom\"\nend\n";
-
     let options = NormalizeOptions::new(vec![
         NormalizationStep::NormalizeLeadingWhitespace,
         NormalizationStep::CollapseInternalWhitespace,
@@ -179,11 +176,52 @@ fn normalization_never_masks_a_change_inside_a_quoted_value() {
         NormalizationStep::IgnoreComments,
         NormalizationStep::IgnoreBlankLines,
     ]);
+    let config = |body: &str| format!("config system global\n{body}\nend\n");
 
-    assert_eq!(
-        edit_texts(&diff(before, after, options)),
-        vec!["\thard  wrapped", "    hard wrapped "],
-    );
+    for (before, after, reported) in [
+        (
+            "    set comment \"top\n\thard  wrapped\nbottom\"",
+            "    set comment \"top\n    hard wrapped \nbottom\"",
+            &["\thard  wrapped", "    hard wrapped "][..],
+        ),
+        (
+            "    set comments \"allow  web\"",
+            "    set comments \"allow web\"",
+            &[
+                "    set comments \"allow  web\"",
+                "    set comments \"allow web\"",
+            ],
+        ),
+        (
+            "    set comment \"top  x\nbottom\"",
+            "    set comment \"top x\nbottom\"",
+            &["    set comment \"top  x", "    set comment \"top x"],
+        ),
+        (
+            "    set comment \"top   \nbottom\"",
+            "    set comment \"top\nbottom\"",
+            &["    set comment \"top   ", "    set comment \"top"],
+        ),
+        (
+            "    set comments \"19\\\" rack  B\"",
+            "    set comments \"19\\\" rack B\"",
+            &[
+                "    set comments \"19\\\" rack  B\"",
+                "    set comments \"19\\\" rack B\"",
+            ],
+        ),
+        (
+            "    set member\t\"a\"   \"b\"  ",
+            "    set  member \"a\" \"b\"",
+            &[],
+        ),
+    ] {
+        assert_eq!(
+            edit_texts(&diff(&config(before), &config(after), options.clone())),
+            reported,
+            "{before:?}",
+        );
+    }
 }
 
 #[test]
@@ -202,19 +240,26 @@ fn a_hash_line_inside_a_quoted_value_survives_ignore_comments() {
 }
 
 #[test]
-fn the_ios_family_dialects_open_no_region_on_a_quoted_line() {
-    for quoted in [
-        // FortiOS
-        "    set private-key \"-----BEGIN ENCRYPTED PRIVATE KEY-----",
-        // Junos
-        "                certificate \"-----BEGIN CERTIFICATE-----",
+fn the_ios_family_dialects_read_a_quote_as_plain_text() {
+    let collapse = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
+
+    for (name, dialect) in [
+        ("iosxe", &netform_dialects::iosxe::DIALECT),
+        ("eos", &netform_dialects::eos::DIALECT),
+        ("nxos", &netform_dialects::nxos::DIALECT),
     ] {
-        for (name, dialect) in [
-            ("iosxe", &netform_dialects::iosxe::DIALECT),
-            ("eos", &netform_dialects::eos::DIALECT),
-            ("nxos", &netform_dialects::nxos::DIALECT),
+        for quoted in [
+            // FortiOS
+            "    set private-key \"-----BEGIN ENCRYPTED PRIVATE KEY-----",
+            // Junos
+            "                certificate \"-----BEGIN CERTIFICATE-----",
         ] {
             assert_eq!(dialect.literal_region(quoted), None, "{name}: {quoted}");
         }
+
+        let before = parse_with_dialect("interface Gi0/1\n description \"to  core\"\n", dialect);
+        let after = parse_with_dialect("interface Gi0/1\n description \"to core\"\n", dialect);
+        let diff = diff_documents(&before, &after, collapse.clone()).unwrap();
+        assert!(!diff.has_changes, "{name}");
     }
 }

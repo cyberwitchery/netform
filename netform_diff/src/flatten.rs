@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use netform_ir::{Document, Node, NodeId, Path, TriviaKind};
+use netform_ir::{DialectHint, Document, Node, NodeId, Path, TriviaKind};
 
 use crate::model::{
     ComparisonLine, ComparisonView, KeyKind, NormalizeOptions, derive_content_key,
@@ -111,10 +111,13 @@ fn flatten_node(
     let Some(node) = doc.node(node_id) else {
         return;
     };
+    let quoted_values = quotes_delimit_values(doc);
 
     match node {
         Node::Line(line) => {
-            if let Some(normalized) = normalize_for_compare(&line.raw, line.trivia, options) {
+            if let Some(normalized) =
+                normalize_for_compare(&line.raw, line.trivia, quoted_values, options)
+            {
                 push_comparison_line(
                     out,
                     keys,
@@ -127,9 +130,12 @@ fn flatten_node(
             }
         }
         Node::Block(block) => {
-            if let Some(normalized) =
-                normalize_for_compare(&block.header.raw, block.header.trivia, options)
-            {
+            if let Some(normalized) = normalize_for_compare(
+                &block.header.raw,
+                block.header.trivia,
+                quoted_values,
+                options,
+            ) {
                 let header_content_key = push_comparison_line(
                     out,
                     keys,
@@ -150,7 +156,7 @@ fn flatten_node(
                     path.push(block.children.len());
 
                     if let Some(footer_normalized) =
-                        normalize_for_compare(&footer.raw, footer.trivia, options)
+                        normalize_for_compare(&footer.raw, footer.trivia, quoted_values, options)
                     {
                         push_comparison_line(
                             out,
@@ -167,6 +173,14 @@ fn flatten_node(
                 }
             }
         }
+    }
+}
+
+/// FortiOS and Junos read `"…"` as a value; elsewhere a quote is plain text.
+fn quotes_delimit_values(doc: &Document) -> bool {
+    match &doc.metadata.dialect_hint {
+        DialectHint::Named(name) => matches!(name.as_str(), "fortios" | "junos"),
+        DialectHint::Generic | DialectHint::Unknown => false,
     }
 }
 

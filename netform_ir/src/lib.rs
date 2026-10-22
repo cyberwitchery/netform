@@ -24,6 +24,7 @@ pub mod detect;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Range;
 
 /// stable arena identifier for a node in a [`Document`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -309,23 +310,47 @@ pub fn ends_inside_quoted_value(raw: &str) -> bool {
     unescaped_quote_count(raw) % 2 == 1
 }
 
+/// byte ranges of the double-quoted values in `raw`, quotes included.
+///
+/// escapes follow [`ends_inside_quoted_value`]; a value still open at the end
+/// of the line runs to the end of `raw`.
+///
+/// # Example
+///
+/// ```rust
+/// use netform_ir::quoted_spans;
+///
+/// let spans: Vec<_> = quoted_spans("set a \"x \\\" y\" b \"open").collect();
+/// assert_eq!(spans, [6..14, 17..22]);
+/// ```
+pub fn quoted_spans(raw: &str) -> impl Iterator<Item = Range<usize>> + '_ {
+    let mut quotes = unescaped_quotes(raw);
+    std::iter::from_fn(move || {
+        let open = quotes.next()?;
+        Some(open..quotes.next().map_or(raw.len(), |close| close + 1))
+    })
+}
+
 /// count the double quotes in `raw` that are not backslash-escaped.
 fn unescaped_quote_count(raw: &str) -> usize {
-    let mut count = 0usize;
+    unescaped_quotes(raw).count()
+}
+
+/// byte offsets of the double quotes in `raw` that are not backslash-escaped.
+fn unescaped_quotes(raw: &str) -> impl Iterator<Item = usize> + '_ {
     let mut escaped = false;
 
     // no UTF-8 continuation byte can equal `\` or `"`, so bytes suffice.
-    for byte in raw.bytes() {
+    raw.bytes().enumerate().filter_map(move |(idx, byte)| {
         if escaped {
             escaped = false;
         } else if byte == b'\\' {
             escaped = true;
         } else if byte == b'"' {
-            count += 1;
+            return Some(idx);
         }
-    }
-
-    count
+        None
+    })
 }
 
 /// parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
