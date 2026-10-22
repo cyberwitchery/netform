@@ -1,12 +1,14 @@
 use std::borrow::Cow;
+use std::ops::Range;
 
-use netform_ir::{TriviaKind, count_indent};
+use netform_ir::{TriviaKind, count_indent, ends_inside_quoted_value, quoted_spans};
 
 use crate::model::{NormalizationStep, NormalizeOptions};
 
 pub(crate) fn normalize_for_compare(
     raw: &str,
     trivia: TriviaKind,
+    quoted_values: bool,
     options: &NormalizeOptions,
 ) -> Option<String> {
     // no step may drop or rewrite opaque literal text.
@@ -29,6 +31,9 @@ pub(crate) fn normalize_for_compare(
                 }
             }
             NormalizationStep::TrimTrailingWhitespace => {
+                if quoted_values && ends_inside_quoted_value(&output) {
+                    continue;
+                }
                 let trimmed_len = output.trim_end().len();
                 if trimmed_len < output.len() {
                     match &mut output {
@@ -55,23 +60,38 @@ pub(crate) fn normalize_for_compare(
             NormalizationStep::CollapseInternalWhitespace => {
                 let leading_len = output.len() - output.trim_start().len();
                 let body = &output[leading_len..];
-                let mut parts = body.split_whitespace();
-                if let Some(first) = parts.next() {
-                    let mut collapsed = String::with_capacity(body.len());
-                    collapsed.push_str(first);
-                    for word in parts {
-                        collapsed.push(' ');
-                        collapsed.push_str(word);
-                    }
-                    if collapsed != body {
-                        output = Cow::Owned(format!("{}{collapsed}", &output[..leading_len]));
-                    }
+                let values: Vec<Range<usize>> = if quoted_values {
+                    quoted_spans(body).collect()
+                } else {
+                    Vec::new()
+                };
+                let collapsed = collapse_whitespace(body, &values);
+                if collapsed != body {
+                    output = Cow::Owned(format!("{}{collapsed}", &output[..leading_len]));
                 }
             }
         }
     }
 
     Some(output.into_owned())
+}
+
+/// join the words of `body` with single spaces, keeping each of `values` as it is.
+fn collapse_whitespace(body: &str, values: &[Range<usize>]) -> String {
+    let mut collapsed = String::with_capacity(body.len());
+    let mut gap = false;
+    for (idx, ch) in body.char_indices() {
+        if ch.is_whitespace() && !values.iter().any(|value| value.contains(&idx)) {
+            gap = !collapsed.is_empty();
+        } else {
+            if gap {
+                collapsed.push(' ');
+                gap = false;
+            }
+            collapsed.push(ch);
+        }
+    }
+    collapsed
 }
 
 pub(crate) fn trivia_tag(kind: TriviaKind) -> &'static str {
@@ -91,7 +111,7 @@ mod tests {
 
     fn collapse(input: &str) -> String {
         let opts = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
-        normalize_for_compare(input, TriviaKind::Content, &opts).unwrap()
+        normalize_for_compare(input, TriviaKind::Content, false, &opts).unwrap()
     }
 
     #[test]

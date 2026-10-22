@@ -173,10 +173,6 @@ interfaces {
 
 #[test]
 fn normalization_never_masks_a_change_inside_a_quoted_value() {
-    let before =
-        "system {\n    login {\n        announcement \"top\n\thard  wrapped\nbottom\";\n    }\n}\n";
-    let after = "system {\n    login {\n        announcement \"top\n    hard wrapped \nbottom\";\n    }\n}\n";
-
     let options = NormalizeOptions::new(vec![
         NormalizationStep::NormalizeLeadingWhitespace,
         NormalizationStep::CollapseInternalWhitespace,
@@ -185,10 +181,45 @@ fn normalization_never_masks_a_change_inside_a_quoted_value() {
         NormalizationStep::IgnoreBlankLines,
     ]);
 
-    assert_eq!(
-        edit_texts(&diff(before, after, options)),
-        vec!["\thard  wrapped", "    hard wrapped "],
-    );
+    for (before, after, reported) in [
+        (
+            "system {\n    login {\n        announcement \"top\n\thard  wrapped\nbottom\";\n    }\n}\n",
+            "system {\n    login {\n        announcement \"top\n    hard wrapped \nbottom\";\n    }\n}\n",
+            &["\thard  wrapped", "    hard wrapped "][..],
+        ),
+        (
+            "system {\n    login {\n        message \"two  spaces\";\n    }\n}\n",
+            "system {\n    login {\n        message \"two spaces\";\n    }\n}\n",
+            &[
+                "        message \"two  spaces\";",
+                "        message \"two spaces\";",
+            ],
+        ),
+        (
+            "set system login message \"two  spaces\"\n",
+            "set system login message \"two spaces\"\n",
+            &[
+                "set system login message \"two  spaces\"",
+                "set system login message \"two spaces\"",
+            ],
+        ),
+        (
+            "system {\n    login {\n        message \"top  x\nbottom\";\n    }\n}\n",
+            "system {\n    login {\n        message \"top x\nbottom\";\n    }\n}\n",
+            &["        message \"top  x", "        message \"top x"],
+        ),
+        (
+            "set interfaces\tge-0/0/0  description \"uplink\"   \n",
+            "set interfaces ge-0/0/0 description \"uplink\"\n",
+            &[],
+        ),
+    ] {
+        assert_eq!(
+            edit_texts(&diff(before, after, options.clone())),
+            reported,
+            "{before:?}"
+        );
+    }
 }
 
 #[test]
