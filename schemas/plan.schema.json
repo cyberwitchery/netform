@@ -44,7 +44,7 @@
         "type": { "const": "apply_line_edits_under_context" },
         "context_path": {
           "$ref": "#/$defs/path",
-          "description": "the left-side block whose children the line edits change; empty for the top level"
+          "description": "the left-side block whose children the line edits change, or a left-side line whose first children they insert; empty for the top level"
         },
         "line_edits": {
           "type": "array",

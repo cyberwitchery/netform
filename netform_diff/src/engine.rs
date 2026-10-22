@@ -458,8 +458,9 @@ fn diff_matched_contents(
 ///
 /// blocks sharing a header identity are paired and diffed like matched
 /// segments; the chunked edits for leaves and unpaired blocks are returned.
-/// under `Unordered` a block also pairs with a leaf of the same text, and an
-/// unpaired block is reported whole rather than line by line.
+/// unless the policy is `Ordered`, a block also pairs with a leaf of its header
+/// identity; under `Unordered` an unpaired block is reported whole rather than
+/// line by line.
 fn diff_sibling_multiset(
     deleted: Vec<Segment>,
     inserted: Vec<Segment>,
@@ -470,10 +471,10 @@ fn diff_sibling_multiset(
 ) -> Result<Vec<Edit>, DiffError> {
     let unordered = policy == OrderPolicy::Unordered;
     let (mut pairs, deleted, inserted) = pair_blocks(deleted, inserted, policy);
-    let (deleted, inserted) = if unordered {
-        pair_blocks_with_leaves(&mut pairs, deleted, inserted)
-    } else {
+    let (deleted, inserted) = if policy == OrderPolicy::Ordered {
         (deleted, inserted)
+    } else {
+        pair_blocks_with_leaves(&mut pairs, deleted, inserted, policy)
     };
     for (left, right) in &pairs {
         diff_matched_segment(left, right, options, edits, fallback_contexts)?;
@@ -568,20 +569,21 @@ fn pair_blocks(
     (pairs, unpaired_deleted, unpaired_inserted)
 }
 
-/// pairs each unpaired block with the first unpaired leaf of the same text on the other side.
+/// pairs each unpaired block with the first unpaired leaf of its header identity on the other side.
 fn pair_blocks_with_leaves(
     pairs: &mut Vec<(Segment, Segment)>,
     deleted: Vec<Segment>,
     inserted: Vec<Segment>,
+    policy: OrderPolicy,
 ) -> (Vec<Segment>, Vec<Segment>) {
     let mut deleted = deleted.into_iter().map(Some).collect::<Vec<_>>();
     let mut inserted = inserted.into_iter().map(Some).collect::<Vec<_>>();
-    let mut deleted_leaves = leaves_by_text(&deleted);
-    let mut inserted_leaves = leaves_by_text(&inserted);
+    let mut deleted_leaves = leaves_by_identity(&deleted, policy);
+    let mut inserted_leaves = leaves_by_identity(&inserted, policy);
 
     for slot in &mut deleted {
         if let Some(block) = slot.take_if(|segment| segment.is_block) {
-            let key = unordered_key(&block.lines[0]);
+            let key = header_identity(&block, policy);
             match take_first(inserted_leaves.get_mut(&key), &mut inserted) {
                 Some(leaf) => pairs.push((block, leaf)),
                 None => *slot = Some(block),
@@ -590,7 +592,7 @@ fn pair_blocks_with_leaves(
     }
     for slot in &mut inserted {
         if let Some(block) = slot.take_if(|segment| segment.is_block) {
-            let key = unordered_key(&block.lines[0]);
+            let key = header_identity(&block, policy);
             match take_first(deleted_leaves.get_mut(&key), &mut deleted) {
                 Some(leaf) => pairs.push((leaf, block)),
                 None => *slot = Some(block),
@@ -604,17 +606,20 @@ fn pair_blocks_with_leaves(
     )
 }
 
-fn leaves_by_text(segments: &[Option<Segment>]) -> HashMap<u64, VecDeque<usize>> {
-    let mut by_text: HashMap<u64, VecDeque<usize>> = HashMap::new();
+fn leaves_by_identity(
+    segments: &[Option<Segment>],
+    policy: OrderPolicy,
+) -> HashMap<u64, VecDeque<usize>> {
+    let mut by_identity: HashMap<u64, VecDeque<usize>> = HashMap::new();
     for (index, segment) in segments.iter().enumerate() {
         if let Some(leaf) = segment.as_ref().filter(|segment| !segment.is_block) {
-            by_text
-                .entry(unordered_key(&leaf.lines[0]))
+            by_identity
+                .entry(header_identity(leaf, policy))
                 .or_default()
                 .push_back(index);
         }
     }
-    by_text
+    by_identity
 }
 
 /// takes the first segment in `queue` that is still unpaired.

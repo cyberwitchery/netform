@@ -508,6 +508,52 @@ fn an_earlier_sibling_is_removed_and_added_on_its_own() {
 }
 
 #[test]
+fn an_only_child_is_removed_and_added_on_its_own() {
+    let rows: &[(&str, Parse, &str, &str, &str)] = &[
+        (
+            "interface",
+            netform_dialects::iosxe::parse,
+            "hostname r1\n!\ninterface Gi0/1\n shutdown\n!\ninterface Gi0/2\n description x\n!\nend\n",
+            "hostname r1\n!\ninterface Gi0/1\n!\ninterface Gi0/2\n description x\n!\nend\n",
+            " shutdown",
+        ),
+        (
+            "nested address-family",
+            netform_dialects::iosxe::parse,
+            "router bgp 1\n neighbor 1.1.1.1 remote-as 2\n address-family ipv4\n  neighbor 1.1.1.1 activate\n exit-address-family\n!\n",
+            "router bgp 1\n neighbor 1.1.1.1 remote-as 2\n address-family ipv4\n exit-address-family\n!\n",
+            "  neighbor 1.1.1.1 activate",
+        ),
+        (
+            "generic",
+            parse_generic,
+            "hostname h\n  foo\n",
+            "hostname h\n",
+            "  foo",
+        ),
+    ];
+    for &(family, parse, with, without, child) in rows {
+        for policy in POLICIES {
+            let options = options_for(policy);
+            for (left, right, kind) in [(with, without, "delete"), (without, with, "insert")] {
+                let diff =
+                    diff_documents(&parse(left), &parse(right), options.clone()).expect("diff");
+                assert_eq!(edited_lines(&diff), [(kind, child)], "{family}, {policy:?}");
+                assert!(
+                    !diff
+                        .findings
+                        .iter()
+                        .any(|finding| finding.code == "diff_unreliable_region"),
+                    "{family}, {policy:?}: {:?}",
+                    diff.findings
+                );
+                check_plan(left, right, parse, &options);
+            }
+        }
+    }
+}
+
+#[test]
 fn a_changed_line_between_reshuffled_same_key_siblings_is_planned() {
     let left = "set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1\n\
                 set routing-options static route 10.0.0.0/8 bfd-liveness-detection minimum-interval 300\n\

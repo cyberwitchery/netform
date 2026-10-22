@@ -55,17 +55,16 @@ fn edits_section(report: &str) -> String {
 #[test]
 fn markdown_report_renders_each_edit_kind() {
     for (left, right, expected) in [
-        // a child added to a block replaces the block
+        // a renamed block replaces the block
         (
             "interface Ethernet1\n",
-            "interface Ethernet1\n  description added\n",
-            "1. Replace 1 line(s) at key 0x# with 2 line(s) at key 0x#\n   - `-` L1: interface Ethernet1\n   - `+` L1: interface Ethernet1\n   - `+` L2:   description added",
+            "interface Ethernet2\n  description added\n",
+            "1. Replace 1 line(s) at key 0x# with 2 line(s) at key 0x#\n   - `-` L1: interface **Ethernet1**\n   - `+` L1: interface **Ethernet2**\n   - `+` L2:   description added",
         ),
-        // a child removed from a block replaces the block
         (
             "interface Ethernet1\n  description removed\n",
-            "interface Ethernet1\n",
-            "1. Replace 2 line(s) at key 0x# with 1 line(s) at key 0x#\n   - `-` L1: interface Ethernet1\n   - `-` L2:   description removed\n   - `+` L1: interface Ethernet1",
+            "interface Ethernet2\n",
+            "1. Replace 2 line(s) at key 0x# with 1 line(s) at key 0x#\n   - `-` L1: interface **Ethernet1**\n   - `-` L2:   description removed\n   - `+` L1: interface **Ethernet2**",
         ),
         (
             "",

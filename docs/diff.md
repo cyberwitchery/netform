@@ -53,7 +53,8 @@ every edit includes both-side anchors where available:
 - `right_anchor { path, span }`
 
 an `Insert` below the top level carries as its `left_anchor` the header of the left-side block its
-lines go into. it has none at the top level, nor when that block exists only on the right.
+lines go into, or the left-side line they become the first children of. it has none at the top
+level, nor when that block exists only on the right.
 
 changed lines also carry path/span references for diagnostics.
 
@@ -77,7 +78,8 @@ to, so `config-diff --plan-json a.cfg b.cfg` plans the changes that turn `a.cfg`
 actions do not shift each other's paths: resolve each one against the left-hand document as it was
 before the first action. `replace_block.target_path` names the left-side node to replace, its
 subtree included. `apply_line_edits_under_context.context_path` names the left-side block whose
-children the line edits change, or `[]` for the top level.
+children the line edits change, a left-side line whose first children they insert, or `[]` for the
+top level.
 
 line edits carry no paths: a delete picks a child of its context by its text. actions come deepest
 first, so everything planned inside a block is applied before its parent's deletes pick among that

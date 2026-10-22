@@ -637,12 +637,7 @@ fn children_moved_to_an_empty_sibling_are_drift_under_every_policy() {
                 let headers_reported = edited_texts(&diff)
                     .iter()
                     .any(|text| text.trim() == "interface Ethernet1");
-                assert_eq!(
-                    headers_reported,
-                    policy != OrderPolicy::Unordered,
-                    "{policy:?}: {:?}",
-                    diff.edits
-                );
+                assert!(!headers_reported, "{policy:?}: {:?}", diff.edits);
             }
         }
     }
