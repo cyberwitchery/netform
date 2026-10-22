@@ -16,7 +16,7 @@ const MAX_NESTING_DEPTH: usize = 128;
 
 #[derive(Debug, Default)]
 struct KeyAllocator {
-    counters: HashMap<(u64, KeyKind, u64), u64>,
+    counters: HashMap<u64, u64>,
 }
 
 impl KeyAllocator {
@@ -27,10 +27,14 @@ impl KeyAllocator {
         trivia: TriviaKind,
         normalized_for_key: &str,
     ) -> (u64, u64) {
+        // a header keys as a line, so a statement keeps its key with or without children.
+        let kind = match kind {
+            KeyKind::BlockHeader => KeyKind::Line,
+            kind => kind,
+        };
         let content_key = derive_content_key(parent_signature, kind, trivia, normalized_for_key);
 
-        let bucket = (parent_signature, kind, content_key);
-        let ordinal = self.counters.entry(bucket).or_insert(0);
+        let ordinal = self.counters.entry(content_key).or_insert(0);
         *ordinal += 1;
 
         let occurrence_key = derive_occurrence_key(content_key, *ordinal);
@@ -179,30 +183,15 @@ fn key_material_for_line(
     normalized: &str,
 ) -> KeyMaterial {
     if trivia == TriviaKind::Content
+        && kind != KeyKind::BlockFooter
         && let Some(hint) = key_hint
     {
-        match kind {
-            KeyKind::BlockHeader => {
-                // keep a stable and explicit namespace prefix for extracted keys.
-                let for_hash = format!("stanza:{hint}");
-                return KeyMaterial {
-                    for_hash,
-                    hint: Some(hint.to_string()),
-                };
-            }
-            KeyKind::Line => {
-                // leaf-line hints (e.g. FortiOS `set:<field>`) stabilise content
-                // keys across value changes.  we intentionally do NOT expose the
-                // hint on ComparisonLine — leaf hints repeat across many sibling
-                // blocks and would flood extracted-key ambiguity findings.
-                let for_hash = format!("subkey:{hint}");
-                return KeyMaterial {
-                    for_hash,
-                    hint: None,
-                };
-            }
-            KeyKind::BlockFooter => {}
-        }
+        // leaf hints (e.g. FortiOS `set:<field>`) repeat across many sibling
+        // blocks and would flood extracted-key ambiguity findings.
+        return KeyMaterial {
+            for_hash: format!("subkey:{hint}"),
+            hint: (kind == KeyKind::BlockHeader).then(|| hint.to_string()),
+        };
     }
 
     KeyMaterial {
@@ -318,12 +307,16 @@ mod tests {
 
     #[test]
     fn duplicate_lines_share_content_key_but_differ_in_occurrence_key() {
-        let doc = parse_generic("permit any\npermit any\n");
-        let view = build_comparison_view(&doc, &default_opts());
+        for input in [
+            "permit any\npermit any\n",
+            "permit any\npermit any\n  log\n",
+        ] {
+            let doc = parse_generic(input);
+            let view = build_comparison_view(&doc, &default_opts());
 
-        assert_eq!(view.lines.len(), 2);
-        assert_eq!(view.lines[0].content_key, view.lines[1].content_key);
-        assert_ne!(view.lines[0].occurrence_key, view.lines[1].occurrence_key);
+            assert_eq!(view.lines[0].content_key, view.lines[1].content_key);
+            assert_ne!(view.lines[0].occurrence_key, view.lines[1].occurrence_key);
+        }
     }
 
     #[test]
