@@ -280,11 +280,19 @@ const POLICIES: [OrderPolicy; 3] = [
 
 #[test]
 fn line_moved_between_blocks_is_planned_under_each_block() {
-    let left = "hostname x\ninterface Ethernet1\n   description srv1\n   mtu 9000\ninterface Ethernet2\n   shutdown\n";
-    let right =
-        "interface Ethernet1\n   mtu 9000\ninterface Ethernet2\n   shutdown\n   description srv1\n";
-    for policy in POLICIES {
-        check_plan(left, right, parse_generic, &options_for(policy));
+    for (left, right) in [
+        (
+            "hostname x\ninterface Ethernet1\n   description srv1\n   mtu 9000\ninterface Ethernet2\n   shutdown\n",
+            "interface Ethernet1\n   mtu 9000\ninterface Ethernet2\n   shutdown\n   description srv1\n",
+        ),
+        (
+            "interface Ethernet2\n   description srv1\nvrf A\n   !\n",
+            "vrf A\n   description srv1\n",
+        ),
+    ] {
+        for policy in POLICIES {
+            check_plan(left, right, parse_generic, &options_for(policy));
+        }
     }
 }
 
@@ -530,6 +538,34 @@ fn an_only_child_is_removed_and_added_on_its_own() {
             "hostname h\n  foo\n",
             "hostname h\n",
             "  foo",
+        ),
+        (
+            "comment-only body",
+            netform_dialects::eos::parse,
+            "vrf instance A\n   !\n   rd 1:1\nhostname x\n",
+            "vrf instance A\n   !\nhostname x\n",
+            "   rd 1:1",
+        ),
+        (
+            "junos comment-only body",
+            netform_dialects::junos::parse,
+            "system {\n    /* note */\n    host-name r1;\n}\n",
+            "system {\n    /* note */\n}\n",
+            "    host-name r1;",
+        ),
+        (
+            "junos comment region",
+            netform_dialects::junos::parse,
+            "system {\n    /* note\n       more */\n    host-name r1;\n}\n",
+            "system {\n    /* note\n       more */\n}\n",
+            "    host-name r1;",
+        ),
+        (
+            "fortios comment-only body",
+            netform_dialects::fortios::parse,
+            "config system global\n    # note\n    set hostname r1\nend\n",
+            "config system global\n    # note\nend\n",
+            "    set hostname r1",
         ),
     ];
     for &(family, parse, with, without, child) in rows {
