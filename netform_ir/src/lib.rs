@@ -554,8 +554,9 @@ impl Dialect for GenericDialect {
 /// parse input into a lossless IR using the given dialect implementation.
 ///
 /// parsing is indentation-based and conservative:
-/// - open a block when next content line is more indented
-/// - close blocks on non-blank dedent
+/// - open a block when the next content or comment line is more indented
+/// - close blocks when a content or comment line dedents
+/// - blank lines and the bodies of literal and comment regions do neither
 /// - preserve all lines even when structure is uncertain
 pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     let mut doc = Document::new(DocumentMetadata {
@@ -574,16 +575,16 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     );
     let mut parent_stack: Vec<(usize, NodeId)> = Vec::new();
 
-    // pre-compute the indent of the next content line for each position in a
+    // pre-compute the indent of the next structural line for each position in a
     // single reverse pass (O(n)), avoiding a per-line forward scan that would be
     // O(n²) on large configs.
-    let mut next_content_indent: Vec<Option<usize>> = vec![None; lines.len()];
+    let mut next_structural_indent: Vec<Option<usize>> = vec![None; lines.len()];
     {
-        let mut last_content_indent: Option<usize> = None;
+        let mut last_structural_indent: Option<usize> = None;
         for i in (0..lines.len()).rev() {
-            next_content_indent[i] = last_content_indent;
-            if lines[i].trivia == TriviaKind::Content {
-                last_content_indent = Some(lines[i].indent);
+            next_structural_indent[i] = last_structural_indent;
+            if lines[i].is_structural() {
+                last_structural_indent = Some(lines[i].indent);
             }
         }
     }
@@ -592,7 +593,7 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     let opens_block: Vec<bool> = (0..lines.len())
         .map(|idx| {
             lines[idx].trivia == TriviaKind::Content
-                && next_content_indent[idx].is_some_and(|next| next > lines[idx].indent)
+                && next_structural_indent[idx].is_some_and(|next| next > lines[idx].indent)
         })
         .collect();
 
@@ -618,7 +619,7 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
 
         // only a structurally meaningful line closes open blocks, and only on a dedent.
         let mut closed_block: Option<NodeId> = None;
-        if !line.in_region && !matches!(line.trivia, TriviaKind::Blank | TriviaKind::Literal) {
+        if line.is_structural() {
             while let Some((parent_indent, parent_id)) = parent_stack.last().copied() {
                 if line.indent <= parent_indent {
                     closed_block = Some(parent_id);
@@ -675,6 +676,11 @@ struct LineCandidate {
 }
 
 impl LineCandidate {
+    /// whether the line's indentation decides block structure.
+    fn is_structural(&self) -> bool {
+        !self.in_region && !matches!(self.trivia, TriviaKind::Blank | TriviaKind::Literal)
+    }
+
     fn into_line_node(self) -> LineNode {
         LineNode {
             raw: self.raw,
