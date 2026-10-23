@@ -79,9 +79,12 @@ pub(crate) fn normalize_for_compare(
 /// join the words of `body` with single spaces, keeping each of `values` as it is.
 fn collapse_whitespace(body: &str, values: &[Range<usize>]) -> String {
     let mut collapsed = String::with_capacity(body.len());
+    let mut values = values.iter().peekable();
     let mut gap = false;
     for (idx, ch) in body.char_indices() {
-        if ch.is_whitespace() && !values.iter().any(|value| value.contains(&idx)) {
+        // `values` are in order, so skip the ones already behind `idx`.
+        while values.next_if(|value| value.end <= idx).is_some() {}
+        if ch.is_whitespace() && !values.peek().is_some_and(|value| value.contains(&idx)) {
             gap = !collapsed.is_empty();
         } else {
             if gap {
@@ -131,6 +134,24 @@ mod tests {
             ("  description uplink", "  description uplink"),
         ] {
             assert_eq!(collapse(input), expected, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn collapse_internal_whitespace_keeps_every_quoted_value() {
+        let opts = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
+        for (input, expected) in [
+            (
+                r#"    set member "a"  "b  c"   "d   e"  f"#,
+                r#"    set member "a" "b  c" "d   e" f"#,
+            ),
+            (r#"set x "a  b""c  d"  y"#, r#"set x "a  b""c  d" y"#),
+            (r#"set x ""  "a  b"  ""  z"#, r#"set x "" "a  b" "" z"#),
+            ("set x \"a\"\t\tb", "set x \"a\" b"),
+            (r#"set x "a  b" "c  d  "#, r#"set x "a  b" "c  d  "#),
+        ] {
+            let collapsed = normalize_for_compare(input, TriviaKind::Content, true, &opts);
+            assert_eq!(collapsed.as_deref(), Some(expected), "{input:?}");
         }
     }
 }
