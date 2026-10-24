@@ -1,6 +1,6 @@
 [package]
 name = "netform_dialects"
-version = "0.10.1"
+version = "0.10.2"
 edition = "2024"
 license = "MIT"
 description = "Registry of network configuration dialects for netform"
@@ -9,4 +9,4 @@ homepage = "https://github.com/cyberwitchery/netform"
 documentation = "https://docs.rs/netform_dialects"
 
 [dependencies]
-netform_ir = { version = "0.10.1", path = "../netform_ir" }
+netform_ir = { version = "0.10.2", path = "../netform_ir" }
