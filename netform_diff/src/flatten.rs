@@ -17,6 +17,7 @@ const MAX_NESTING_DEPTH: usize = 128;
 #[derive(Debug, Default)]
 struct KeyAllocator {
     counters: HashMap<u64, u64>,
+    annotations: &'static [&'static str],
 }
 
 impl KeyAllocator {
@@ -46,7 +47,10 @@ impl KeyAllocator {
 /// build a flattened comparison view from a parsed document.
 pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> ComparisonView {
     let mut out = Vec::new();
-    let mut keys = KeyAllocator::default();
+    let mut keys = KeyAllocator {
+        annotations: annotations(doc),
+        ..KeyAllocator::default()
+    };
     let mut path = Vec::new();
 
     for (idx, root) in doc.roots.iter().copied().enumerate() {
@@ -73,6 +77,7 @@ fn push_comparison_line(
         line.trivia,
         line.key_hint.as_deref(),
         normalized.as_str(),
+        keys.annotations,
     );
     let (content_key, occurrence_key) = keys.next_keys(
         parent_signature,
@@ -184,6 +189,28 @@ fn quotes_delimit_values(doc: &Document) -> bool {
     }
 }
 
+/// leading tokens that flag a statement without changing which statement it is.
+fn annotations(doc: &Document) -> &'static [&'static str] {
+    match &doc.metadata.dialect_hint {
+        DialectHint::Named(name) if name == "junos" => &["inactive:", "protect:"],
+        DialectHint::Named(_) | DialectHint::Generic | DialectHint::Unknown => &[],
+    }
+}
+
+/// `text` with its leading `annotations` removed and its indentation kept.
+fn strip_annotations(text: &str, annotations: &[&str]) -> String {
+    let body = text.trim_start();
+    let mut rest = body;
+    while let Some(after) = annotations
+        .iter()
+        .find_map(|annotation| rest.strip_prefix(annotation))
+        .filter(|after| after.starts_with(char::is_whitespace))
+    {
+        rest = after.trim_start();
+    }
+    [&text[..text.len() - body.len()], rest].concat()
+}
+
 #[derive(Debug)]
 struct KeyMaterial {
     for_hash: String,
@@ -195,6 +222,7 @@ fn key_material_for_line(
     trivia: TriviaKind,
     key_hint: Option<&str>,
     normalized: &str,
+    annotations: &[&str],
 ) -> KeyMaterial {
     if trivia == TriviaKind::Content
         && kind != KeyKind::BlockFooter
@@ -208,8 +236,13 @@ fn key_material_for_line(
         };
     }
 
+    let for_hash = if trivia == TriviaKind::Content {
+        strip_annotations(normalized, annotations)
+    } else {
+        normalized.to_string()
+    };
     KeyMaterial {
-        for_hash: normalized.to_string(),
+        for_hash,
         hint: None,
     }
 }

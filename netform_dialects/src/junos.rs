@@ -130,8 +130,12 @@ fn parse_junos_parts(raw: &str) -> Option<ParsedLineParts> {
 
 fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let parsed = parsed?;
-    let head = parsed.head.as_str();
-    let args = parsed.args.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut tokens = std::iter::once(&parsed.head)
+        .chain(&parsed.args)
+        .map(String::as_str)
+        .skip_while(|token| matches!(*token, "inactive:" | "protect:"));
+    let head = tokens.next()?;
+    let args = tokens.collect::<Vec<_>>();
 
     match head {
         "interfaces" | "protocols" | "routing-instances" | "policy-options" | "firewall"
@@ -587,6 +591,10 @@ mod tests {
             ("groups {", Some("groups")),
             ("system {", Some("system")),
             ("routing-options {", Some("routing-options")),
+            ("inactive: interfaces {", Some("interfaces")),
+            ("protect: system {", Some("system")),
+            ("protect: inactive: protocols {", Some("protocols")),
+            ("inactive: protect: firewall {", Some("firewall")),
             // not a keyed stanza.
             ("event-options {", None),
         ] {
