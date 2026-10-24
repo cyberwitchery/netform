@@ -1,4 +1,4 @@
-//! integration coverage for Junos `set`-style identity keys.
+//! integration coverage for Junos identity keys.
 //!
 //! the value-change cases pin identities that are deliberately kept coarse.
 
@@ -162,6 +162,80 @@ set system root-authentication encrypted-password \"$6$xyz\"
             "set system root-authentication encrypted-password \"$6$abc\"",
             "set system root-authentication encrypted-password \"$6$xyz\"",
             false,
+        ),
+        (
+            "deactivating an interface changes only its header",
+            "\
+interfaces {
+    ge-0/0/0 {
+        description uplink;
+        unit 0 {
+            family inet;
+        }
+    }
+    ge-0/0/1 {
+        description spare;
+    }
+}
+",
+            "\
+interfaces {
+    inactive: ge-0/0/0 {
+        description uplink;
+        unit 0 {
+            family inet;
+        }
+    }
+    ge-0/0/1 {
+        description spare;
+    }
+}
+",
+            "    ge-0/0/0 {",
+            "    inactive: ge-0/0/0 {",
+            true,
+        ),
+        (
+            "deactivating a stanza changes only its header",
+            "\
+interfaces {
+    ge-0/0/0 {
+        description uplink;
+    }
+}
+",
+            "\
+inactive: interfaces {
+    ge-0/0/0 {
+        description uplink;
+    }
+}
+",
+            "interfaces {",
+            "inactive: interfaces {",
+            true,
+        ),
+        (
+            "protecting and deactivating a leaf changes only that leaf",
+            "\
+system {
+    host-name r1;
+    services {
+        ssh;
+    }
+}
+",
+            "\
+system {
+    protect: inactive: host-name r1;
+    services {
+        ssh;
+    }
+}
+",
+            "    host-name r1;",
+            "    protect: inactive: host-name r1;",
+            true,
         ),
     ];
     for &(why, before, after, old, new, no_findings) in cases {
