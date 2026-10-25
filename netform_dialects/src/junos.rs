@@ -60,6 +60,10 @@ impl Dialect for JunosDialect {
         matches!(raw.trim(), "}" | "};")
     }
 
+    fn empty_block(&self, opener: &str, _terminator: &str) -> bool {
+        opener.trim_end().ends_with('{')
+    }
+
     fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
         literal_region(raw)
     }

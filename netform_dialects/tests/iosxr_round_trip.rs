@@ -253,6 +253,40 @@ end-group
 }
 
 #[test]
+fn an_empty_block_keeps_its_terminator_as_footer() {
+    let cfg = "\
+route-policy EMPTY
+end-policy
+rd-set EMPTY
+end-set
+class-map match-any EMPTY
+end-class-map
+policy-map EMPTY
+end-policy-map
+group EMPTY
+end-group
+";
+    let doc = parse(cfg);
+
+    assert_eq!(doc.render(), cfg);
+    for (header, footer) in [
+        ("route-policy EMPTY", "end-policy"),
+        ("rd-set EMPTY", "end-set"),
+        ("class-map match-any EMPTY", "end-class-map"),
+        ("policy-map EMPTY", "end-policy-map"),
+        ("group EMPTY", "end-group"),
+    ] {
+        let block = root_block(&doc, header);
+        assert!(block.children.is_empty(), "{header}");
+        assert_eq!(
+            block.footer.as_ref().map(|f| f.raw.as_str()),
+            Some(footer),
+            "{header}"
+        );
+    }
+}
+
+#[test]
 fn an_indented_terminator_stays_a_child_line() {
     let cfg = "\
 class-map match-any VOICE

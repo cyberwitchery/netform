@@ -567,6 +567,34 @@ fn an_only_child_is_removed_and_added_on_its_own() {
             "config system global\n    # note\nend\n",
             "    set hostname r1",
         ),
+        (
+            "junos empty block",
+            netform_dialects::junos::parse,
+            "interfaces {\n    ge-0/0/0 {\n        disable;\n    }\n}\n",
+            "interfaces {\n    ge-0/0/0 {\n    }\n}\n",
+            "        disable;",
+        ),
+        (
+            "fortios empty config",
+            netform_dialects::fortios::parse,
+            "config system global\n    set hostname r1\nend\n",
+            "config system global\nend\n",
+            "    set hostname r1",
+        ),
+        (
+            "fortios empty edit",
+            netform_dialects::fortios::parse,
+            "config firewall address\n    edit \"a\"\n        set subnet 10.0.0.0 255.0.0.0\n    next\nend\n",
+            "config firewall address\n    edit \"a\"\n    next\nend\n",
+            "        set subnet 10.0.0.0 255.0.0.0",
+        ),
+        (
+            "iosxr empty set",
+            netform_dialects::iosxr::parse,
+            "rd-set RS\n  65000:1\nend-set\n!\n",
+            "rd-set RS\nend-set\n!\n",
+            "  65000:1",
+        ),
     ];
     for &(family, parse, with, without, child) in rows {
         for policy in POLICIES {

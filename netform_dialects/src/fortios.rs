@@ -61,6 +61,13 @@ impl Dialect for FortiosDialect {
         matches!(raw.trim(), "end" | "next")
     }
 
+    fn empty_block(&self, opener: &str, terminator: &str) -> bool {
+        matches!(
+            (opener.split_whitespace().next(), terminator.trim()),
+            (Some("config"), "end") | (Some("edit"), "next")
+        )
+    }
+
     fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
         literal_region(raw)
     }
