@@ -236,6 +236,17 @@ pub trait Dialect {
         false
     }
 
+    /// report whether `opener` opens a block that `terminator`, the next content
+    /// or comment line after it and at its indent, closes.
+    ///
+    /// only asked when `terminator` is a [`Dialect::block_terminator`] line.
+    /// returning `true` parses the pair as an empty [`BlockNode`] with
+    /// `terminator` as its footer, as Junos `ge-0/0/0 {` and `}` or FortiOS
+    /// `edit 1` and `next`; the default `false` keeps them two sibling lines.
+    fn empty_block(&self, _opener: &str, _terminator: &str) -> bool {
+        false
+    }
+
     /// report whether a raw line opens a multi-line literal region, and what
     /// closes it.
     ///
@@ -371,6 +382,7 @@ pub struct IosLikeDialect {
     name: &'static str,
     key_hint: fn(Option<&ParsedLineParts>) -> Option<String>,
     block_terminator: Option<fn(&str) -> bool>,
+    empty_block: Option<fn(&str, &str) -> bool>,
 }
 
 impl IosLikeDialect {
@@ -381,8 +393,10 @@ impl IosLikeDialect {
     /// `None`); each IOS-family dialect crate passes its own so interface-type
     /// normalization and dialect-specific constructs stay local to that crate.
     ///
-    /// the dialect reports no [`Dialect::block_terminator`]; add one with
-    /// [`IosLikeDialect::with_block_terminator`].
+    /// the dialect reports no [`Dialect::block_terminator`] and no
+    /// [`Dialect::empty_block`]; add them with
+    /// [`IosLikeDialect::with_block_terminator`] and
+    /// [`IosLikeDialect::with_empty_block`].
     pub const fn new(
         name: &'static str,
         key_hint: fn(Option<&ParsedLineParts>) -> Option<String>,
@@ -391,6 +405,7 @@ impl IosLikeDialect {
             name,
             key_hint,
             block_terminator: None,
+            empty_block: None,
         }
     }
 
@@ -411,6 +426,29 @@ impl IosLikeDialect {
             name: self.name,
             key_hint: self.key_hint,
             block_terminator: Some(is_terminator),
+            empty_block: self.empty_block,
+        }
+    }
+
+    /// return this dialect with `is_empty_block` answering
+    /// [`Dialect::empty_block`].
+    ///
+    /// ```rust
+    /// use netform_ir::{IosLikeDialect, common_key_hint, parse_with_dialect, Node};
+    ///
+    /// let dialect = IosLikeDialect::new("xr", common_key_hint)
+    ///     .with_block_terminator(|raw| raw.trim() == "end-set")
+    ///     .with_empty_block(|opener, _| opener.starts_with("rd-set "));
+    /// let doc = parse_with_dialect("rd-set EMPTY\nend-set\n", &dialect);
+    /// let Node::Block(block) = doc.node(doc.roots[0]).unwrap() else { unreachable!() };
+    /// assert_eq!(block.footer.as_ref().unwrap().raw, "end-set");
+    /// ```
+    pub const fn with_empty_block(self, is_empty_block: fn(&str, &str) -> bool) -> Self {
+        Self {
+            name: self.name,
+            key_hint: self.key_hint,
+            block_terminator: self.block_terminator,
+            empty_block: Some(is_empty_block),
         }
     }
 }
@@ -443,6 +481,13 @@ impl Dialect for IosLikeDialect {
     fn block_terminator(&self, raw: &str) -> bool {
         match self.block_terminator {
             Some(is_terminator) => is_terminator(raw),
+            None => false,
+        }
+    }
+
+    fn empty_block(&self, opener: &str, terminator: &str) -> bool {
+        match self.empty_block {
+            Some(is_empty_block) => is_empty_block(opener, terminator),
             None => false,
         }
     }
@@ -555,6 +600,8 @@ impl Dialect for GenericDialect {
 ///
 /// parsing is indentation-based and conservative:
 /// - open a block when the next content or comment line is more indented
+/// - open an empty block when the next one is a terminator at the same indent
+///   that [`Dialect::empty_block`] pairs with the line
 /// - close blocks when a content or comment line dedents
 /// - blank lines and the bodies of literal and comment regions do neither
 /// - preserve all lines even when structure is uncertain
@@ -575,16 +622,16 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     );
     let mut parent_stack: Vec<(usize, NodeId)> = Vec::new();
 
-    // pre-compute the indent of the next structural line for each position in a
+    // pre-compute the index of the next structural line for each position in a
     // single reverse pass (O(n)), avoiding a per-line forward scan that would be
     // O(n²) on large configs.
-    let mut next_structural_indent: Vec<Option<usize>> = vec![None; lines.len()];
+    let mut next_structural: Vec<Option<usize>> = vec![None; lines.len()];
     {
-        let mut last_structural_indent: Option<usize> = None;
+        let mut last_structural: Option<usize> = None;
         for i in (0..lines.len()).rev() {
-            next_structural_indent[i] = last_structural_indent;
+            next_structural[i] = last_structural;
             if lines[i].is_structural() {
-                last_structural_indent = Some(lines[i].indent);
+                last_structural = Some(i);
             }
         }
     }
@@ -592,8 +639,16 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     // pre-compute block-opening decisions using the O(n) lookup table.
     let opens_block: Vec<bool> = (0..lines.len())
         .map(|idx| {
-            lines[idx].trivia == TriviaKind::Content
-                && next_structural_indent[idx].is_some_and(|next| next > lines[idx].indent)
+            let line = &lines[idx];
+            line.trivia == TriviaKind::Content
+                && next_structural[idx].is_some_and(|next| {
+                    let next = &lines[next];
+                    next.indent > line.indent
+                        || (next.indent == line.indent
+                            && next.trivia == TriviaKind::Content
+                            && dialect.block_terminator(&next.raw)
+                            && dialect.empty_block(&line.raw, &next.raw))
+                })
         })
         .collect();
 

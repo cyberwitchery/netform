@@ -61,6 +61,13 @@ impl Dialect for FortiosDialect {
         matches!(raw.trim(), "end" | "next")
     }
 
+    fn empty_block(&self, opener: &str, terminator: &str) -> bool {
+        matches!(
+            (opener.split_whitespace().next(), terminator.trim()),
+            (Some("config"), "end") | (Some("edit"), "next")
+        )
+    }
+
     fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
         literal_region(raw)
     }
@@ -326,6 +333,34 @@ end
             edit.footer.as_ref().map(|f| f.raw.as_str()),
             Some("    next"),
         );
+    }
+
+    #[test]
+    fn config_pairs_only_with_end_and_edit_only_with_next() {
+        use netform_ir::Node;
+
+        let rows: [(&str, &[&str]); 2] = [
+            (
+                "config firewall address\n    edit \"a\"\n        config sub\n        next\n    next\nend\n",
+                &["config firewall address", "edit \"a\""],
+            ),
+            (
+                "config firewall address\n    edit \"a\"\n    end\n",
+                &["config firewall address"],
+            ),
+        ];
+        for (cfg, expected) in rows {
+            let doc = parse(cfg);
+            let blocks: Vec<&str> = doc
+                .arena
+                .iter()
+                .filter_map(|node| match node {
+                    Node::Block(block) => Some(block.header.raw.trim()),
+                    Node::Line(_) => None,
+                })
+                .collect();
+            assert_eq!(blocks, expected, "{cfg:?}");
+        }
     }
 
     #[test]

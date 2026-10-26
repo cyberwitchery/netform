@@ -84,8 +84,9 @@ pub const RULES: IosRules = IosRules {
 
 /// the IOS XR dialect profile, including its delimiter-terminated policy and
 /// set blocks.
-pub const DIALECT: IosLikeDialect =
-    IosLikeDialect::new("iosxr", key_hint).with_block_terminator(is_block_terminator);
+pub const DIALECT: IosLikeDialect = IosLikeDialect::new("iosxr", key_hint)
+    .with_block_terminator(is_block_terminator)
+    .with_empty_block(is_empty_block);
 
 /// report whether `raw` closes an IOS XR block.
 ///
@@ -95,6 +96,21 @@ fn is_block_terminator(raw: &str) -> bool {
         raw.trim(),
         "end-policy" | "end-set" | "end-class-map" | "end-policy-map" | "end-group"
     )
+}
+
+/// report whether `opener` heads the kind of block that `terminator` closes.
+fn is_empty_block(opener: &str, terminator: &str) -> bool {
+    let Some(head) = opener.split_whitespace().next() else {
+        return false;
+    };
+    match terminator.trim() {
+        "end-policy" => head == "route-policy",
+        "end-set" => head.ends_with("-set") && head != "end-set",
+        "end-class-map" => head == "class-map",
+        "end-policy-map" => head == "policy-map",
+        "end-group" => head == "group",
+        _ => false,
+    }
 }
 
 /// derive a stable identity key for an IOS XR configuration line.
