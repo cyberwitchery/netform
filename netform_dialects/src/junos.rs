@@ -1009,6 +1009,36 @@ mod tests {
     }
 
     #[test]
+    fn only_an_opener_directly_above_its_closer_is_an_empty_block() {
+        use netform_ir::Node;
+
+        let rows: [(&str, &[&str]); 4] = [
+            (
+                "interfaces {\n    ge-0/0/0 { \n    }\n}\n",
+                &["interfaces {", "ge-0/0/0 {"],
+            ),
+            ("interfaces {\n    ge-0/0/0 {\n}\n", &["interfaces {"]),
+            ("ge-0/0/0 {\nunit 0;\n}\n", &[]),
+            (
+                "interfaces {\n    ge-0/0/0 {\n    disable;\n    }\n}\n",
+                &["interfaces {"],
+            ),
+        ];
+        for (cfg, expected) in rows {
+            let doc = parse(cfg);
+            let blocks: Vec<&str> = doc
+                .arena
+                .iter()
+                .filter_map(|node| match node {
+                    Node::Block(block) => Some(block.header.raw.trim()),
+                    Node::Line(_) => None,
+                })
+                .collect();
+            assert_eq!(blocks, expected, "{cfg:?}");
+        }
+    }
+
+    #[test]
     fn closing_braces_attach_as_block_footers() {
         use netform_ir::Node;
 

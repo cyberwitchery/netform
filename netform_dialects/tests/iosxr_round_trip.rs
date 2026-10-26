@@ -287,6 +287,32 @@ end-group
 }
 
 #[test]
+fn an_empty_block_needs_the_opener_its_terminator_closes() {
+    let rows: [(&str, &[&str]); 5] = [
+        ("rd-set R\n  1:1\nend-set\nend-set\n", &["rd-set R"]),
+        ("prefix-set P\n10.0.0.0/8\nend-set\n", &[]),
+        ("route-policy RP\npass\nend-policy\n", &[]),
+        (
+            "policy-map PM\n class class-default\n end-policy-map\n",
+            &["policy-map PM"],
+        ),
+        ("group G\nrouter bgp 1\nend-group\n", &[]),
+    ];
+    for (cfg, expected) in rows {
+        let doc = parse(cfg);
+        let blocks: Vec<&str> = doc
+            .arena
+            .iter()
+            .filter_map(|node| match node {
+                netform_ir::Node::Block(block) => Some(block.header.raw.as_str()),
+                netform_ir::Node::Line(_) => None,
+            })
+            .collect();
+        assert_eq!(blocks, expected, "{cfg:?}");
+    }
+}
+
+#[test]
 fn an_indented_terminator_stays_a_child_line() {
     let cfg = "\
 class-map match-any VOICE

@@ -336,6 +336,34 @@ end
     }
 
     #[test]
+    fn config_pairs_only_with_end_and_edit_only_with_next() {
+        use netform_ir::Node;
+
+        let rows: [(&str, &[&str]); 2] = [
+            (
+                "config firewall address\n    edit \"a\"\n        config sub\n        next\n    next\nend\n",
+                &["config firewall address", "edit \"a\""],
+            ),
+            (
+                "config firewall address\n    edit \"a\"\n    end\n",
+                &["config firewall address"],
+            ),
+        ];
+        for (cfg, expected) in rows {
+            let doc = parse(cfg);
+            let blocks: Vec<&str> = doc
+                .arena
+                .iter()
+                .filter_map(|node| match node {
+                    Node::Block(block) => Some(block.header.raw.trim()),
+                    Node::Line(_) => None,
+                })
+                .collect();
+            assert_eq!(blocks, expected, "{cfg:?}");
+        }
+    }
+
+    #[test]
     fn literal_region_opens_on_an_unclosed_quoted_value() {
         assert_eq!(
             literal_region("        set private-key \"-----BEGIN KEY-----"),
