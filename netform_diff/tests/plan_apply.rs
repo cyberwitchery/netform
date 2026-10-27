@@ -336,6 +336,31 @@ fn edited_route_policy_else_branch_is_planned_before_its_twin_is_deleted() {
 }
 
 #[test]
+fn vdom_tables_are_planned_under_their_vdom() {
+    let parse = netform_dialects::fortios::parse;
+    let left = "config vdom\nedit root\nconfig firewall address\n    edit \"web\"\n        set subnet 10.0.0.10 255.255.255.255\n    next\nend\nnext\nedit dmz\nconfig firewall address\n    edit \"db\"\n        set subnet 10.1.0.20 255.255.255.255\n    next\nend\nnext\nend\n";
+    let right = "config vdom\nedit root\nnext\nedit dmz\nconfig firewall address\n    edit \"db\"\n        set subnet 10.1.0.21 255.255.255.255\n    next\nend\nnext\nend\n";
+    for policy in POLICIES {
+        check_plan(left, right, parse, &options_for(policy));
+    }
+    let diff = diff_documents(
+        &parse(left),
+        &parse(right),
+        options_for(OrderPolicy::Ordered),
+    )
+    .expect("diff");
+    let contexts: Vec<Vec<usize>> = build_plan(&diff)
+        .actions
+        .iter()
+        .map(|action| match action {
+            PlanAction::ApplyLineEditsUnderContext { context_path, .. } => context_path.0.clone(),
+            PlanAction::ReplaceBlock { target_path, .. } => target_path.0.clone(),
+        })
+        .collect();
+    assert_eq!(contexts, [vec![0, 1, 0, 0], vec![0, 0]]);
+}
+
+#[test]
 fn replaces_with_the_same_new_text_apply_to_their_own_lines() {
     let left =
         "interface Ethernet1\n  description x\ninterface Ethernet2\n  description x\n  mtu 1500\n";
