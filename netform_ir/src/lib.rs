@@ -745,6 +745,9 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     doc
 }
 
+/// keyword nesting deeper than this is malformed, and its openers are placed by indentation.
+const MAX_KEYWORD_DEPTH: usize = 64;
+
 /// map each [`Dialect::block_opener`] line to the terminator that matches it,
 /// and that terminator back to it, in one stack pass.
 fn match_block_openers<D: Dialect>(lines: &[LineCandidate], dialect: &D) -> Vec<Option<usize>> {
@@ -766,6 +769,9 @@ fn match_block_openers<D: Dialect>(lines: &[LineCandidate], dialect: &D) -> Vec<
                 _ => open.clear(),
             }
         } else if dialect.block_opener(&line.raw) {
+            if open.len() == MAX_KEYWORD_DEPTH {
+                open.clear();
+            }
             open.push(idx);
         }
     }

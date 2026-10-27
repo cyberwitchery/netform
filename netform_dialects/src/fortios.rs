@@ -433,6 +433,26 @@ end
     }
 
     #[test]
+    fn keyword_nesting_stops_at_the_depth_limit() {
+        fn depth(doc: &Document, ids: &[netform_ir::NodeId]) -> usize {
+            use netform_ir::Node;
+
+            ids.iter()
+                .map(|id| match doc.node(*id).expect("node in arena") {
+                    Node::Line(_) => 0,
+                    Node::Block(block) => 1 + depth(doc, &block.children),
+                })
+                .max()
+                .unwrap_or(0)
+        }
+        let nested = |levels: usize| "config system a\n".repeat(levels) + &"end\n".repeat(levels);
+        let doc = parse(&nested(64));
+        assert_eq!(depth(&doc, &doc.roots), 64);
+        let doc = parse(&nested(65));
+        assert!(depth(&doc, &doc.roots) < 65);
+    }
+
+    #[test]
     fn literal_region_opens_on_an_unclosed_quoted_value() {
         assert_eq!(
             literal_region("        set private-key \"-----BEGIN KEY-----"),
