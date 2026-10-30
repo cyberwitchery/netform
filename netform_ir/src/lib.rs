@@ -243,7 +243,21 @@ pub trait Dialect {
     /// returning `true` parses the pair as an empty [`BlockNode`] with
     /// `terminator` as its footer, as Junos `ge-0/0/0 {` and `}` or FortiOS
     /// `edit 1` and `next`; the default `false` keeps them two sibling lines.
+    /// it also matches a [`Dialect::block_opener`] line with a later terminator.
     fn empty_block(&self, _opener: &str, _terminator: &str) -> bool {
+        false
+    }
+
+    /// report whether a raw line opens a block that only its matching
+    /// terminator closes, however the lines between them are indented.
+    ///
+    /// such openers and [`Dialect::block_terminator`] lines nest like brackets:
+    /// a terminator matches the innermost opener still open when they share an
+    /// indent and [`Dialect::empty_block`] pairs them, as FortiOS `config vdom`
+    /// and `end` around unindented `edit` entries.  any other terminator leaves
+    /// every opener still open unmatched, and unmatched lines nest by
+    /// indentation.  the default `false` leaves all nesting to indentation.
+    fn block_opener(&self, _raw: &str) -> bool {
         false
     }
 
@@ -604,6 +618,8 @@ impl Dialect for GenericDialect {
 ///   that [`Dialect::empty_block`] pairs with the line
 /// - close blocks when a content or comment line dedents
 /// - blank lines and the bodies of literal and comment regions do neither
+/// - a [`Dialect::block_opener`] line with a matching terminator opens a block
+///   that only that terminator closes
 /// - preserve all lines even when structure is uncertain
 pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     let mut doc = Document::new(DocumentMetadata {
@@ -620,7 +636,9 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
         &mut doc.metadata.line_count,
         &mut doc.metadata.parse_findings,
     );
-    let mut parent_stack: Vec<(usize, NodeId)> = Vec::new();
+    // (indent, block, closed only by its matching terminator)
+    let mut parent_stack: Vec<(usize, NodeId, bool)> = Vec::new();
+    let partner = match_block_openers(&lines, dialect);
 
     // pre-compute the index of the next structural line for each position in a
     // single reverse pass (O(n)), avoiding a per-line forward scan that would be
@@ -639,6 +657,9 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     // pre-compute block-opening decisions using the O(n) lookup table.
     let opens_block: Vec<bool> = (0..lines.len())
         .map(|idx| {
+            if let Some(partner) = partner[idx] {
+                return partner > idx;
+            }
             let line = &lines[idx];
             line.trivia == TriviaKind::Content
                 && next_structural[idx].is_some_and(|next| {
@@ -672,11 +693,18 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
             });
         }
 
-        // only a structurally meaningful line closes open blocks, and only on a dedent.
+        // a matched terminator closes its opener's block; other structural lines close on a dedent.
         let mut closed_block: Option<NodeId> = None;
-        if line.is_structural() {
-            while let Some((parent_indent, parent_id)) = parent_stack.last().copied() {
-                if line.indent <= parent_indent {
+        if partner[idx].is_some_and(|opener| opener < idx) {
+            while let Some((_, parent_id, matched)) = parent_stack.pop() {
+                closed_block = Some(parent_id);
+                if matched {
+                    break;
+                }
+            }
+        } else if line.is_structural() {
+            while let Some((parent_indent, parent_id, matched)) = parent_stack.last().copied() {
+                if !matched && line.indent <= parent_indent {
                     closed_block = Some(parent_id);
                     parent_stack.pop();
                 } else {
@@ -707,7 +735,7 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
             });
             let id = doc.insert_node(block);
             attach_node(&mut doc, &parent_stack, id);
-            parent_stack.push((indent, id));
+            parent_stack.push((indent, id, partner[idx].is_some()));
         } else {
             let id = doc.insert_node(Node::Line(line.into_line_node()));
             attach_node(&mut doc, &parent_stack, id);
@@ -715,6 +743,39 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     }
 
     doc
+}
+
+/// keyword nesting deeper than this is malformed, and its openers are placed by indentation.
+const MAX_KEYWORD_DEPTH: usize = 64;
+
+/// map each [`Dialect::block_opener`] line to the terminator that matches it,
+/// and that terminator back to it, in one stack pass.
+fn match_block_openers<D: Dialect>(lines: &[LineCandidate], dialect: &D) -> Vec<Option<usize>> {
+    let mut partner = vec![None; lines.len()];
+    let mut open: Vec<usize> = Vec::new();
+    for (idx, line) in lines.iter().enumerate() {
+        if line.trivia != TriviaKind::Content {
+            continue;
+        }
+        if dialect.block_terminator(&line.raw) {
+            match open.pop() {
+                Some(opener)
+                    if lines[opener].indent == line.indent
+                        && dialect.empty_block(&lines[opener].raw, &line.raw) =>
+                {
+                    partner[opener] = Some(idx);
+                    partner[idx] = Some(opener);
+                }
+                _ => open.clear(),
+            }
+        } else if dialect.block_opener(&line.raw) {
+            if open.len() == MAX_KEYWORD_DEPTH {
+                open.clear();
+            }
+            open.push(idx);
+        }
+    }
+    partner
 }
 
 #[derive(Debug)]
@@ -903,8 +964,8 @@ fn mark_regions<D: Dialect>(
     regions
 }
 
-fn attach_node(doc: &mut Document, parent_stack: &[(usize, NodeId)], id: NodeId) {
-    if let Some((_, parent_id)) = parent_stack.last() {
+fn attach_node(doc: &mut Document, parent_stack: &[(usize, NodeId, bool)], id: NodeId) {
+    if let Some((_, parent_id, _)) = parent_stack.last() {
         if !doc.add_child(*parent_id, id) {
             // if a parent cannot accept children for any reason, keep data by falling back to root.
             doc.roots.push(id);

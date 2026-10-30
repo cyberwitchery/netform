@@ -68,6 +68,10 @@ impl Dialect for FortiosDialect {
         )
     }
 
+    fn block_opener(&self, raw: &str) -> bool {
+        matches!(raw.split_whitespace().next(), Some("config" | "edit"))
+    }
+
     fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
         literal_region(raw)
     }
@@ -361,6 +365,91 @@ end
                 .collect();
             assert_eq!(blocks, expected, "{cfg:?}");
         }
+    }
+
+    /// each node's trimmed text, with a block's children in parentheses before its footer.
+    fn outline(doc: &Document, ids: &[netform_ir::NodeId]) -> String {
+        use netform_ir::Node;
+
+        ids.iter()
+            .map(|id| match doc.node(*id).expect("node in arena") {
+                Node::Line(line) => line.raw.trim().to_string(),
+                Node::Block(block) => {
+                    let footer = block.footer.as_ref().map_or("", |footer| footer.raw.trim());
+                    let children = outline(doc, &block.children);
+                    format!("{} ({children}) {footer}", block.header.raw.trim())
+                        .trim_end()
+                        .to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
+    #[test]
+    fn config_and_edit_nest_to_their_own_end_and_next() {
+        let rows = [
+            (
+                "two vdoms",
+                "config vdom\nedit root\nconfig firewall address\n    edit \"web\"\n        set subnet 10.0.0.10 255.255.255.255\n    next\nend\nnext\nedit dmz\nset x 1\nnext\nend\n",
+                "config vdom (edit root (config firewall address (edit \"web\" (set subnet 10.0.0.10 255.255.255.255) next) end) next | edit dmz (set x 1) next) end",
+            ),
+            (
+                "config global",
+                "config global\n# note\nconfig system global\n    set hostname \"fw\"\nend\nconfig system interface\n    edit \"port1\"\n    next\nend\nend\n",
+                "config global (# note | config system global (set hostname \"fw\") end | config system interface (edit \"port1\" () next) end) end",
+            ),
+            (
+                "quoted value holding end and next",
+                "config vdom\nedit root\n    set buffer \"a\nend\nnext\nb\"\nnext\nend\n",
+                "config vdom (edit root (set buffer \"a | end | next | b\") next) end",
+            ),
+            (
+                "indented lines under a set and after a next",
+                "config vdom\nedit root\nset a\n    set b\nnext\n    # note\nend\n",
+                "config vdom (edit root (set a (set b)) next | # note) end",
+            ),
+            (
+                "unclosed wrapper",
+                "config vdom\nedit root\nconfig system settings\n    set opmode nat\nend\nnext\n",
+                "config vdom | edit root (config system settings (set opmode nat) end) next",
+            ),
+            (
+                "terminator of another opener",
+                "config vdom\nedit root\nend\nend\n",
+                "config vdom | edit root | end | end",
+            ),
+            (
+                "terminator at another indent",
+                "config vdom\n  edit root\nnext\nend\n",
+                "config vdom (edit root) next | end",
+            ),
+        ];
+        for (case, cfg, expected) in rows {
+            let doc = parse(cfg);
+            assert_eq!(doc.render(), cfg, "{case}");
+            assert_eq!(outline(&doc, &doc.roots), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn keyword_nesting_stops_at_the_depth_limit() {
+        fn depth(doc: &Document, ids: &[netform_ir::NodeId]) -> usize {
+            use netform_ir::Node;
+
+            ids.iter()
+                .map(|id| match doc.node(*id).expect("node in arena") {
+                    Node::Line(_) => 0,
+                    Node::Block(block) => 1 + depth(doc, &block.children),
+                })
+                .max()
+                .unwrap_or(0)
+        }
+        let nested = |levels: usize| "config system a\n".repeat(levels) + &"end\n".repeat(levels);
+        let doc = parse(&nested(64));
+        assert_eq!(depth(&doc, &doc.roots), 64);
+        let doc = parse(&nested(65));
+        assert!(depth(&doc, &doc.roots) < 65);
     }
 
     #[test]
