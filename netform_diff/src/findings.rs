@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use netform_ir::{Document, Node, NodeId, Path};
+use netform_ir::{Document, Node, Path};
 
 use crate::flatten::{content_counts, extracted_key_counts};
 use crate::model::{ComparisonView, Finding, FindingLevel, finding_code};
@@ -168,25 +168,18 @@ fn collect_parse_findings(
 
 fn collect_unknown_block_findings(doc: &Document, side: &str, out: &mut Vec<Finding>) {
     let mut path = Vec::new();
-    for (idx, root) in doc.roots.iter().copied().enumerate() {
-        path.clear();
+    let mut stack = vec![doc.roots.iter().enumerate()];
+    while let Some(siblings) = stack.last_mut() {
+        let Some((idx, &node_id)) = siblings.next() else {
+            stack.pop();
+            path.pop();
+            continue;
+        };
         path.push(idx);
-        walk_findings(doc, root, &mut path, side, out);
-    }
-}
-
-fn walk_findings(
-    doc: &Document,
-    node_id: NodeId,
-    path: &mut Vec<usize>,
-    side: &str,
-    out: &mut Vec<Finding>,
-) {
-    let Some(node) = doc.node(node_id) else {
-        return;
-    };
-
-    if let Node::Block(block) = node {
+        let Some(Node::Block(block)) = doc.node(node_id) else {
+            path.pop();
+            continue;
+        };
         if block.kind_label.as_deref() == Some("unknown") {
             out.push(Finding {
                 code: finding_code::UNKNOWN_UNPARSED_CONSTRUCT.to_string(),
@@ -196,12 +189,7 @@ fn walk_findings(
                 span: Some(block.header.span.clone()),
             });
         }
-
-        for (child_idx, child_id) in block.children.iter().copied().enumerate() {
-            path.push(child_idx);
-            walk_findings(doc, child_id, path, side, out);
-            path.pop();
-        }
+        stack.push(block.children.iter().enumerate());
     }
 }
 
@@ -492,6 +480,48 @@ mod tests {
         );
         assert!(out[0].message.contains("right"));
         assert!(out[0].message.contains("unknown block"));
+    }
+
+    #[test]
+    fn unknown_block_findings_reach_any_depth() {
+        let line = |raw: &str| LineNode {
+            raw: raw.to_string(),
+            line_ending: "\n".to_string(),
+            span: Span {
+                line: 1,
+                start_byte: 0,
+                end_byte: 0,
+            },
+            parsed: None,
+            key_hint: None,
+            trivia: TriviaKind::Content,
+        };
+        let block = |children, kind_label: Option<&str>| {
+            Node::Block(BlockNode {
+                header: line("block"),
+                children,
+                footer: None,
+                kind_label: kind_label.map(str::to_string),
+            })
+        };
+        let mut doc = Document::default();
+        doc.insert_root(Node::Line(line("before")));
+        let mut chain = doc.insert_node(Node::Line(line("leaf")));
+        chain = doc.insert_node(block(vec![chain], Some("unknown")));
+        for _ in 1..100_000 {
+            chain = doc.insert_node(block(vec![chain], None));
+        }
+        doc.roots.push(chain);
+        let leaf = doc.insert_node(Node::Line(line("leaf")));
+        doc.insert_root(block(vec![leaf], Some("unknown")));
+        let mut out = Vec::new();
+
+        collect_unknown_block_findings(&doc, "left", &mut out);
+
+        let mut deep = vec![0; 100_000];
+        deep[0] = 1;
+        let paths = out.into_iter().map(|f| f.path).collect::<Vec<_>>();
+        assert_eq!(paths, vec![Some(Path(deep)), Some(Path(vec![2]))]);
     }
 
     #[test]
