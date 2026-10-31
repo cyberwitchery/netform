@@ -712,6 +712,40 @@ fn an_unchanged_sibling_stays_paired_whichever_file_comes_first() {
                 ("replace", " description y"),
             ],
         ),
+        (
+            "a block whose children only moved does not outweigh an unchanged one",
+            netform_dialects::iosxe::parse,
+            "interface Gi1\n description one\n mtu 1500\n no shutdown\ninterface Gi2\n description two\n mtu 9000\n",
+            "interface Gi2\n description two\n mtu 9000\ninterface Gi1\n no shutdown\n mtu 1500\n description one\n",
+            &[
+                ("delete", "interface Gi1"),
+                ("delete", " description one"),
+                ("delete", " mtu 1500"),
+                ("delete", " no shutdown"),
+                ("insert", "interface Gi1"),
+                ("insert", " no shutdown"),
+                ("insert", " mtu 1500"),
+                ("insert", " description one"),
+            ],
+        ),
+        (
+            "a block whose children only moved does not outweigh an unchanged one",
+            netform_dialects::junos::parse,
+            "interfaces {\n    ge-0/0/1 {\n        description one;\n        mtu 1500;\n        vlan-tagging;\n    }\n    ge-0/0/2 {\n        description two;\n        mtu 9000;\n    }\n}\n",
+            "interfaces {\n    ge-0/0/2 {\n        description two;\n        mtu 9000;\n    }\n    ge-0/0/1 {\n        vlan-tagging;\n        mtu 1500;\n        description one;\n    }\n}\n",
+            &[
+                ("delete", "    ge-0/0/1 {"),
+                ("delete", "        description one;"),
+                ("delete", "        mtu 1500;"),
+                ("delete", "        vlan-tagging;"),
+                ("delete", "    }"),
+                ("insert", "    ge-0/0/1 {"),
+                ("insert", "        vlan-tagging;"),
+                ("insert", "        mtu 1500;"),
+                ("insert", "        description one;"),
+                ("insert", "    }"),
+            ],
+        ),
     ];
     let options = options_for(OrderPolicy::Ordered);
     for &(case, parse, left, right, edits) in rows {
