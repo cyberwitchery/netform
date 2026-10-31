@@ -658,6 +658,81 @@ fn a_changed_line_between_reshuffled_same_key_siblings_is_planned() {
 }
 
 #[test]
+fn an_unchanged_sibling_stays_paired_whichever_file_comes_first() {
+    type Edits = &'static [(&'static str, &'static str)];
+    let rows: &[(&str, Parse, &str, &str, Edits)] = &[
+        (
+            "route beside ntp",
+            netform_dialects::iosxe::parse,
+            "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name X\nntp server 192.0.2.1\n",
+            "ntp server 192.0.2.1\nip route 10.0.0.0 255.0.0.0 192.0.2.1 name Y\n",
+            &[
+                ("delete", "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name X"),
+                ("insert", "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name Y"),
+            ],
+        ),
+        (
+            "route beside ntp",
+            netform_dialects::eos::parse,
+            "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name X\nntp server 192.0.2.1\n",
+            "ntp server 192.0.2.1\nip route 10.0.0.0 255.0.0.0 192.0.2.1 name Y\n",
+            &[
+                ("delete", "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name X"),
+                ("insert", "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name Y"),
+            ],
+        ),
+        (
+            "two key matches beat one identical",
+            netform_dialects::iosxe::parse,
+            "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name X\nntp server 192.0.2.1\nhostname r1\n",
+            "hostname r1\nip route 10.0.0.0 255.0.0.0 192.0.2.1 name Y\nntp server 192.0.2.1\n",
+            &[
+                ("insert", "hostname r1"),
+                ("delete", "hostname r1"),
+                ("replace", "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name X"),
+                ("replace", "ip route 10.0.0.0 255.0.0.0 192.0.2.1 name Y"),
+            ],
+        ),
+        (
+            "an identical block outweighs an identical leaf",
+            netform_dialects::iosxe::parse,
+            "interface Gi0/1\n description x\n shutdown\nhostname r1\n",
+            "hostname r1\ninterface Gi0/1\n description x\n shutdown\n",
+            &[("delete", "hostname r1"), ("insert", "hostname r1")],
+        ),
+        (
+            "a block sharing two lines outweighs an identical leaf",
+            netform_dialects::iosxe::parse,
+            "interface Gi0/1\n description x\n shutdown\nhostname r1\n",
+            "hostname r1\ninterface Gi0/1\n description y\n shutdown\n",
+            &[
+                ("delete", "hostname r1"),
+                ("insert", "hostname r1"),
+                ("replace", " description x"),
+                ("replace", " description y"),
+            ],
+        ),
+    ];
+    let options = options_for(OrderPolicy::Ordered);
+    for &(case, parse, left, right, edits) in rows {
+        let flipped = edits
+            .iter()
+            .map(|&(kind, line)| match kind {
+                "delete" => ("insert", line),
+                "insert" => ("delete", line),
+                _ => (kind, line),
+            })
+            .collect::<Vec<_>>();
+        for (from, to, mut expected) in [(left, right, edits.to_vec()), (right, left, flipped)] {
+            expected.sort_unstable();
+            let diff = diff_documents(&parse(from), &parse(to), options.clone()).expect("diff");
+            assert_eq!(edited_lines(&diff), expected, "{case}: {from:?} -> {to:?}");
+            check_plan(from, to, parse, &options);
+        }
+    }
+}
+
+#[test]
 fn reordered_same_key_siblings_report_nothing() {
     let rows: &[(&str, Parse, &str, &str)] = &[
         (

@@ -142,7 +142,7 @@ fn diff_segment_level(
     let a_segments = segment_at(a_lines, depth);
     let b_segments = segment_at(b_lines, depth);
 
-    let ops = align_segments(&a_segments, &b_segments)?;
+    let ops = align_segments(&a_segments, &b_segments, level_policy)?;
 
     let a_count = a_segments.len();
     let b_count = b_segments.len();
@@ -234,15 +234,21 @@ fn diff_segment_level(
     Ok(())
 }
 
+/// the most cells `prefer_shared_lines` fills before it keeps Myers' pairs instead.
+const SHARED_LINES_CELL_BUDGET: usize = 1 << 24;
+
 /// aligns siblings by key, re-pairing each run of same-key matches identical siblings first.
-fn align_segments(a: &[Segment], b: &[Segment]) -> Result<Vec<Op>, DiffError> {
+fn align_segments(a: &[Segment], b: &[Segment], policy: OrderPolicy) -> Result<Vec<Op>, DiffError> {
     let keys = |segments: &[Segment]| {
         segments
             .iter()
             .map(|segment| segment.segment_key)
             .collect::<Vec<_>>()
     };
-    let matches = matched_pairs(&compute_ops(&keys(a), &keys(b))?);
+    let mut matches = matched_pairs(&compute_ops(&keys(a), &keys(b))?);
+    if policy == OrderPolicy::Ordered {
+        matches = prefer_shared_lines(a, b, matches, SHARED_LINES_CELL_BUDGET);
+    }
 
     let mut pairs = Vec::with_capacity(matches.len());
     let mut start = 0;
@@ -270,6 +276,142 @@ fn align_segments(a: &[Segment], b: &[Segment]) -> Result<Vec<Op>, DiffError> {
         start = end;
     }
     Ok(ops_from_pairs(a.len(), b.len(), &pairs))
+}
+
+/// re-pairs siblings by key, keeping as many pairs as Myers found and choosing, among
+/// such pairings, the one whose pairs share the most lines, then the most of Myers'.
+///
+/// above `cell_budget` cells it returns Myers' pairs unchanged.
+fn prefer_shared_lines(
+    a: &[Segment],
+    b: &[Segment],
+    myers: Vec<(usize, usize)>,
+    cell_budget: usize,
+) -> Vec<(usize, usize)> {
+    let (deletes, inserts) = (a.len() - myers.len(), b.len() - myers.len());
+    if deletes + inserts == 0 {
+        return myers;
+    }
+
+    let identical = |(left, right): (usize, usize)| {
+        segment_fingerprint(&a[left]) == segment_fingerprint(&b[right])
+    };
+    let prefix = myers
+        .iter()
+        .enumerate()
+        .take_while(|&(index, &pair)| pair == (index, index) && identical(pair))
+        .count();
+    let suffix = myers[prefix..]
+        .iter()
+        .rev()
+        .enumerate()
+        .take_while(|&(index, &pair)| {
+            pair == (a.len() - 1 - index, b.len() - 1 - index) && identical(pair)
+        })
+        .count();
+    let (n, m) = (a.len() - prefix - suffix, b.len() - prefix - suffix);
+    let width = deletes + inserts + 1;
+    if myers.len() == prefix + suffix || (n + 1).saturating_mul(width) > cell_budget {
+        return myers;
+    }
+
+    let fingerprints = |segments: &[Segment], len: usize| {
+        segments[prefix..prefix + len]
+            .iter()
+            .map(segment_fingerprint)
+            .collect::<Vec<_>>()
+    };
+    let (a_prints, b_prints) = (fingerprints(a, n), fingerprints(b, m));
+    let mut myers_partner = vec![usize::MAX; n];
+    for &(left, right) in &myers[prefix..myers.len() - suffix] {
+        myers_partner[left - prefix] = right - prefix;
+    }
+
+    // a pairing with the most key matches stays on diagonals j - i in [-deletes, inserts].
+    let mut steps = vec![Op::Equal; (n + 1) * width];
+    let mut previous = vec![(0, 0, 0); width];
+    let mut current = previous.clone();
+    for i in 0..=n {
+        for band in 0..width {
+            let Some(j) = (i + band).checked_sub(deletes).filter(|&j| j <= m) else {
+                continue;
+            };
+            let mut best = None;
+            if i > 0 && band + 1 < width {
+                best = Some((previous[band + 1], Op::Delete));
+            }
+            if j > 0 && band > 0 && best.is_none_or(|(score, _)| current[band - 1] > score) {
+                best = Some((current[band - 1], Op::Insert));
+            }
+            if i > 0 && j > 0 && a[prefix + i - 1].segment_key == b[prefix + j - 1].segment_key {
+                let (pairs, lines, kept) = previous[band];
+                let score = (
+                    pairs + 1,
+                    lines
+                        + shared_lines(
+                            &a[prefix + i - 1],
+                            &b[prefix + j - 1],
+                            a_prints[i - 1] == b_prints[j - 1],
+                        ),
+                    kept + usize::from(myers_partner[i - 1] == j - 1),
+                );
+                if best.is_none_or(|(best_score, _)| score > best_score) {
+                    best = Some((score, Op::Equal));
+                }
+            }
+            let (score, step) = best.unwrap_or(((0, 0, 0), Op::Equal));
+            current[band] = score;
+            steps[i * width + band] = step;
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    let mut middle = Vec::with_capacity(myers.len() - prefix - suffix);
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        match steps[i * width + j + deletes - i] {
+            Op::Equal => {
+                middle.push((prefix + i - 1, prefix + j - 1));
+                i -= 1;
+                j -= 1;
+            }
+            Op::Delete => i -= 1,
+            Op::Insert => j -= 1,
+        }
+    }
+
+    let mut pairs = myers[..prefix].to_vec();
+    pairs.extend(middle.into_iter().rev());
+    pairs.extend_from_slice(&myers[myers.len() - suffix..]);
+    pairs
+}
+
+/// how many of `left`'s lines also occur in `right` at the same depth.
+fn shared_lines(left: &Segment, right: &Segment, identical: bool) -> usize {
+    if identical {
+        return left.lines.len();
+    }
+    if !(left.is_block || right.is_block) {
+        return 0;
+    }
+    let mut unmatched: HashMap<(usize, &str), usize> = HashMap::new();
+    for line in &right.lines {
+        *unmatched
+            .entry((line.path.0.len(), &line.normalized))
+            .or_default() += 1;
+    }
+    left.lines
+        .iter()
+        .filter(|line| {
+            unmatched
+                .get_mut(&(line.path.0.len(), line.normalized.as_str()))
+                .is_some_and(|count| {
+                    let found = *count > 0;
+                    *count = count.saturating_sub(1);
+                    found
+                })
+        })
+        .count()
 }
 
 /// the (left, right) index of every segment pair `ops` matches.
@@ -1388,6 +1530,33 @@ mod tests {
         assert_eq!(stats.deletes, 1);
         assert_eq!(stats.inserted_lines, 2);
         assert_eq!(stats.deleted_lines, 1);
+    }
+
+    #[test]
+    fn myers_pairs_are_kept_above_the_cell_budget() {
+        let a = segment_at(
+            &[
+                cline("ntp server 192.0.2.1", 1, vec![0]),
+                cline("ip route 10.0.0.0/8 192.0.2.1 name Y", 2, vec![1]),
+            ],
+            0,
+        );
+        let b = segment_at(
+            &[
+                cline("ip route 10.0.0.0/8 192.0.2.1 name X", 2, vec![0]),
+                cline("ntp server 192.0.2.1", 1, vec![1]),
+            ],
+            0,
+        );
+        let myers = matched_pairs(&compute_ops(&[1, 2], &[2, 1]).unwrap());
+        assert_eq!(myers, [(1, 0)]);
+        for (budget, expected) in [(8, [(1, 0)]), (9, [(0, 1)])] {
+            assert_eq!(
+                prefer_shared_lines(&a, &b, myers.clone(), budget),
+                expected,
+                "budget {budget}"
+            );
+        }
     }
 
     #[test]
