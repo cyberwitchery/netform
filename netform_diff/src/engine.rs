@@ -32,12 +32,14 @@ pub(crate) fn diff_views(
 ) -> Result<DiffComputation, DiffError> {
     let mut edits = Vec::new();
     let mut fallback_contexts = Vec::new();
+    let mut budget = SHARED_LINES_BUDGET;
     let root = netform_ir::Path(Vec::new());
     if options.policy_for_path(&root) == OrderPolicy::Unordered {
         diff_unordered_root(
             &a.lines,
             &b.lines,
             options,
+            &mut budget,
             &mut edits,
             &mut fallback_contexts,
         )?;
@@ -47,6 +49,7 @@ pub(crate) fn diff_views(
             &b.lines,
             &root,
             options,
+            &mut budget,
             &mut edits,
             &mut fallback_contexts,
         )?;
@@ -63,6 +66,7 @@ fn diff_unordered_root(
     a_lines: &[ComparisonLine],
     b_lines: &[ComparisonLine],
     options: &NormalizeOptions,
+    budget: &mut usize,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<(), DiffError> {
@@ -82,6 +86,7 @@ fn diff_unordered_root(
         b_segments,
         OrderPolicy::Unordered,
         options,
+        budget,
         edits,
         fallback_contexts,
     )?;
@@ -134,6 +139,7 @@ fn diff_segment_level(
     b_lines: &[ComparisonLine],
     level_path: &netform_ir::Path,
     options: &NormalizeOptions,
+    budget: &mut usize,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<(), DiffError> {
@@ -142,7 +148,7 @@ fn diff_segment_level(
     let a_segments = segment_at(a_lines, depth);
     let b_segments = segment_at(b_lines, depth);
 
-    let ops = align_segments(&a_segments, &b_segments, level_policy, options)?;
+    let ops = align_segments(&a_segments, &b_segments, level_policy, options, budget)?;
 
     let a_count = a_segments.len();
     let b_count = b_segments.len();
@@ -168,6 +174,7 @@ fn diff_segment_level(
                         &mut pending_runs,
                         policy,
                         options,
+                        budget,
                         edits,
                         fallback_contexts,
                     )?;
@@ -189,7 +196,7 @@ fn diff_segment_level(
                     a_count,
                     b_count,
                 })?;
-                diff_matched_segment(&left, &right, options, edits, fallback_contexts)?;
+                diff_matched_segment(&left, &right, options, budget, edits, fallback_contexts)?;
             }
             Op::Delete => {
                 if !run_open {
@@ -225,6 +232,7 @@ fn diff_segment_level(
         &mut pending_runs,
         policy,
         options,
+        budget,
         edits,
         fallback_contexts,
     )?;
@@ -234,8 +242,8 @@ fn diff_segment_level(
     Ok(())
 }
 
-/// the most work `prefer_shared_lines` does before it keeps Myers' pairs instead: a unit
-/// per cell, plus a unit per line or search step it spends weighing two blocks.
+/// the most work `prefer_shared_lines` does across one diff before it keeps Myers' pairs
+/// instead: a unit per cell, plus a unit per line or search step it spends weighing two blocks.
 const SHARED_LINES_BUDGET: usize = 1 << 24;
 
 /// aligns siblings by key, re-pairing each run of same-key matches identical siblings first.
@@ -244,6 +252,7 @@ fn align_segments(
     b: &[Segment],
     policy: OrderPolicy,
     options: &NormalizeOptions,
+    budget: &mut usize,
 ) -> Result<Vec<Op>, DiffError> {
     let keys = |segments: &[Segment]| {
         segments
@@ -253,7 +262,7 @@ fn align_segments(
     };
     let mut matches = matched_pairs(&compute_ops(&keys(a), &keys(b))?);
     if policy == OrderPolicy::Ordered {
-        matches = prefer_shared_lines(a, b, matches, options, SHARED_LINES_BUDGET);
+        matches = prefer_shared_lines(a, b, matches, options, budget);
     }
 
     let mut pairs = Vec::with_capacity(matches.len());
@@ -287,13 +296,14 @@ fn align_segments(
 /// re-pairs siblings by key, keeping as many pairs as Myers found and choosing, among
 /// such pairings, the one whose pairs keep the most lines, then the most of Myers'.
 ///
-/// past `budget` units of work it returns Myers' pairs unchanged.
+/// it takes its work out of `budget`, and past it returns Myers' pairs unchanged, emptying
+/// `budget` if it overran while weighing.
 fn prefer_shared_lines(
     a: &[Segment],
     b: &[Segment],
     myers: Vec<(usize, usize)>,
     options: &NormalizeOptions,
-    budget: usize,
+    budget: &mut usize,
 ) -> Vec<(usize, usize)> {
     let (deletes, inserts) = (a.len() - myers.len(), b.len() - myers.len());
     if deletes + inserts == 0 {
@@ -319,10 +329,10 @@ fn prefer_shared_lines(
     let (n, m) = (a.len() - prefix - suffix, b.len() - prefix - suffix);
     let width = deletes + inserts + 1;
     let cells = (n + 1).saturating_mul(width);
-    if myers.len() == prefix + suffix || cells > budget {
+    if myers.len() == prefix + suffix || cells > *budget {
         return myers;
     }
-    let mut budget = budget - cells;
+    *budget -= cells;
 
     let a_weighed = a[prefix..prefix + n]
         .iter()
@@ -355,8 +365,9 @@ fn prefer_shared_lines(
             }
             if i > 0 && j > 0 && a[prefix + i - 1].segment_key == b[prefix + j - 1].segment_key {
                 let Some(shared) =
-                    shared_lines(&a_weighed[i - 1], &b_weighed[j - 1], options, &mut budget)
+                    shared_lines(&a_weighed[i - 1], &b_weighed[j - 1], options, budget)
                 else {
+                    *budget = 0;
                     return myers;
                 };
                 let (pairs, lines, kept) = previous[band];
@@ -596,11 +607,12 @@ fn diff_matched_segment(
     left: &Segment,
     right: &Segment,
     options: &NormalizeOptions,
+    budget: &mut usize,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<(), DiffError> {
     let first_edit = edits.len();
-    diff_matched_contents(left, right, options, edits, fallback_contexts)?;
+    diff_matched_contents(left, right, options, budget, edits, fallback_contexts)?;
     anchor_child_inserts(&mut edits[first_edit..], &left.lines[0], &right.lines[0]);
     Ok(())
 }
@@ -633,6 +645,7 @@ fn diff_matched_contents(
     left: &Segment,
     right: &Segment,
     options: &NormalizeOptions,
+    budget: &mut usize,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<(), DiffError> {
@@ -666,6 +679,7 @@ fn diff_matched_contents(
             right_children,
             &left_header.path,
             options,
+            budget,
             edits,
             fallback_contexts,
         )?,
@@ -676,6 +690,7 @@ fn diff_matched_contents(
                 segment_at(right_children, depth),
                 policy,
                 options,
+                budget,
                 edits,
                 fallback_contexts,
             )?;
@@ -698,6 +713,7 @@ fn diff_sibling_multiset(
     inserted: Vec<Segment>,
     policy: OrderPolicy,
     options: &NormalizeOptions,
+    budget: &mut usize,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<Vec<Edit>, DiffError> {
@@ -709,7 +725,7 @@ fn diff_sibling_multiset(
         pair_blocks_with_leaves(&mut pairs, deleted, inserted, policy)
     };
     for (left, right) in &pairs {
-        diff_matched_segment(left, right, options, edits, fallback_contexts)?;
+        diff_matched_segment(left, right, options, budget, edits, fallback_contexts)?;
     }
 
     let (deleted_blocks, deleted): (Vec<_>, Vec<_>) = deleted
@@ -952,12 +968,14 @@ fn flush_policy(
 ///
 /// `runs` holds the start index of each contiguous unmatched run; the context
 /// of every run is returned when the fallback reports anything.
+#[allow(clippy::too_many_arguments)]
 fn flush_replaced_segments(
     deleted: &mut Vec<Segment>,
     inserted: &mut Vec<Segment>,
     runs: &mut Vec<(usize, usize)>,
     policy: OrderPolicy,
     options: &NormalizeOptions,
+    budget: &mut usize,
     edits: &mut Vec<Edit>,
     fallback_contexts: &mut Vec<netform_ir::Path>,
 ) -> Result<Vec<netform_ir::Path>, DiffError> {
@@ -974,6 +992,7 @@ fn flush_replaced_segments(
         std::mem::take(inserted),
         policy,
         options,
+        budget,
         edits,
         fallback_contexts,
     )?;
@@ -1650,27 +1669,103 @@ mod tests {
         );
         let myers = matched_pairs(&compute_ops(&[1, 2], &[2, 1]).unwrap());
         assert_eq!(myers, [(1, 0)]);
-        for (case, (a, b), budget, expected) in [
-            ("leaves, one cell short", &leaves, 8, [(1, 0)]),
-            ("leaves, every cell", &leaves, 9, [(0, 1)]),
-            (
-                "blocks, every cell but not their lines",
-                &blocks,
-                9,
-                [(1, 0)],
-            ),
-            ("blocks, ample", &blocks, 1 << 24, [(0, 1)]),
+        for (case, (a, b), budget, expected, left) in [
+            ("leaves, one cell short", &leaves, 8, [(1, 0)], 8),
+            ("leaves, every cell", &leaves, 9, [(0, 1)], 0),
+            ("blocks, a unit past their cells", &blocks, 10, [(1, 0)], 0),
+            ("blocks, ample", &blocks, 1 << 24, [(0, 1)], (1 << 24) - 16),
         ] {
+            let mut budget = budget;
+            let pairs = prefer_shared_lines(
+                &segment_at(a, 0),
+                &segment_at(b, 0),
+                myers.clone(),
+                &default_options(),
+                &mut budget,
+            );
+            assert_eq!((pairs, budget), (expected.to_vec(), left), "{case}");
+        }
+    }
+
+    #[test]
+    fn every_level_of_a_diff_draws_on_one_budget() {
+        let a = vec![
+            cline("router bgp 1", 3, vec![0]),
+            cline(" ntp server 192.0.2.1", 1, vec![0, 0]),
+            cline(" ip route 10.0.0.0/8 192.0.2.1 name Y", 2, vec![0, 1]),
+            cline("router bgp 2", 4, vec![1]),
+            cline(" ntp server 192.0.2.1", 1, vec![1, 0]),
+            cline(" ip route 10.0.0.0/8 192.0.2.1 name Y", 2, vec![1, 1]),
+        ];
+        let b = vec![
+            cline("router bgp 1", 3, vec![0]),
+            cline(" ip route 10.0.0.0/8 192.0.2.1 name X", 2, vec![0, 0]),
+            cline(" ntp server 192.0.2.1", 1, vec![0, 1]),
+            cline("router bgp 2", 4, vec![1]),
+            cline(" ip route 10.0.0.0/8 192.0.2.1 name X", 2, vec![1, 0]),
+            cline(" ntp server 192.0.2.1", 1, vec![1, 1]),
+        ];
+        // each router's children fill 9 cells, and weighing two leaves costs nothing.
+        for (budget, left, ntp_lines) in [(18, 0, 0), (17, 8, 2)] {
+            let (mut remaining, mut edits) = (budget, Vec::new());
+            diff_segment_level(
+                &a,
+                &b,
+                &Path(Vec::new()),
+                &default_options(),
+                &mut remaining,
+                &mut edits,
+                &mut Vec::new(),
+            )
+            .unwrap();
+            let ntp = edit_texts(&edits)
+                .into_iter()
+                .filter(|text| text.contains("ntp"))
+                .count();
+            assert_eq!((remaining, ntp), (left, ntp_lines), "budget {budget}");
+        }
+    }
+
+    #[test]
+    fn a_block_pair_is_weighed_under_its_left_path_child_policy() {
+        let left = segment_at(
+            &[
+                cline("interface Gi1", 1, vec![0]),
+                cline(" description p", 3, vec![0, 0]),
+                cline(" shutdown", 4, vec![0, 1]),
+            ],
+            0,
+        );
+        let right = segment_at(
+            &[
+                cline("interface Gi1", 1, vec![1]),
+                cline(" shutdown", 4, vec![1, 0]),
+                cline(" description p", 3, vec![1, 1]),
+            ],
+            0,
+        );
+        for (unordered, shared, units) in [(None, 2, 8), (Some(0), 3, 6), (Some(1), 2, 8)] {
+            let options = NormalizeOptions::default().with_order_policy(OrderPolicyConfig {
+                default: OrderPolicy::Ordered,
+                overrides: unordered
+                    .map(|block| OrderPolicyOverride {
+                        context_prefix: vec![block],
+                        policy: OrderPolicy::Unordered,
+                    })
+                    .into_iter()
+                    .collect(),
+            });
+            let mut budget = 1 << 24;
+            let weight = shared_lines(
+                &Weighed::new(&left[0]),
+                &Weighed::new(&right[0]),
+                &options,
+                &mut budget,
+            );
             assert_eq!(
-                prefer_shared_lines(
-                    &segment_at(a, 0),
-                    &segment_at(b, 0),
-                    myers.clone(),
-                    &default_options(),
-                    budget,
-                ),
-                expected,
-                "{case}"
+                (weight, (1 << 24) - budget),
+                (Some(shared), units),
+                "unordered at {unordered:?}"
             );
         }
     }
