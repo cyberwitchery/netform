@@ -32,9 +32,9 @@ add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-netform_ir = "0.10.2"
-netform_diff = "0.10.2"
-netform_dialects = "0.10.2"
+netform_ir = "0.10.3"
+netform_diff = "0.10.3"
+netform_dialects = "0.10.3"
 ```
 
 install the cli binary so you can run `config-diff` directly:
