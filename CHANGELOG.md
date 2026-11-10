@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- a change to lines nested under 127 or more blocks is no longer reported as no change. the diff still stops descending at that depth, and a changed, added or removed line below it gave no edits, no findings and exit 0. every block whose children are cut off there now gets a `diff_unreliable_region` warning saying whether those lines match the other side's, compared as a whole after normalization and, under `unordered` and `keyed-stable`, in any order. when they differ, `config-diff` exits 1, `--json` has `has_changes: true` and the default report prints the warning. such a change has no edit, so `--plan-json` has no action for it
+- a change to lines nested under 127 or more blocks is no longer reported as no change. the diff still stops descending at that depth, and a changed, added or removed line below it gave no edits, no findings and exit 0. every block whose children are cut off there now gets a `diff_unreliable_region` warning that names the block's header and says whether those lines match the other side's, compared as a whole after normalization and in any order where `--order-policy` or `--policy-override` makes that level `unordered` or `keyed-stable`, read from the left file's paths as everywhere else. when they differ, `config-diff` exits 1, `--json` has `has_changes: true` and the default report prints the warning. such a change has no edit, so `--plan-json` has no action for it
 
 ## [0.10.3] - 2026-11-04
 

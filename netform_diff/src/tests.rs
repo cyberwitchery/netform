@@ -121,20 +121,46 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
     let changed: (&[&str], &[&str]) = (&["leaf old"], &["leaf new"]);
     let same: (&[&str], &[&str]) = (&["leaf old"], &["leaf old"]);
     let reordered: (&[&str], &[&str]) = (&["leaf one", "leaf two"], &["leaf two", "leaf one"]);
+    let renamed: (&[&str], &[&str]) = (&["sub old", " leaf"], &["sub new", " leaf"]);
+    let comment_to_line: (&[&str], &[&str]) = (&["sub", " ! note"], &["sub", " leaf"]);
+    let swap_reversed: (&[&str], &[&str]) = (
+        &["alpha", " a1", " a2", "beta", " b1"],
+        &["beta", " b1", "alpha", " a2", " a1"],
+    );
+    let swapped: (&[&str], &[&str]) = (
+        &["alpha", " a2", " a1", "beta", " b1"],
+        &["beta", " b1", "alpha", " a2", " a1"],
+    );
+    let ordered = || with_policy(OrderPolicy::Ordered, Vec::new());
+    let unordered = || with_policy(OrderPolicy::Unordered, Vec::new());
+    let left_alpha_ordered = |depth: usize| {
+        let alpha = OrderPolicyOverride {
+            context_prefix: vec![0; depth + 1],
+            policy: OrderPolicy::Ordered,
+        };
+        with_policy(OrderPolicy::Unordered, vec![alpha])
+    };
+    let ignore_comments = || NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
+    let cut_126 = || vec![Path(vec![0; 127]), Path([vec![0; 126], vec![1]].concat())];
     let cases = [
-        (126, changed, OrderPolicy::Ordered, true, 1, Vec::new()),
-        (127, changed, OrderPolicy::Ordered, true, 0, cut()),
-        (130, changed, OrderPolicy::Ordered, true, 0, cut()),
-        (130, same, OrderPolicy::Ordered, false, 0, cut()),
-        (130, reordered, OrderPolicy::Ordered, true, 0, cut()),
-        (130, reordered, OrderPolicy::Unordered, false, 0, cut()),
+        (126, changed, ordered(), true, 1, Vec::new()),
+        (127, changed, ordered(), true, 0, cut()),
+        (130, changed, ordered(), true, 0, cut()),
+        (130, same, ordered(), false, 0, cut()),
+        (130, reordered, ordered(), true, 0, cut()),
+        (130, reordered, unordered(), false, 0, cut()),
+        (130, renamed, ordered(), true, 0, cut()),
+        (126, comment_to_line, ignore_comments(), true, 0, cut()),
+        (130, swap_reversed, left_alpha_ordered(130), true, 0, cut()),
+        (126, swapped, left_alpha_ordered(126), false, 0, cut_126()),
+        (130, swapped, left_alpha_ordered(130), false, 0, cut()),
     ];
 
-    for (depth, (left, right), policy, has_changes, edits, regions) in cases {
+    for (depth, (left, right), options, has_changes, edits, regions) in cases {
         let a = parse_generic(&nested(depth, left));
         let b = parse_generic(&nested(depth, right));
-        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
-        let case = format!("{depth} levels, {left:?} -> {right:?}, {policy:?}");
+        let diff = diff_documents(&a, &b, options.clone()).unwrap();
+        let case = format!("{depth} levels, {left:?} -> {right:?}, {options:?}");
         assert_eq!(
             (
                 diff.has_changes,
@@ -144,9 +170,11 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
             (has_changes, edits, regions),
             "{case}"
         );
+        let unified = format_unified_diff(&diff, "a", "b", 10);
+        assert_eq!(unified.is_empty(), !has_changes, "{case}");
         assert_eq!(
-            format_unified_diff(&diff, "a", "b", 10).is_empty(),
-            !has_changes,
+            unified.contains("under `level126`"),
+            has_changes && depth >= 127,
             "{case}"
         );
         assert_eq!(

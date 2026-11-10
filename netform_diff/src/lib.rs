@@ -53,7 +53,15 @@ pub fn diff_documents(
 ) -> Result<Diff, DiffError> {
     let (a_view, a_truncations) = flatten::flatten_document(a, &options);
     let (b_view, b_truncations) = flatten::flatten_document(b, &options);
-    let truncated = findings::truncated_regions(&a_view, &a_truncations, &b_view, &b_truncations);
+    let truncated = findings::truncated_regions(
+        a,
+        &a_view,
+        &a_truncations,
+        b,
+        &b_view,
+        &b_truncations,
+        &options,
+    );
     let ctx = findings::DiffContext::from_views(&a_view, &b_view);
     let computation = engine::diff_views(&a_view, &b_view, &options)?;
     let stats = engine::build_stats(&computation.edits);

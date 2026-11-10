@@ -2,8 +2,12 @@ use std::collections::HashMap;
 
 use netform_ir::{Document, Node, Path};
 
-use crate::flatten::{MAX_NESTING_DEPTH, Truncation, content_counts, extracted_key_counts};
-use crate::model::{ComparisonLine, ComparisonView, Finding, FindingLevel, finding_code};
+use crate::flatten::{
+    Cut, MAX_NESTING_DEPTH, Truncation, content_counts, cut_fingerprint, extracted_key_counts,
+};
+use crate::model::{
+    ComparisonLine, ComparisonView, Finding, FindingLevel, NormalizeOptions, finding_code,
+};
 
 #[derive(Debug)]
 pub(crate) struct DiffContext {
@@ -80,40 +84,54 @@ pub(crate) struct TruncatedRegion<'a> {
 
 /// pairs each side's truncated blocks by occurrence key; a pair is reported once, on the left.
 pub(crate) fn truncated_regions<'a>(
+    a: &Document,
     a_view: &'a ComparisonView,
     a_truncations: &[Truncation],
+    b: &Document,
     b_view: &'a ComparisonView,
     b_truncations: &[Truncation],
+    options: &NormalizeOptions,
 ) -> Vec<TruncatedRegion<'a>> {
-    let fingerprints = |view: &'a ComparisonView, truncations: &[Truncation]| {
-        truncations
-            .iter()
-            .map(|truncation| (&view.lines[truncation.line], truncation.fingerprint))
-            .collect::<Vec<_>>()
+    let cut = |doc, view: &'a ComparisonView, truncation: &Truncation| Cut {
+        doc,
+        block: truncation.block,
+        path: &view.lines[truncation.line].path,
     };
-    let left = fingerprints(a_view, a_truncations);
-    let right = fingerprints(b_view, b_truncations);
-    let by_key = |side: &[(&ComparisonLine, u64)]| {
-        side.iter()
-            .map(|(header, fingerprint)| (header.occurrence_key, *fingerprint))
-            .collect::<HashMap<_, _>>()
-    };
-    let (left_keys, right_keys) = (by_key(&left), by_key(&right));
-
-    let left_regions = left.iter().map(|&(header, fingerprint)| TruncatedRegion {
-        side: "left",
-        header,
-        differs: right_keys.get(&header.occurrence_key) != Some(&fingerprint),
-    });
-    let right_regions = right
+    let mut unpaired = b_truncations
         .iter()
-        .filter(|(header, _)| !left_keys.contains_key(&header.occurrence_key))
-        .map(|&(header, _)| TruncatedRegion {
-            side: "right",
+        .map(|truncation| (b_view.lines[truncation.line].occurrence_key, truncation))
+        .collect::<HashMap<_, _>>();
+    let mut regions = Vec::new();
+
+    for truncation in a_truncations {
+        let left = cut(a, a_view, truncation);
+        let Some(fingerprint) = cut_fingerprint(left, left, options) else {
+            continue;
+        };
+        let header = &a_view.lines[truncation.line];
+        let right = unpaired
+            .remove(&header.occurrence_key)
+            .and_then(|right| cut_fingerprint(cut(b, b_view, right), left, options));
+        regions.push(TruncatedRegion {
+            side: "left",
             header,
-            differs: true,
+            differs: right != Some(fingerprint),
         });
-    left_regions.chain(right_regions).collect()
+    }
+    for truncation in b_truncations {
+        let header = &b_view.lines[truncation.line];
+        let right = cut(b, b_view, truncation);
+        if unpaired.contains_key(&header.occurrence_key)
+            && cut_fingerprint(right, right, options).is_some()
+        {
+            regions.push(TruncatedRegion {
+                side: "right",
+                header,
+                differs: true,
+            });
+        }
+    }
+    regions
 }
 
 pub(crate) fn collect_findings(
@@ -279,9 +297,10 @@ fn collect_truncation_findings(truncated: &[TruncatedRegion<'_>], out: &mut Vec<
             code: finding_code::DIFF_UNRELIABLE_REGION.to_string(),
             level: FindingLevel::Warning,
             message: format!(
-                "{} document nests deeper than {} levels under this block; those lines were compared as a whole and {}",
+                "{} document nests deeper than {} levels under `{}`; those lines were compared as a whole and {}",
                 region.side,
                 MAX_NESTING_DEPTH - 1,
+                region.header.original.trim(),
                 if region.differs { "differ" } else { "match" }
             ),
             path: Some(region.header.path.clone()),
