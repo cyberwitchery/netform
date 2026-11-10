@@ -284,7 +284,8 @@ impl<'g> Guide<'g> {
 
 /// hashes the lines `flatten_node` leaves out below `subject`, or `None` when there are none.
 ///
-/// each level takes its order policy from the path of its paired block under `guide`, the left cut.
+/// each level takes its order policy from the path of its paired block under `guide`, the left cut,
+/// or, when it has none, of its nearest paired ancestor.
 pub(crate) fn cut_fingerprint(
     subject: Cut<'_>,
     guide: Cut<'_>,
@@ -348,7 +349,10 @@ pub(crate) fn cut_fingerprint(
                 None => {}
             }
         } else if let Some(mut done) = stack.pop() {
-            let ordered = done.guide.as_ref().is_none_or(|guide| guide.ordered);
+            let ordered = done.guide.as_ref().map_or_else(
+                || options.policy_for_path(&guide_path) == OrderPolicy::Ordered,
+                |guide| guide.ordered,
+            );
             if !ordered {
                 done.hashes.sort_unstable();
             }

@@ -142,6 +142,29 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
     };
     let ignore_comments = || NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
     let cut_126 = || vec![Path(vec![0; 127]), Path([vec![0; 126], vec![1]].concat())];
+    // one row per child order: which one needs the policy hashed depends on hash order.
+    let mixed: [(&[&str], &[&str]); 4] = [
+        (
+            &["dup", " x 1", " x 2", "dup", " y 1", " y 2"],
+            &["dup", " y 2", " y 1", "dup", " x 2", " x 1"],
+        ),
+        (
+            &["dup", " x 1", " x 2", "dup", " y 2", " y 1"],
+            &["dup", " y 1", " y 2", "dup", " x 2", " x 1"],
+        ),
+        (
+            &["dup", " x 2", " x 1", "dup", " y 1", " y 2"],
+            &["dup", " y 2", " y 1", "dup", " x 1", " x 2"],
+        ),
+        (
+            &["dup", " x 2", " x 1", "dup", " y 2", " y 1"],
+            &["dup", " y 1", " y 2", "dup", " x 1", " x 2"],
+        ),
+    ];
+    let dups_swapped: (&[&str], &[&str]) = (
+        &["dup", " a", "  x 1", "  x 2", "dup", " y 1"],
+        &["dup", " y 1", "dup", " a", "  x 1", "  x 2"],
+    );
     let cases = [
         (126, changed, ordered(), true, 1, Vec::new()),
         (127, changed, ordered(), true, 0, cut()),
@@ -154,6 +177,11 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
         (130, swap_reversed, left_alpha_ordered(130), true, 0, cut()),
         (126, swapped, left_alpha_ordered(126), false, 0, cut_126()),
         (130, swapped, left_alpha_ordered(130), false, 0, cut()),
+        (130, mixed[0], left_alpha_ordered(130), true, 0, cut()),
+        (130, mixed[1], left_alpha_ordered(130), true, 0, cut()),
+        (130, mixed[2], left_alpha_ordered(130), true, 0, cut()),
+        (130, mixed[3], left_alpha_ordered(130), true, 0, cut()),
+        (130, dups_swapped, unordered(), false, 0, cut()),
     ];
 
     for (depth, (left, right), options, has_changes, edits, regions) in cases {
