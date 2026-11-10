@@ -255,7 +255,7 @@ fn subtree_fingerprint(
                         stack.push(Level {
                             header: Some(header),
                             children: block.children.iter().enumerate(),
-                            footer: block.footer.as_ref().and_then(&normalize),
+                            footer: block.footer.as_ref().and_then(normalize),
                             hashes: Vec::new(),
                             ordered: options.policy_for_path(&path) == OrderPolicy::Ordered,
                         });
