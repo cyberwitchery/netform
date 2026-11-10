@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use netform_ir::{Document, Node, Path};
 
-use crate::flatten::{content_counts, extracted_key_counts};
-use crate::model::{ComparisonView, Finding, FindingLevel, finding_code};
+use crate::flatten::{MAX_NESTING_DEPTH, Truncation, content_counts, extracted_key_counts};
+use crate::model::{ComparisonLine, ComparisonView, Finding, FindingLevel, finding_code};
 
 #[derive(Debug)]
 pub(crate) struct DiffContext {
@@ -71,6 +71,51 @@ impl DiffContext {
     }
 }
 
+/// a block whose children nest too deep to flatten, and whether they differ from the other side's.
+pub(crate) struct TruncatedRegion<'a> {
+    side: &'static str,
+    header: &'a ComparisonLine,
+    pub(crate) differs: bool,
+}
+
+/// pairs each side's truncated blocks by occurrence key; a pair is reported once, on the left.
+pub(crate) fn truncated_regions<'a>(
+    a_view: &'a ComparisonView,
+    a_truncations: &[Truncation],
+    b_view: &'a ComparisonView,
+    b_truncations: &[Truncation],
+) -> Vec<TruncatedRegion<'a>> {
+    let fingerprints = |view: &'a ComparisonView, truncations: &[Truncation]| {
+        truncations
+            .iter()
+            .map(|truncation| (&view.lines[truncation.line], truncation.fingerprint))
+            .collect::<Vec<_>>()
+    };
+    let left = fingerprints(a_view, a_truncations);
+    let right = fingerprints(b_view, b_truncations);
+    let by_key = |side: &[(&ComparisonLine, u64)]| {
+        side.iter()
+            .map(|(header, fingerprint)| (header.occurrence_key, *fingerprint))
+            .collect::<HashMap<_, _>>()
+    };
+    let (left_keys, right_keys) = (by_key(&left), by_key(&right));
+
+    let left_regions = left.iter().map(|&(header, fingerprint)| TruncatedRegion {
+        side: "left",
+        header,
+        differs: right_keys.get(&header.occurrence_key) != Some(&fingerprint),
+    });
+    let right_regions = right
+        .iter()
+        .filter(|(header, _)| !left_keys.contains_key(&header.occurrence_key))
+        .map(|&(header, _)| TruncatedRegion {
+            side: "right",
+            header,
+            differs: true,
+        });
+    left_regions.chain(right_regions).collect()
+}
+
 pub(crate) fn collect_findings(
     a_doc: &Document,
     b_doc: &Document,
@@ -78,6 +123,7 @@ pub(crate) fn collect_findings(
     b_view: &ComparisonView,
     ctx: &DiffContext,
     fallback_contexts: &[Path],
+    truncated: &[TruncatedRegion<'_>],
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
     collect_parse_findings(
@@ -99,6 +145,7 @@ pub(crate) fn collect_findings(
     collect_ambiguity_findings(a_view, ctx, &mut findings);
     collect_extracted_key_ambiguity_findings(a_view, ctx, &mut findings);
     collect_fallback_alignment_findings(fallback_contexts, &mut findings);
+    collect_truncation_findings(truncated, &mut findings);
     findings.sort_by(|a, b| {
         let ap = a.path.as_ref().map(|p| p.0.as_slice()).unwrap_or(&[]);
         let bp = b.path.as_ref().map(|p| p.0.as_slice()).unwrap_or(&[]);
@@ -226,10 +273,26 @@ fn collect_fallback_alignment_findings(contexts: &[Path], out: &mut Vec<Finding>
     }
 }
 
+fn collect_truncation_findings(truncated: &[TruncatedRegion<'_>], out: &mut Vec<Finding>) {
+    for region in truncated {
+        out.push(Finding {
+            code: finding_code::DIFF_UNRELIABLE_REGION.to_string(),
+            level: FindingLevel::Warning,
+            message: format!(
+                "{} document nests deeper than {} levels under this block; those lines were compared as a whole and {}",
+                region.side,
+                MAX_NESTING_DEPTH - 1,
+                if region.differs { "differ" } else { "match" }
+            ),
+            path: Some(region.header.path.clone()),
+            span: Some(region.header.span.clone()),
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::ComparisonLine;
     use netform_ir::{BlockNode, LineNode, ParseFinding, Span, TriviaKind};
 
     fn make_line(content_key: u64, key_hint: Option<&str>) -> ComparisonLine {
@@ -533,7 +596,7 @@ mod tests {
         let ctx = DiffContext::from_views(&a_view, &b_view);
         let contexts = vec![Path(vec![1]), Path(vec![0])];
 
-        let findings = collect_findings(&a_doc, &b_doc, &a_view, &b_view, &ctx, &contexts);
+        let findings = collect_findings(&a_doc, &b_doc, &a_view, &b_view, &ctx, &contexts, &[]);
 
         assert_eq!(findings.len(), 2);
         assert_eq!(findings[0].path.as_ref().unwrap().0, vec![0]);

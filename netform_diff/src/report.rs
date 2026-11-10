@@ -89,7 +89,9 @@ pub fn format_markdown_report(
     .unwrap();
 
     out.push_str("## Edits\n\n");
-    if diff.edits.is_empty() {
+    if diff.edits.is_empty() && diff.has_changes {
+        out.push_str("Changes were found that no edit shows; see Findings.\n");
+    } else if diff.edits.is_empty() {
         out.push_str("No changes detected.\n");
     } else {
         for (idx, edit) in diff.edits.iter().enumerate() {
@@ -168,7 +170,7 @@ pub fn format_unified_diff_with_color(
     color: ColorChoice,
 ) -> String {
     let mut out = String::new();
-    if diff.edits.is_empty() {
+    if diff.edits.is_empty() && !diff.has_changes {
         return out;
     }
 

@@ -1,5 +1,9 @@
 # changelog
 
+## Unreleased
+
+- a change to lines nested under 127 or more blocks is no longer reported as no change. the diff still stops descending at that depth, and a changed, added or removed line below it gave no edits, no findings and exit 0. every block whose children are cut off there now gets a `diff_unreliable_region` warning saying whether those lines match the other side's, compared as a whole after normalization and, under `unordered` and `keyed-stable`, in any order. when they differ, `config-diff` exits 1, `--json` has `has_changes: true` and the default report prints the warning. such a change has no edit, so `--plan-json` has no action for it
+
 ## [0.10.3] - 2026-11-04
 
 - a statement that only moved past a changed sibling is no longer reported as deleted and re-inserted under `--order-policy ordered` (the default), whichever file comes first. when `ntp server 192.0.2.1` and `ip route 10.0.0.0 255.0.0.0 192.0.2.1 name X` swapped places and the route's name became `Y`, `config-diff r1 r2` reported the route's old line deleted and its new line inserted, but `config-diff r2 r1` reported the unchanged ntp line deleted and re-inserted around a replace of the route, and `--plan-json` planned that delete and insert. both directions now report only the route. among the pairings that match the most statements by key, the one that leaves the most lines unchanged is now chosen, so a block that moved, or changed one line, is no longer deleted and re-inserted whole to keep a single line it moved past. siblings that share a key are still paired identical ones first, then in order. two very different large configurations, such as two unrelated 20,000-line files, are paired as before, and `keyed-stable` and `unordered` are unchanged

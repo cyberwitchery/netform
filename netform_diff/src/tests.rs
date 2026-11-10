@@ -7,7 +7,7 @@ use netform_ir::{Path, Span, parse_generic};
 use super::{
     Diff, DiffLine, Edit, EditAnchor, NormalizationStep, NormalizeOptions, OrderPolicy,
     OrderPolicyConfig, OrderPolicyOverride, PlanAction, PlanLineEditKind, build_comparison_view,
-    build_plan, diff_documents,
+    build_plan, diff_documents, format_markdown_report, format_unified_diff,
 };
 
 #[test]
@@ -105,6 +105,56 @@ fn fallback_alignment_emits_finding() {
         .map(|f| f.path.clone())
         .collect::<Vec<_>>();
     assert_eq!(unreliable, [Some(Path(vec![0]))]);
+}
+
+fn nested(depth: usize, leaves: &[&str]) -> String {
+    let headers = (0..depth).map(|level| format!("{}level{level}\n", " ".repeat(level)));
+    let leaves = leaves
+        .iter()
+        .map(|leaf| format!("{}{leaf}\n", " ".repeat(depth)));
+    headers.chain(leaves).collect()
+}
+
+#[test]
+fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_differ() {
+    let cut = || vec![Path(vec![0; 127])];
+    let changed: (&[&str], &[&str]) = (&["leaf old"], &["leaf new"]);
+    let same: (&[&str], &[&str]) = (&["leaf old"], &["leaf old"]);
+    let reordered: (&[&str], &[&str]) = (&["leaf one", "leaf two"], &["leaf two", "leaf one"]);
+    let cases = [
+        (126, changed, OrderPolicy::Ordered, true, 1, Vec::new()),
+        (127, changed, OrderPolicy::Ordered, true, 0, cut()),
+        (130, changed, OrderPolicy::Ordered, true, 0, cut()),
+        (130, same, OrderPolicy::Ordered, false, 0, cut()),
+        (130, reordered, OrderPolicy::Ordered, true, 0, cut()),
+        (130, reordered, OrderPolicy::Unordered, false, 0, cut()),
+    ];
+
+    for (depth, (left, right), policy, has_changes, edits, regions) in cases {
+        let a = parse_generic(&nested(depth, left));
+        let b = parse_generic(&nested(depth, right));
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        let case = format!("{depth} levels, {left:?} -> {right:?}, {policy:?}");
+        assert_eq!(
+            (
+                diff.has_changes,
+                diff.edits.len(),
+                unreliable_regions(&diff)
+            ),
+            (has_changes, edits, regions),
+            "{case}"
+        );
+        assert_eq!(
+            format_unified_diff(&diff, "a", "b", 10).is_empty(),
+            !has_changes,
+            "{case}"
+        );
+        assert_eq!(
+            format_markdown_report(&diff, "a", "b", 10).contains("No changes detected."),
+            !has_changes,
+            "{case}"
+        );
+    }
 }
 
 #[test]

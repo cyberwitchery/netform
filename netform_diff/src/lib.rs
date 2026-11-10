@@ -51,14 +51,23 @@ pub fn diff_documents(
     b: &Document,
     options: NormalizeOptions,
 ) -> Result<Diff, DiffError> {
-    let a_view = build_comparison_view(a, &options);
-    let b_view = build_comparison_view(b, &options);
+    let (a_view, a_truncations) = flatten::flatten_document(a, &options);
+    let (b_view, b_truncations) = flatten::flatten_document(b, &options);
+    let truncated = findings::truncated_regions(&a_view, &a_truncations, &b_view, &b_truncations);
     let ctx = findings::DiffContext::from_views(&a_view, &b_view);
     let computation = engine::diff_views(&a_view, &b_view, &options)?;
     let stats = engine::build_stats(&computation.edits);
-    let findings =
-        findings::collect_findings(a, b, &a_view, &b_view, &ctx, &computation.fallback_contexts);
-    let has_changes = !computation.edits.is_empty();
+    let findings = findings::collect_findings(
+        a,
+        b,
+        &a_view,
+        &b_view,
+        &ctx,
+        &computation.fallback_contexts,
+        &truncated,
+    );
+    let has_changes =
+        !computation.edits.is_empty() || truncated.iter().any(|region| region.differs);
 
     Ok(Diff {
         normalization_steps: options.steps,

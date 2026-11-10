@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use netform_ir::{DialectHint, Document, Node, NodeId, Path, TriviaKind};
 
 use crate::model::{
-    ComparisonLine, ComparisonView, KeyKind, NormalizeOptions, derive_content_key,
+    ComparisonLine, ComparisonView, KeyKind, NormalizeOptions, OrderPolicy, derive_content_key,
     derive_occurrence_key,
 };
 use crate::normalize::normalize_for_compare;
@@ -12,7 +12,22 @@ use crate::normalize::normalize_for_compare;
 /// configs rarely exceed 10–15 levels; a limit of 128 is generous enough to
 /// handle any legitimate document while preventing stack overflow on
 /// pathologically deep (or cyclic) input.
-const MAX_NESTING_DEPTH: usize = 128;
+pub(crate) const MAX_NESTING_DEPTH: usize = 128;
+
+/// a block whose children nest too deep to flatten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Truncation {
+    /// index of the block's header in the view.
+    pub(crate) line: usize,
+    /// hash of the lines left out; sibling order counts only where the order policy is `ordered`.
+    pub(crate) fingerprint: u64,
+}
+
+#[derive(Debug, Default)]
+struct Flattened {
+    lines: Vec<ComparisonLine>,
+    truncations: Vec<Truncation>,
+}
 
 #[derive(Debug, Default)]
 struct KeyAllocator {
@@ -46,7 +61,15 @@ impl KeyAllocator {
 
 /// build a flattened comparison view from a parsed document.
 pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> ComparisonView {
-    let mut out = Vec::new();
+    flatten_document(doc, options).0
+}
+
+/// the comparison view of `doc`, and each block whose children it leaves out.
+pub(crate) fn flatten_document(
+    doc: &Document,
+    options: &NormalizeOptions,
+) -> (ComparisonView, Vec<Truncation>) {
+    let mut out = Flattened::default();
     let mut keys = KeyAllocator {
         annotations: annotations(doc),
         ..KeyAllocator::default()
@@ -59,7 +82,7 @@ pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> Comp
         flatten_node(doc, root, 0, &mut path, &mut out, &mut keys, options);
     }
 
-    ComparisonView { lines: out }
+    (ComparisonView { lines: out.lines }, out.truncations)
 }
 
 /// compute keys for a line and push a [`ComparisonLine`] onto the output.
@@ -105,14 +128,10 @@ fn flatten_node(
     node_id: NodeId,
     parent_signature: u64,
     path: &mut Vec<usize>,
-    out: &mut Vec<ComparisonLine>,
+    out: &mut Flattened,
     keys: &mut KeyAllocator,
     options: &NormalizeOptions,
 ) {
-    if path.len() >= MAX_NESTING_DEPTH {
-        return;
-    }
-
     let Some(node) = doc.node(node_id) else {
         return;
     };
@@ -124,7 +143,7 @@ fn flatten_node(
                 normalize_for_compare(&line.raw, line.trivia, quoted_values, options)
             {
                 push_comparison_line(
-                    out,
+                    &mut out.lines,
                     keys,
                     parent_signature,
                     KeyKind::Line,
@@ -141,8 +160,9 @@ fn flatten_node(
                 quoted_values,
                 options,
             ) {
+                let header = out.lines.len();
                 let header_content_key = push_comparison_line(
-                    out,
+                    &mut out.lines,
                     keys,
                     parent_signature,
                     KeyKind::BlockHeader,
@@ -151,10 +171,19 @@ fn flatten_node(
                     path,
                 );
 
-                for (child_idx, child_id) in block.children.iter().copied().enumerate() {
-                    path.push(child_idx);
-                    flatten_node(doc, child_id, header_content_key, path, out, keys, options);
-                    path.pop();
+                if path.len() + 1 < MAX_NESTING_DEPTH {
+                    for (child_idx, child_id) in block.children.iter().copied().enumerate() {
+                        path.push(child_idx);
+                        flatten_node(doc, child_id, header_content_key, path, out, keys, options);
+                        path.pop();
+                    }
+                } else if let Some(fingerprint) =
+                    subtree_fingerprint(doc, &block.children, path, quoted_values, options)
+                {
+                    out.truncations.push(Truncation {
+                        line: header,
+                        fingerprint,
+                    });
                 }
 
                 if let Some(footer) = &block.footer {
@@ -164,7 +193,7 @@ fn flatten_node(
                         normalize_for_compare(&footer.raw, footer.trivia, quoted_values, options)
                     {
                         push_comparison_line(
-                            out,
+                            &mut out.lines,
                             keys,
                             header_content_key,
                             KeyKind::BlockFooter,
@@ -179,6 +208,81 @@ fn flatten_node(
             }
         }
     }
+}
+
+/// hashes the lines `flatten_node` would emit for `children` of the block at `path`, or
+/// `None` when it would emit none.
+fn subtree_fingerprint(
+    doc: &Document,
+    children: &[NodeId],
+    path: &[usize],
+    quoted_values: bool,
+    options: &NormalizeOptions,
+) -> Option<u64> {
+    struct Level<'a> {
+        header: Option<String>,
+        children: std::iter::Enumerate<std::slice::Iter<'a, NodeId>>,
+        footer: Option<String>,
+        hashes: Vec<u64>,
+        ordered: bool,
+    }
+
+    let normalize = |line: &netform_ir::LineNode| {
+        normalize_for_compare(&line.raw, line.trivia, quoted_values, options)
+    };
+    let mut path = Path(path.to_vec());
+    let mut stack = vec![Level {
+        header: None,
+        children: children.iter().enumerate(),
+        footer: None,
+        hashes: Vec::new(),
+        ordered: options.policy_for_path(&path) == OrderPolicy::Ordered,
+    }];
+
+    while let Some(level) = stack.last_mut() {
+        if let Some((idx, &child_id)) = level.children.next() {
+            match doc.node(child_id) {
+                Some(Node::Line(line)) => {
+                    if let Some(text) = normalize(line) {
+                        level
+                            .hashes
+                            .push(xxhash_rust::xxh3::xxh3_64(text.as_bytes()));
+                    }
+                }
+                Some(Node::Block(block)) => {
+                    if let Some(header) = normalize(&block.header) {
+                        path.0.push(idx);
+                        stack.push(Level {
+                            header: Some(header),
+                            children: block.children.iter().enumerate(),
+                            footer: block.footer.as_ref().and_then(&normalize),
+                            hashes: Vec::new(),
+                            ordered: options.policy_for_path(&path) == OrderPolicy::Ordered,
+                        });
+                    }
+                }
+                None => {}
+            }
+        } else if let Some(mut done) = stack.pop() {
+            if !done.ordered {
+                done.hashes.sort_unstable();
+            }
+            let mut hasher = xxhash_rust::xxh3::Xxh3Default::new();
+            hasher.update(done.header.unwrap_or_default().as_bytes());
+            for hash in &done.hashes {
+                hasher.update(&hash.to_le_bytes());
+            }
+            hasher.update(done.footer.unwrap_or_default().as_bytes());
+            match stack.last_mut() {
+                Some(parent) => {
+                    parent.hashes.push(hasher.digest());
+                    path.0.pop();
+                }
+                None => return (!done.hashes.is_empty()).then(|| hasher.digest()),
+            }
+        }
+    }
+    None
 }
 
 /// FortiOS and Junos read `"…"` as a value; elsewhere a quote is plain text.
@@ -831,57 +935,5 @@ mod tests {
         // only the header should appear; the invalid child is skipped.
         assert_eq!(view.lines.len(), 1);
         assert_eq!(view.lines[0].normalized, "parent");
-    }
-
-    #[test]
-    fn flatten_respects_max_nesting_depth() {
-        // build a document that nests blocks deeper than MAX_NESTING_DEPTH.
-        // the flattener should silently stop recursing beyond the limit.
-        let mut doc = Document::default();
-
-        // start with the deepest leaf.
-        let leaf = doc.insert_node(Node::Line(LineNode {
-            raw: "  deep leaf".to_string(),
-            line_ending: "\n".to_string(),
-            span: dummy_span(MAX_NESTING_DEPTH + 2),
-            parsed: None,
-            key_hint: None,
-            trivia: TriviaKind::Content,
-        }));
-
-        // wrap it in MAX_NESTING_DEPTH layers of blocks.
-        let mut inner = leaf;
-        for depth in (1..=MAX_NESTING_DEPTH).rev() {
-            inner = doc.insert_node(Node::Block(BlockNode {
-                header: LineNode {
-                    raw: format!("level-{depth}"),
-                    line_ending: "\n".to_string(),
-                    span: dummy_span(depth),
-                    parsed: None,
-                    key_hint: None,
-                    trivia: TriviaKind::Content,
-                },
-                children: vec![inner],
-                footer: None,
-                kind_label: None,
-            }));
-        }
-        doc.roots.push(inner);
-
-        let view = build_comparison_view(&doc, &default_opts());
-
-        // the leaf sits at depth MAX_NESTING_DEPTH + 1 (root header is
-        // depth 1, its child header is depth 2, …). the guard truncates
-        // at MAX_NESTING_DEPTH so the leaf must be absent.
-        assert!(
-            !view.lines.iter().any(|l| l.normalized == "  deep leaf"),
-            "leaf beyond MAX_NESTING_DEPTH should be excluded"
-        );
-
-        // headers up to the limit should still be present.
-        assert!(
-            view.lines.iter().any(|l| l.normalized == "level-1"),
-            "top-level header should be present"
-        );
     }
 }
