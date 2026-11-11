@@ -1,14 +1,13 @@
 //! pins the IOS XR detection guard against the dialect interface-type tables
 //! it shadows.
 //!
-//! `netform_ir::detect` scores a four-part `rack/slot/instance/port` interface
-//! name as IOS XR unless the type is one another supported dialect spells, and
-//! it carries its own hand-maintained copy of those spellings — the tables
-//! themselves live here, in a crate that depends on it, so the guard cannot
-//! read them.
+//! `netform_dialects::detect` scores a four-part `rack/slot/instance/port`
+//! interface name as IOS XR unless the type is one another registered dialect
+//! spells, reading those spellings from the registry's interface-type tables.
 //!
-//! without this, adding an interface type to the registry silently changes what
-//! `--dialect auto` reports for that vendor's four-part names.
+//! without this, a table the guard stops reading, or a type that starts with an
+//! IOS XR-only prefix, silently makes `--dialect auto` report that vendor's
+//! four-part names as IOS XR.
 
 use netform_dialects::{DialectEntry, REGISTRY, detect_dialect};
 use netform_ir::DialectHint;
@@ -36,7 +35,7 @@ fn no_dialect_interface_type_scores_iosxr_on_slot_shape() {
                     detect_dialect(&input),
                     iosxr,
                     "{} carries `{ty}`, and `interface {ty}{suffix}` reads as IOS XR — \
-                     netform_ir::detect's guard no longer covers that table",
+                     netform_dialects::detect's guard no longer covers that table",
                     entry.name,
                 );
             }

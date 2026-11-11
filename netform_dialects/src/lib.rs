@@ -3,7 +3,7 @@
 //! a vendor is an entry in [`REGISTRY`], not a crate.  most vendors are
 //! described entirely as data — an interface-type table, a VRF keyword, a set
 //! of router protocols, a list of [`rules::KeyRule`]s and the
-//! [`netform_ir::detect::Signal`]s that identify its configuration text — and
+//! [`detect::Signal`]s that identify its configuration text — and
 //! the IOS-like parser and [`detect_dialect`] are driven from that.  vendors
 //! whose grammar needs real code (Junos' brace blocks, FortiOS'
 //! `config`/`edit` terminators) keep their own parser and appear here through
@@ -25,6 +25,8 @@
 //! );
 //! ```
 
+pub mod detect;
+pub mod ios_like;
 pub mod rules;
 
 pub mod eos;
@@ -34,15 +36,16 @@ pub mod iosxr;
 pub mod junos;
 pub mod nxos;
 
-use netform_ir::detect::{Signal, SignalTable};
-use netform_ir::{DialectHint, Document, IosKeyHintConfig, ParsedLineParts, ios_family_key_hint};
+use detect::{Signal, SignalTable};
+use ios_like::{IosKeyHintConfig, ios_family_key_hint};
+use netform_ir::{DialectHint, Document, ParsedLineParts};
 use rules::{KeyRule, rule_key_hint};
 
 /// the data an IOS-family vendor needs to derive key hints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IosRules {
     /// interface type prefixes in canonical lowercase form,
-    /// longest-prefix-first (see `netform_ir::parse_interface`).
+    /// longest-prefix-first (see `ios_like::parse_interface`).
     pub interface_types: &'static [&'static str],
     /// the VRF sub-command keyword (`"instance"`, `"definition"`, `"context"`).
     pub vrf_keyword: &'static str,
@@ -161,7 +164,7 @@ pub fn names() -> impl Iterator<Item = &'static str> {
 ///
 /// scores every entry in [`REGISTRY`] on its own signals and returns the
 /// winner, or [`DialectHint::Generic`] when none of them is a confident enough
-/// match.  see [`netform_ir::detect`] for the scoring rules.
+/// match.  see [`detect`] for the scoring rules.
 pub fn detect_dialect(input: &str) -> DialectHint {
     let tables: Vec<SignalTable> = REGISTRY
         .iter()
@@ -171,13 +174,14 @@ pub fn detect_dialect(input: &str) -> DialectHint {
         })
         .collect();
 
-    netform_ir::detect::detect_dialect(input, &tables)
+    detect::detect_dialect(input, &tables)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::{ParsedLineParts, parse_ios_like_parts};
+    use ios_like::parse_ios_like_parts;
+    use netform_ir::ParsedLineParts;
     use rules::KeyRuleAction;
 
     #[test]

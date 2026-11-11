@@ -10,7 +10,7 @@
 //!
 //! ```rust
 //! use netform_dialects::rules::{ArgGuard, KeyRule, KeyRuleAction, rule_key_hint};
-//! use netform_ir::parse_ios_like_parts;
+//! use netform_dialects::ios_like::parse_ios_like_parts;
 //!
 //! const RULES: &[KeyRule] = &[KeyRule {
 //!     head: "vpc",
@@ -25,7 +25,8 @@
 //! );
 //! ```
 
-use netform_ir::{ParsedLineParts, common_key_hint};
+use crate::ios_like::common_key_hint;
+use netform_ir::ParsedLineParts;
 
 /// a requirement that the argument at `index` is one of `any_of`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,7 +168,7 @@ pub fn rule_key_hint(rules: &[KeyRule], parsed: Option<&ParsedLineParts>) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::parse_ios_like_parts;
+    use crate::ios_like::parse_ios_like_parts;
 
     const RULES: &[KeyRule] = &[
         KeyRule {
