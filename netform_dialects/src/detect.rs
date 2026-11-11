@@ -4,8 +4,7 @@
 //! line-shape tests a vendor's signals are written in, and the winner/margin
 //! arithmetic.  the signals are data the caller supplies — one [`SignalTable`]
 //! per vendor — and live with the rest of that vendor's description in
-//! [`REGISTRY`](crate::REGISTRY); [`crate::detect_dialect`] runs this over
-//! every entry.
+//! [`REGISTRY`]; [`crate::detect_dialect`] runs this over every entry.
 //!
 //! [`detect_dialect`] accumulates a per-vendor score over the scorable lines
 //! and returns the highest-scoring vendor as a [`DialectHint`].  the winner
@@ -33,7 +32,9 @@
 //! assert_eq!(detect_dialect("", &tables), DialectHint::Generic);
 //! ```
 
+use crate::REGISTRY;
 use crate::ios_like::ios_like_literal_region;
+use crate::junos::STANZA_NAMES as JUNOS_STANZA_NAMES;
 use netform_ir::DialectHint;
 
 /// score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
@@ -137,9 +138,9 @@ impl Test {
             }
             Test::WordContainsSlash(index) => words.get(*index).is_some_and(|w| w.contains('/')),
             Test::AnyWordIsDottedMask => words.iter().any(|w| looks_like_dotted_mask(w)),
-            Test::WordIsJunosStanza(index) => {
-                words.get(*index).is_some_and(|w| is_junos_stanza_name(w))
-            }
+            Test::WordIsJunosStanza(index) => words
+                .get(*index)
+                .is_some_and(|w| JUNOS_STANZA_NAMES.contains(w)),
             Test::InterfaceName(shape) => match interface_name(line) {
                 Some(name) => shape.holds(name),
                 None => false,
@@ -260,28 +261,6 @@ fn banner_body_end(lines: &[&str], idx: usize) -> Option<usize> {
         .map(|offset| idx + 1 + offset)
 }
 
-/// returns `true` if `name` is a well-known Junos top-level stanza name.
-fn is_junos_stanza_name(name: &str) -> bool {
-    matches!(
-        name,
-        "interfaces"
-            | "protocols"
-            | "policy-options"
-            | "routing-options"
-            | "forwarding-options"
-            | "class-of-service"
-            | "system"
-            | "security"
-            | "firewall"
-            | "vlans"
-            | "chassis"
-            | "snmp"
-            | "applications"
-            | "groups"
-            | "routing-instances"
-    )
-}
-
 /// returns `true` if `name` is an IOS XE speed-prefixed Ethernet interface
 /// name (e.g. `GigabitEthernet1/0/1`, `HundredGigE1/0/1`).
 fn is_iosxe_ethernet_name(name: &str) -> bool {
@@ -317,49 +296,19 @@ fn is_iosxr_interface_name(name: &str) -> bool {
     has_four_part_slot(name) && !is_other_dialect_interface_name(&lower)
 }
 
-/// interface type prefixes that a supported dialect other than IOS XR spells.
-///
-/// a superset of the IOS XE, NX-OS and EOS `*_INTERFACE_TYPES` tables: it also
-/// carries vendor spellings those tables do not yet parse
-/// (`hundredgigabitethernet`, `fourhundredgig`, `twohundredgig`), because a
-/// name IOS XE spells must not score IOS XR whether or not netform can key it.
-///
-/// the containment is an invariant, not a coincidence — every entry of every
-/// dialect table must start with one of these prefixes, or that dialect's
-/// four-part interface names silently begin scoring IOS XR. the
-/// `detect_guard_coverage` suite asserts it.
-const OTHER_DIALECT_INTERFACE_PREFIXES: &[&str] = &[
-    "appgigabitethernet",
-    "bdi",
-    "ethernet",
-    "fabric",
-    "fastethernet",
-    "fivegigabitethernet",
-    "fortygigabitethernet",
-    "fourhundredgig",
-    "gigabitethernet",
-    "hundredgigabitethernet",
-    "hundredgige",
-    "loopback",
-    "management",
-    "mgmt",
-    "nve",
-    "port-channel",
-    "serial",
-    "tengigabitethernet",
-    "tunnel",
-    "twentyfivegige",
-    "twogigabitethernet",
-    "twohundredgig",
-    "vlan",
-    "vxlan",
-];
+/// IOS XE spellings no interface-type table parses yet, which must not score IOS XR either.
+const UNPARSED_OTHER_DIALECT_PREFIXES: &[&str] =
+    &["fourhundredgig", "hundredgigabitethernet", "twohundredgig"];
 
 /// returns `true` if `lower` — an already-lowercased interface name — starts
-/// with an interface type another supported dialect spells.
+/// with an interface type another registered dialect spells.
 fn is_other_dialect_interface_name(lower: &str) -> bool {
-    OTHER_DIALECT_INTERFACE_PREFIXES
+    REGISTRY
         .iter()
+        .filter(|entry| entry.name != "iosxr")
+        .filter_map(|entry| entry.rules)
+        .flat_map(|rules| rules.interface_types)
+        .chain(UNPARSED_OTHER_DIALECT_PREFIXES)
         .any(|prefix| lower.starts_with(prefix))
 }
 

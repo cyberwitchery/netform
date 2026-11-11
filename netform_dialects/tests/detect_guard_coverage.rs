@@ -2,12 +2,12 @@
 //! it shadows.
 //!
 //! `netform_dialects::detect` scores a four-part `rack/slot/instance/port`
-//! interface name as IOS XR unless the type is one another supported dialect
-//! spells, and it carries its own hand-maintained copy of those spellings
-//! rather than reading the registry's tables.
+//! interface name as IOS XR unless the type is one another registered dialect
+//! spells, reading those spellings from the registry's interface-type tables.
 //!
-//! without this, adding an interface type to the registry silently changes what
-//! `--dialect auto` reports for that vendor's four-part names.
+//! without this, a table the guard stops reading, or a type that starts with an
+//! IOS XR-only prefix, silently makes `--dialect auto` report that vendor's
+//! four-part names as IOS XR.
 
 use netform_dialects::{DialectEntry, REGISTRY, detect_dialect};
 use netform_ir::DialectHint;
