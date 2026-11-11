@@ -1,9 +1,10 @@
 //! Cisco NX-OS as registry data.
 
 use crate::IosRules;
+use crate::detect::{MODERATE_SIGNAL, NameShape, STRONG_SIGNAL, Signal, Test};
+use crate::ios_like::IosLikeDialect;
 use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
-use netform_ir::detect::{MODERATE_SIGNAL, NameShape, STRONG_SIGNAL, Signal, Test};
-use netform_ir::{Document, IosLikeDialect, ParsedLineParts, parse_with_dialect};
+use netform_ir::{Document, ParsedLineParts, parse_with_dialect};
 
 /// NX-OS key-hint data.
 pub const RULES: IosRules = IosRules {
@@ -98,7 +99,8 @@ interface port-channel10
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::{Node, TriviaKind, parse_ios_like_parts};
+    use crate::ios_like::parse_ios_like_parts;
+    use netform_ir::{Node, TriviaKind};
 
     fn root_trivia(doc: &Document) -> Vec<(&str, TriviaKind)> {
         doc.roots

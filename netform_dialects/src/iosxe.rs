@@ -1,9 +1,10 @@
 //! Cisco IOS XE as registry data.
 
 use crate::IosRules;
+use crate::detect::{MODERATE_SIGNAL, NameShape, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
+use crate::ios_like::IosLikeDialect;
 use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
-use netform_ir::detect::{MODERATE_SIGNAL, NameShape, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
-use netform_ir::{Document, IosLikeDialect, ParsedLineParts, parse_with_dialect};
+use netform_ir::{Document, ParsedLineParts, parse_with_dialect};
 
 /// IOS XE key-hint data.
 pub const RULES: IosRules = IosRules {
@@ -138,7 +139,8 @@ ip access-list extended MGMT-IN
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::{Node, TriviaKind, parse_ios_like_parts};
+    use crate::ios_like::parse_ios_like_parts;
+    use netform_ir::{Node, TriviaKind};
 
     /// `(raw, trivia, key_hint)` for each root line of a flat document.
     fn root_lines(doc: &Document) -> Vec<(&str, TriviaKind, Option<&str>)> {

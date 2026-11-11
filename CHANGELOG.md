@@ -1,5 +1,9 @@
 # changelog
 
+## Unreleased
+
+- the IOS-family dialect and dialect detection moved from `netform_ir` to `netform_dialects`: `IosLikeDialect`, `ios_like_literal_region`, `IosKeyHintConfig`, `ios_family_key_hint`, `common_key_hint`, `parse_interface`, `classify_ios_like_trivia` and `parse_ios_like_parts` are now in `netform_dialects::ios_like`, and `netform_ir::detect` is now `netform_dialects::detect`. they are removed from `netform_ir`, which keeps the `Dialect` trait, the parser and the generic helpers. detection and parsing results are unchanged
+
 ## [0.10.3] - 2026-11-04
 
 - a statement that only moved past a changed sibling is no longer reported as deleted and re-inserted under `--order-policy ordered` (the default), whichever file comes first. when `ntp server 192.0.2.1` and `ip route 10.0.0.0 255.0.0.0 192.0.2.1 name X` swapped places and the route's name became `Y`, `config-diff r1 r2` reported the route's old line deleted and its new line inserted, but `config-diff r2 r1` reported the unchanged ntp line deleted and re-inserted around a replace of the route, and `--plan-json` planned that delete and insert. both directions now report only the route. among the pairings that match the most statements by key, the one that leaves the most lines unchanged is now chosen, so a block that moved, or changed one line, is no longer deleted and re-inserted whole to keep a single line it moved past. siblings that share a key are still paired identical ones first, then in order. two very different large configurations, such as two unrelated 20,000-line files, are paired as before, and `keyed-stable` and `unordered` are unchanged

@@ -3,9 +3,9 @@
 //! this module is the scoring engine: the weights, the thresholds, the
 //! line-shape tests a vendor's signals are written in, and the winner/margin
 //! arithmetic.  the signals are data the caller supplies — one [`SignalTable`]
-//! per vendor — and live with the rest of that vendor's description;
-//! `netform_dialects` holds netform's and wraps this in a zero-argument
-//! `detect_dialect` over its registry.
+//! per vendor — and live with the rest of that vendor's description in
+//! [`REGISTRY`](crate::REGISTRY); [`crate::detect_dialect`] runs this over
+//! every entry.
 //!
 //! [`detect_dialect`] accumulates a per-vendor score over the scorable lines
 //! and returns the highest-scoring vendor as a [`DialectHint`].  the winner
@@ -15,8 +15,8 @@
 //! # Example
 //!
 //! ```rust
+//! use netform_dialects::detect::{MODERATE_SIGNAL, Signal, SignalTable, Test, detect_dialect};
 //! use netform_ir::DialectHint;
-//! use netform_ir::detect::{MODERATE_SIGNAL, Signal, SignalTable, Test, detect_dialect};
 //!
 //! const BRACES: &[Signal] = &[Signal {
 //!     weight: MODERATE_SIGNAL,
@@ -33,7 +33,8 @@
 //! assert_eq!(detect_dialect("", &tables), DialectHint::Generic);
 //! ```
 
-use crate::{DialectHint, ios_like_literal_region};
+use crate::ios_like::ios_like_literal_region;
+use netform_ir::DialectHint;
 
 /// score for a highly distinctive, dialect-unique pattern (e.g. FortiOS
 /// `config <section>`, NX-OS `feature <name>`, Junos top-level stanza names).
@@ -325,9 +326,8 @@ fn is_iosxr_interface_name(name: &str) -> bool {
 ///
 /// the containment is an invariant, not a coincidence — every entry of every
 /// dialect table must start with one of these prefixes, or that dialect's
-/// four-part interface names silently begin scoring IOS XR. nothing in this
-/// crate can check that: the tables live in `netform_dialects`, which depends
-/// on this one. its `detect_guard_coverage` suite sees both and asserts it.
+/// four-part interface names silently begin scoring IOS XR. the
+/// `detect_guard_coverage` suite asserts it.
 const OTHER_DIALECT_INTERFACE_PREFIXES: &[&str] = &[
     "appgigabitethernet",
     "bdi",
