@@ -16,7 +16,7 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::detect::{MODERATE_SIGNAL, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
+use crate::detect::{MODERATE_SIGNAL, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
 use netform_ir::{
     Dialect, DialectHint, Document, LiteralTerminator, ParsedLineParts, TriviaKind,
     classify_trivia_with_prefixes, ends_inside_quoted_value, parse_with_dialect, tokenize,
@@ -132,6 +132,25 @@ fn parse_junos_parts(raw: &str) -> Option<ParsedLineParts> {
     Some(ParsedLineParts { head, args })
 }
 
+/// the well-known Junos top-level stanza names, each keyed by its own name.
+pub(crate) const STANZA_NAMES: &[&str] = &[
+    "interfaces",
+    "protocols",
+    "routing-instances",
+    "policy-options",
+    "firewall",
+    "security",
+    "snmp",
+    "vlans",
+    "chassis",
+    "class-of-service",
+    "forwarding-options",
+    "applications",
+    "groups",
+    "system",
+    "routing-options",
+];
+
 fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let parsed = parsed?;
     let mut tokens = std::iter::once(&parsed.head)
@@ -142,9 +161,7 @@ fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let args = tokens.collect::<Vec<_>>();
 
     match head {
-        "interfaces" | "protocols" | "routing-instances" | "policy-options" | "firewall"
-        | "security" | "snmp" | "vlans" | "chassis" | "class-of-service" | "forwarding-options"
-        | "applications" | "groups" | "system" | "routing-options" => Some(head.to_string()),
+        _ if STANZA_NAMES.contains(&head) => Some(head.to_string()),
         "set" => set_style_key_hint(&args),
         _ => None,
     }

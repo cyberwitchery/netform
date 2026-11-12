@@ -1,9 +1,10 @@
 //! Arista EOS as registry data.
 
 use crate::IosRules;
+use crate::detect::{MODERATE_SIGNAL, NameShape, Signal, Test, WEAK_SIGNAL};
+use crate::ios_like::IosLikeDialect;
 use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
-use netform_ir::detect::{MODERATE_SIGNAL, NameShape, Signal, Test, WEAK_SIGNAL};
-use netform_ir::{Document, IosLikeDialect, ParsedLineParts, parse_with_dialect};
+use netform_ir::{Document, ParsedLineParts, parse_with_dialect};
 
 /// EOS key-hint data.
 pub const RULES: IosRules = IosRules {
@@ -121,7 +122,8 @@ management api http-commands
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::{Node, TriviaKind, classify_ios_like_trivia, parse_ios_like_parts};
+    use crate::ios_like::{classify_ios_like_trivia, parse_ios_like_parts};
+    use netform_ir::{Node, TriviaKind};
 
     fn root_trivia(doc: &Document) -> Vec<(&str, TriviaKind)> {
         doc.roots

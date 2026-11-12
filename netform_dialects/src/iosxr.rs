@@ -1,9 +1,10 @@
 //! Cisco IOS XR as registry data.
 
 use crate::IosRules;
+use crate::detect::{MODERATE_SIGNAL, NameShape, STRONG_SIGNAL, Signal, Test};
+use crate::ios_like::IosLikeDialect;
 use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
-use netform_ir::detect::{MODERATE_SIGNAL, NameShape, STRONG_SIGNAL, Signal, Test};
-use netform_ir::{Document, IosLikeDialect, ParsedLineParts, parse_with_dialect};
+use netform_ir::{Document, ParsedLineParts, parse_with_dialect};
 
 /// IOS XR key-hint data.
 pub const RULES: IosRules = IosRules {

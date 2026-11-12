@@ -16,11 +16,11 @@
 //! assert_eq!(doc.render(), cfg);
 //! ```
 
-use netform_ir::detect::{MODERATE_SIGNAL, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
+use crate::detect::{MODERATE_SIGNAL, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
+use crate::ios_like::parse_ios_like_parts;
 use netform_ir::{
     Dialect, DialectHint, Document, LiteralTerminator, ParsedLineParts, TriviaKind,
-    classify_trivia_with_prefixes, ends_inside_quoted_value, parse_ios_like_parts,
-    parse_with_dialect,
+    classify_trivia_with_prefixes, ends_inside_quoted_value, parse_with_dialect,
 };
 
 /// dialect implementation for FortiOS configuration text.
