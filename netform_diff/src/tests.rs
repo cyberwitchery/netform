@@ -142,6 +142,25 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
     };
     let ignore_comments = || NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
     let cut_126 = || vec![Path(vec![0; 127]), Path([vec![0; 126], vec![1]].concat())];
+    let second_126 = || Path([vec![0; 126], vec![1]].concat());
+    let second_then_first = || vec![second_126(), Path(vec![0; 127])];
+    let emptied_same: (&[&str], &[&str]) =
+        (&["dup", " ! c", "dup", " x"], &["dup", " ! c", "dup", " x"]);
+    let leaf_moved: (&[&str], &[&str]) = (&["dup", "dup", " x"], &["dup", " x", "dup"]);
+    let emptied_swapped: (&[&str], &[&str]) =
+        (&["dup", " ! c", "dup", " x"], &["dup", " x", "dup", " ! c"]);
+    let across_parents: (&[&str], &[&str]) = (
+        &["P", " dup", "  x", "Q", " dup", "  y"],
+        &["P", " dup", "  y", "Q", " dup", "  x"],
+    );
+    let dups: (&[&str], &[&str]) = (&["dup", " x", "dup", " y"], &["dup", " y", "dup", " x"]);
+    let parent_ordered = || {
+        let parent = OrderPolicyOverride {
+            context_prefix: vec![0; 126],
+            policy: OrderPolicy::Ordered,
+        };
+        with_policy(OrderPolicy::Unordered, vec![parent])
+    };
     // one row per child order: which one needs the policy hashed depends on hash order.
     let mixed: [(&[&str], &[&str]); 4] = [
         (
@@ -174,6 +193,35 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
         (130, reordered, unordered(), false, 0, cut()),
         (130, renamed, ordered(), true, 0, cut()),
         (126, comment_to_line, ignore_comments(), true, 0, cut()),
+        (
+            126,
+            emptied_same,
+            ignore_comments(),
+            false,
+            0,
+            vec![second_126()],
+        ),
+        (
+            126,
+            emptied_swapped,
+            ignore_comments(),
+            true,
+            0,
+            second_then_first(),
+        ),
+        (126, leaf_moved, ordered(), true, 0, second_then_first()),
+        (126, dups, parent_ordered(), true, 0, cut_126()),
+        (
+            125,
+            across_parents,
+            unordered(),
+            true,
+            0,
+            vec![
+                Path(vec![0; 127]),
+                Path([vec![0; 125], vec![1, 0]].concat()),
+            ],
+        ),
         (130, swap_reversed, left_alpha_ordered(130), true, 0, cut()),
         (126, swapped, left_alpha_ordered(126), false, 0, cut_126()),
         (130, swapped, left_alpha_ordered(130), false, 0, cut()),

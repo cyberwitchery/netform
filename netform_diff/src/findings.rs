@@ -124,7 +124,7 @@ fn siblings<'a>(
 /// pairs each side's truncated blocks; a pair is reported once, on the left.
 ///
 /// blocks pair under parents that share an occurrence key, as the engine pairs siblings under the
-/// left parent's policy: same contents first unless it is `ordered`, then in order.
+/// left parent's policy: by occurrence key if `ordered`, else same contents first, then in order.
 pub(crate) fn truncated_regions<'a>(
     a: &'a Document,
     a_view: &'a ComparisonView,
@@ -166,22 +166,33 @@ pub(crate) fn truncated_regions<'a>(
     let mut partners = vec![None; left.len()];
     let mut paired = vec![false; right.len()];
     for (policy, lefts, rights) in buckets.values() {
-        if *policy != OrderPolicy::Ordered {
-            let guide = left[lefts[0]].1.cut;
-            let mut by_contents: HashMap<u64, VecDeque<usize>> = HashMap::new();
-            for &index in rights {
-                if let Some(fingerprint) = cut_fingerprint(right[index].cut, guide, options) {
-                    by_contents.entry(fingerprint).or_default().push_back(index);
-                }
-            }
+        if *policy == OrderPolicy::Ordered {
+            let by_occurrence = rights
+                .iter()
+                .map(|&index| (right[index].header.occurrence_key, index))
+                .collect::<HashMap<_, _>>();
             for &index in lefts {
-                let partner = by_contents
-                    .get_mut(&left[index].0)
-                    .and_then(VecDeque::pop_front);
-                if let Some(partner) = partner {
+                if let Some(&partner) = by_occurrence.get(&left[index].1.header.occurrence_key) {
                     partners[index] = Some(partner);
                     paired[partner] = true;
                 }
+            }
+            continue;
+        }
+        let guide = left[lefts[0]].1.cut;
+        let mut by_contents: HashMap<u64, VecDeque<usize>> = HashMap::new();
+        for &index in rights {
+            if let Some(fingerprint) = cut_fingerprint(right[index].cut, guide, options) {
+                by_contents.entry(fingerprint).or_default().push_back(index);
+            }
+        }
+        for &index in lefts {
+            let partner = by_contents
+                .get_mut(&left[index].0)
+                .and_then(VecDeque::pop_front);
+            if let Some(partner) = partner {
+                partners[index] = Some(partner);
+                paired[partner] = true;
             }
         }
         let rest = rights
