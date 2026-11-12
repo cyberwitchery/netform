@@ -910,9 +910,14 @@ fn tree_fingerprint(lines: &[ComparisonLine]) -> u64 {
 
 /// the key siblings are paired on, matching how `policy` buckets lines.
 fn header_identity(segment: &Segment, policy: OrderPolicy) -> u64 {
+    sibling_identity(&segment.lines[0], policy)
+}
+
+/// the key a sibling headed by `header` is paired on under `policy`.
+pub(crate) fn sibling_identity(header: &ComparisonLine, policy: OrderPolicy) -> u64 {
     match policy {
-        OrderPolicy::Unordered => unordered_key(&segment.lines[0]),
-        OrderPolicy::Ordered | OrderPolicy::KeyedStable => segment.segment_key,
+        OrderPolicy::Unordered => unordered_key(header),
+        OrderPolicy::Ordered | OrderPolicy::KeyedStable => header.content_key,
     }
 }
 

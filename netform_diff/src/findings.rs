@@ -1,12 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use netform_ir::{Document, Node, Path};
 
+use crate::engine::sibling_identity;
 use crate::flatten::{
     Cut, MAX_NESTING_DEPTH, Truncation, content_counts, cut_fingerprint, extracted_key_counts,
 };
 use crate::model::{
-    ComparisonLine, ComparisonView, Finding, FindingLevel, NormalizeOptions, finding_code,
+    ComparisonLine, ComparisonView, Finding, FindingLevel, NormalizeOptions, OrderPolicy,
+    finding_code,
 };
 
 #[derive(Debug)]
@@ -82,51 +84,137 @@ pub(crate) struct TruncatedRegion<'a> {
     pub(crate) differs: bool,
 }
 
-/// pairs each side's truncated blocks by occurrence key; a pair is reported once, on the left.
+/// a truncated block, and the occurrence key of its parent's header.
+struct Sibling<'a> {
+    cut: Cut<'a>,
+    header: &'a ComparisonLine,
+    parent: u64,
+}
+
+fn siblings<'a>(
+    doc: &'a Document,
+    view: &'a ComparisonView,
+    truncations: &[Truncation],
+) -> Vec<Sibling<'a>> {
+    let mut parent = 0;
+    let mut scanned = 0;
+    truncations
+        .iter()
+        .map(|truncation| {
+            let header = &view.lines[truncation.line];
+            for line in &view.lines[scanned..truncation.line] {
+                if line.path.0.len() + 1 == header.path.0.len() {
+                    parent = line.occurrence_key;
+                }
+            }
+            scanned = truncation.line;
+            Sibling {
+                cut: Cut {
+                    doc,
+                    block: truncation.block,
+                    path: &header.path,
+                },
+                header,
+                parent,
+            }
+        })
+        .collect()
+}
+
+/// pairs each side's truncated blocks; a pair is reported once, on the left.
+///
+/// blocks pair under parents that share an occurrence key, as the engine pairs siblings under the
+/// left parent's policy: same contents first unless it is `ordered`, then in order.
 pub(crate) fn truncated_regions<'a>(
-    a: &Document,
+    a: &'a Document,
     a_view: &'a ComparisonView,
     a_truncations: &[Truncation],
-    b: &Document,
+    b: &'a Document,
     b_view: &'a ComparisonView,
     b_truncations: &[Truncation],
     options: &NormalizeOptions,
 ) -> Vec<TruncatedRegion<'a>> {
-    let cut = |doc, view: &'a ComparisonView, truncation: &Truncation| Cut {
-        doc,
-        block: truncation.block,
-        path: &view.lines[truncation.line].path,
-    };
-    let mut unpaired = b_truncations
-        .iter()
-        .map(|truncation| (b_view.lines[truncation.line].occurrence_key, truncation))
-        .collect::<HashMap<_, _>>();
-    let mut regions = Vec::new();
+    let left = siblings(a, a_view, a_truncations)
+        .into_iter()
+        .filter_map(|left| Some((cut_fingerprint(left.cut, left.cut, options)?, left)))
+        .collect::<Vec<_>>();
+    let right = siblings(b, b_view, b_truncations);
 
-    for truncation in a_truncations {
-        let left = cut(a, a_view, truncation);
-        let Some(fingerprint) = cut_fingerprint(left, left, options) else {
-            continue;
-        };
-        let header = &a_view.lines[truncation.line];
-        let right = unpaired
-            .remove(&header.occurrence_key)
-            .and_then(|right| cut_fingerprint(cut(b, b_view, right), left, options));
+    let mut policies = HashMap::new();
+    let mut buckets = HashMap::new();
+    for (index, (_, sibling)) in left.iter().enumerate() {
+        let policy = *policies.entry(sibling.parent).or_insert_with(|| {
+            let path = &sibling.header.path.0;
+            options.policy_for_path(&Path(path[..path.len() - 1].to_vec()))
+        });
+        let identity = sibling_identity(sibling.header, policy);
+        buckets
+            .entry((sibling.parent, identity))
+            .or_insert_with(|| (policy, Vec::new(), Vec::new()))
+            .1
+            .push(index);
+    }
+    for (index, sibling) in right.iter().enumerate() {
+        if let Some(&policy) = policies.get(&sibling.parent) {
+            let identity = sibling_identity(sibling.header, policy);
+            if let Some(bucket) = buckets.get_mut(&(sibling.parent, identity)) {
+                bucket.2.push(index);
+            }
+        }
+    }
+
+    let mut partners = vec![None; left.len()];
+    let mut paired = vec![false; right.len()];
+    for (policy, lefts, rights) in buckets.values() {
+        if *policy != OrderPolicy::Ordered {
+            let guide = left[lefts[0]].1.cut;
+            let mut by_contents: HashMap<u64, VecDeque<usize>> = HashMap::new();
+            for &index in rights {
+                if let Some(fingerprint) = cut_fingerprint(right[index].cut, guide, options) {
+                    by_contents.entry(fingerprint).or_default().push_back(index);
+                }
+            }
+            for &index in lefts {
+                let partner = by_contents
+                    .get_mut(&left[index].0)
+                    .and_then(VecDeque::pop_front);
+                if let Some(partner) = partner {
+                    partners[index] = Some(partner);
+                    paired[partner] = true;
+                }
+            }
+        }
+        let rest = rights
+            .iter()
+            .copied()
+            .filter(|&index| !paired[index])
+            .collect::<Vec<_>>();
+        let unmatched = lefts
+            .iter()
+            .copied()
+            .filter(|&index| partners[index].is_none())
+            .collect::<Vec<_>>();
+        for (index, partner) in unmatched.into_iter().zip(rest) {
+            partners[index] = Some(partner);
+            paired[partner] = true;
+        }
+    }
+
+    let mut regions = Vec::new();
+    for ((fingerprint, sibling), partner) in left.iter().zip(&partners) {
+        let right =
+            partner.and_then(|partner| cut_fingerprint(right[partner].cut, sibling.cut, options));
         regions.push(TruncatedRegion {
             side: "left",
-            header,
-            differs: right != Some(fingerprint),
+            header: sibling.header,
+            differs: right != Some(*fingerprint),
         });
     }
-    for truncation in b_truncations {
-        let header = &b_view.lines[truncation.line];
-        let right = cut(b, b_view, truncation);
-        if unpaired.contains_key(&header.occurrence_key)
-            && cut_fingerprint(right, right, options).is_some()
-        {
+    for (sibling, paired) in right.iter().zip(paired) {
+        if !paired && cut_fingerprint(sibling.cut, sibling.cut, options).is_some() {
             regions.push(TruncatedRegion {
                 side: "right",
-                header,
+                header: sibling.header,
                 differs: true,
             });
         }
@@ -233,18 +321,23 @@ fn collect_parse_findings(
 
 fn collect_unknown_block_findings(doc: &Document, side: &str, out: &mut Vec<Finding>) {
     let mut path = Vec::new();
-    let mut stack = vec![doc.roots.iter().enumerate()];
-    while let Some(siblings) = stack.last_mut() {
+    let mut open = HashSet::new();
+    let mut stack = vec![(None, doc.roots.iter().enumerate())];
+    while let Some((_, siblings)) = stack.last_mut() {
         let Some((idx, &node_id)) = siblings.next() else {
-            stack.pop();
+            if let Some((Some(block), _)) = stack.pop() {
+                open.remove(&block);
+            }
             path.pop();
             continue;
         };
         path.push(idx);
-        let Some(Node::Block(block)) = doc.node(node_id) else {
+        let Some(Node::Block(block)) = doc.node(node_id).filter(|_| !open.contains(&node_id))
+        else {
             path.pop();
             continue;
         };
+        open.insert(node_id);
         if block.kind_label.as_deref() == Some("unknown") {
             out.push(Finding {
                 code: finding_code::UNKNOWN_UNPARSED_CONSTRUCT.to_string(),
@@ -254,7 +347,7 @@ fn collect_unknown_block_findings(doc: &Document, side: &str, out: &mut Vec<Find
                 span: Some(block.header.span.clone()),
             });
         }
-        stack.push(block.children.iter().enumerate());
+        stack.push((Some(node_id), block.children.iter().enumerate()));
     }
 }
 

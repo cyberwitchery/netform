@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use netform_ir::{BlockNode, DialectHint, Document, LineNode, Node, NodeId, Path, TriviaKind};
+use xxhash_rust::xxh3::Xxh3Default;
 
 use crate::model::{
     ComparisonLine, ComparisonView, KeyKind, NormalizeOptions, OrderPolicy, derive_content_key,
@@ -292,6 +293,7 @@ pub(crate) fn cut_fingerprint(
     options: &NormalizeOptions,
 ) -> Option<u64> {
     struct Level<'s, 'g> {
+        block: NodeId,
         header: Option<String>,
         children: std::slice::Iter<'s, NodeId>,
         footer: Option<String>,
@@ -308,7 +310,9 @@ pub(crate) fn cut_fingerprint(
         return None;
     };
     let mut guide_path = guide.path.clone();
+    let mut open = HashSet::from([subject.block]);
     let mut stack = vec![Level {
+        block: subject.block,
         header: None,
         children: root.children.iter(),
         footer: None,
@@ -321,13 +325,15 @@ pub(crate) fn cut_fingerprint(
             match subject.doc.node(child_id) {
                 Some(Node::Line(line)) => {
                     if let Some(text) = normalize(line) {
-                        level
-                            .hashes
-                            .push(xxhash_rust::xxh3::xxh3_64(text.as_bytes()));
+                        level.hashes.push(leaf_hash(LINE, &text));
                     }
                 }
                 Some(Node::Block(block)) => {
                     if let Some(header) = normalize(&block.header) {
+                        if !open.insert(child_id) {
+                            level.hashes.push(leaf_hash(CYCLE, &header));
+                            continue;
+                        }
                         let position = level.hashes.len();
                         let paired = level
                             .guide
@@ -338,6 +344,7 @@ pub(crate) fn cut_fingerprint(
                             Guide::new(guide.doc, paired, &guide_path, options)
                         });
                         stack.push(Level {
+                            block: child_id,
                             header: Some(header),
                             children: block.children.iter(),
                             footer: block.footer.as_ref().and_then(normalize),
@@ -356,15 +363,18 @@ pub(crate) fn cut_fingerprint(
             if !ordered {
                 done.hashes.sort_unstable();
             }
-            let mut hasher = xxhash_rust::xxh3::Xxh3Default::new();
-            hasher.update(done.header.unwrap_or_default().as_bytes());
+            open.remove(&done.block);
+            let mut hasher = Xxh3Default::new();
+            hasher.update(&[BLOCK]);
+            update_field(&mut hasher, done.header.as_deref());
+            hasher.update(&(done.hashes.len() as u64).to_le_bytes());
             if done.hashes.len() > 1 {
                 hasher.update(&[u8::from(ordered)]);
             }
             for hash in &done.hashes {
                 hasher.update(&hash.to_le_bytes());
             }
-            hasher.update(done.footer.unwrap_or_default().as_bytes());
+            update_field(&mut hasher, done.footer.as_deref());
             match stack.last_mut() {
                 Some(parent) => {
                     parent.hashes.push(hasher.digest());
@@ -377,6 +387,29 @@ pub(crate) fn cut_fingerprint(
         }
     }
     None
+}
+
+const LINE: u8 = 0;
+const BLOCK: u8 = 1;
+const CYCLE: u8 = 2;
+
+fn leaf_hash(tag: u8, text: &str) -> u64 {
+    let mut hasher = Xxh3Default::new();
+    hasher.update(&[tag]);
+    hasher.update(text.as_bytes());
+    hasher.digest()
+}
+
+/// feeds `text`, or its absence, to `hasher` length-prefixed.
+fn update_field(hasher: &mut Xxh3Default, text: Option<&str>) {
+    match text {
+        Some(text) => {
+            hasher.update(&[1]);
+            hasher.update(&(text.len() as u64).to_le_bytes());
+            hasher.update(text.as_bytes());
+        }
+        None => hasher.update(&[0]),
+    }
 }
 
 /// FortiOS and Junos read `"…"` as a value; elsewhere a quote is plain text.

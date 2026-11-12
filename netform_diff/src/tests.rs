@@ -214,6 +214,91 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
 }
 
 #[test]
+fn blocks_at_the_nesting_limit_pair_as_their_parent_policy_pairs_siblings() {
+    let swapped: (&[&str], &[&str]) = (&["dup", " x", "dup", " y"], &["dup", " y", "dup", " x"]);
+    let swapped_and_changed: (&[&str], &[&str]) =
+        (&["dup", " x", "dup", " y"], &["dup", " y", "dup", " z"]);
+    let cases = [
+        (swapped, OrderPolicy::Unordered, false, 0),
+        (swapped, OrderPolicy::KeyedStable, false, 0),
+        (swapped, OrderPolicy::Ordered, true, 2),
+        (swapped_and_changed, OrderPolicy::Unordered, true, 1),
+        (swapped_and_changed, OrderPolicy::KeyedStable, true, 1),
+    ];
+
+    for ((left, right), policy, has_changes, differing) in cases {
+        let a = parse_generic(&nested(126, left));
+        let b = parse_generic(&nested(126, right));
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        let differ = diff
+            .findings
+            .iter()
+            .filter(|finding| finding.message.ends_with("and differ"))
+            .count();
+        assert_eq!(
+            (diff.has_changes, differ, unreliable_regions(&diff).len()),
+            (has_changes, differing, 2),
+            "{left:?} -> {right:?}, {policy:?}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_block_past_the_nesting_limit_differs_from_its_text_on_one_line() {
+    let junos = |payload: &[&str]| {
+        let open = (0..127).map(|level| format!("{}level{level} {{\n", " ".repeat(level)));
+        let payload = payload
+            .iter()
+            .map(|line| format!("{}{line}\n", " ".repeat(127)));
+        let close = (0..127)
+            .rev()
+            .map(|level| format!("{}}}\n", " ".repeat(level)));
+        open.chain(payload).chain(close).collect::<String>()
+    };
+    let junos_line = format!("foo {{{}}}", " ".repeat(127));
+    let fortios_line = format!("edit 1{}next", " ".repeat(127));
+    let cases = [
+        (
+            parse_junos(&junos(&["foo {", "}"])),
+            parse_junos(&junos(&[&junos_line])),
+        ),
+        (
+            parse_fortios(&nested(127, &["edit 1", "next"])),
+            parse_fortios(&nested(127, &[&fortios_line])),
+        ),
+    ];
+
+    for (a, b) in cases {
+        let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
+        assert_eq!(
+            (diff.has_changes, unreliable_regions(&diff)),
+            (true, vec![Path(vec![0; 127])]),
+            "{:?}",
+            a.metadata.dialect_hint
+        );
+    }
+}
+
+#[test]
+fn a_cycle_past_the_nesting_limit_does_not_hang_the_diff() {
+    let mut doc = parse_generic(&nested(130, &["leaf"]));
+    let mut chain = vec![doc.roots[0]];
+    while let Some(netform_ir::Node::Block(block)) = doc.node(*chain.last().unwrap()) {
+        match block.children.first() {
+            Some(&child) => chain.push(child),
+            None => break,
+        }
+    }
+    assert!(doc.add_child(chain[128], chain[127]));
+
+    let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
+    assert_eq!(
+        (diff.has_changes, unreliable_regions(&diff)),
+        (false, vec![Path(vec![0; 127])])
+    );
+}
+
+#[test]
 fn parse_uncertainty_is_exposed_as_finding() {
     let a = parse_generic("  orphan-line\n");
     let b = parse_generic("  orphan-line\n");
