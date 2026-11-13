@@ -19,7 +19,8 @@
 use crate::detect::{MODERATE_SIGNAL, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
 use netform_ir::{
     Dialect, DialectHint, Document, LiteralTerminator, ParsedLineParts, TriviaKind,
-    classify_trivia_with_prefixes, ends_inside_quoted_value, parse_with_dialect, tokenize,
+    classify_trivia_with_prefixes, ends_inside_quoted_value, parse_parts_with_punctuation,
+    parse_with_dialect,
 };
 
 /// dialect implementation for Junos-like configuration text.
@@ -41,7 +42,7 @@ impl Dialect for JunosDialect {
     }
 
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_junos_parts(raw)
+        parse_parts_with_punctuation(raw, PUNCTUATION)
     }
 
     fn key_hint(
@@ -125,12 +126,7 @@ fn classify_junos_trivia(raw: &str) -> TriviaKind {
     classify_trivia_with_prefixes(raw, &["#", "/*", "* ", "*/"])
 }
 
-fn parse_junos_parts(raw: &str) -> Option<ParsedLineParts> {
-    let tokens = tokenize(raw, &['{', '}', ';']);
-    let head = tokens.first()?.clone();
-    let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
-    Some(ParsedLineParts { head, args })
-}
+const PUNCTUATION: &[char] = &['{', '}', ';'];
 
 /// the well-known Junos top-level stanza names, each keyed by its own name.
 pub(crate) const STANZA_NAMES: &[&str] = &[
@@ -558,12 +554,13 @@ mod tests {
 
     #[test]
     fn junos_tokenization_keeps_brace_and_semicolon_tokens() {
-        let parsed = parse_junos_parts("interfaces {").expect("content should parse");
+        let parsed = parse_parts_with_punctuation("interfaces {", PUNCTUATION)
+            .expect("content should parse");
         assert_eq!(parsed.head, "interfaces");
         assert_eq!(parsed.args, vec!["{"]);
 
-        let parsed =
-            parse_junos_parts("description \"Uplink to core\";").expect("content should parse");
+        let parsed = parse_parts_with_punctuation("description \"Uplink to core\";", PUNCTUATION)
+            .expect("content should parse");
         assert_eq!(parsed.head, "description");
         assert_eq!(parsed.args, vec!["\"Uplink to core\"", ";"]);
     }
@@ -578,7 +575,7 @@ mod tests {
     }
 
     fn hint(line: &str) -> Option<String> {
-        let parsed = parse_junos_parts(line);
+        let parsed = parse_parts_with_punctuation(line, PUNCTUATION);
         junos_key_hint(parsed.as_ref())
     }
 

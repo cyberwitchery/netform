@@ -122,7 +122,8 @@ management api http-commands
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ios_like::{classify_ios_like_trivia, parse_ios_like_parts};
+    use crate::ios_like::classify_ios_like_trivia;
+    use netform_ir::parse_parts_with_punctuation;
     use netform_ir::{Node, TriviaKind};
 
     fn root_trivia(doc: &Document) -> Vec<(&str, TriviaKind)> {
@@ -188,7 +189,7 @@ mod tests {
             "\"Uplink to spine\"",
         ] {
             let line = format!("description {value}");
-            let parsed = parse_ios_like_parts(&line).expect("content should parse");
+            let parsed = parse_parts_with_punctuation(&line, &[]).expect("content should parse");
             assert_eq!(parsed.head, "description", "{line}");
             assert_eq!(parsed.args, vec![value], "{line}");
         }
@@ -257,7 +258,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                key_hint(parse_ios_like_parts(line).as_ref()).as_deref(),
+                key_hint(parse_parts_with_punctuation(line, &[]).as_ref()).as_deref(),
                 expected,
                 "{line}",
             );
