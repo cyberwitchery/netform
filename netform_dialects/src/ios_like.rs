@@ -2,7 +2,7 @@
 
 use netform_ir::{
     Dialect, DialectHint, LiteralTerminator, ParsedLineParts, TriviaKind,
-    classify_trivia_with_prefixes, tokenize,
+    classify_trivia_with_prefixes, parse_parts_with_punctuation,
 };
 
 /// parameterized dialect for IOS-like configuration text (EOS, IOS XE, NX-OS, …).
@@ -107,7 +107,7 @@ impl Dialect for IosLikeDialect {
     }
 
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_ios_like_parts(raw)
+        parse_parts_with_punctuation(raw, &[])
     }
 
     fn key_hint(
@@ -544,24 +544,13 @@ pub fn classify_ios_like_trivia(raw: &str) -> TriviaKind {
     classify_trivia_with_prefixes(raw, &["!", "#"])
 }
 
-/// tokenize a content line for IOS-like dialects (EOS, IOS XE).
-///
-/// uses [`tokenize`] with no punctuation characters, then splits the result
-/// into a `head` keyword and trailing `args`.
-pub fn parse_ios_like_parts(raw: &str) -> Option<ParsedLineParts> {
-    let tokens = tokenize(raw, &[]);
-    let head = tokens.first()?.clone();
-    let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
-    Some(ParsedLineParts { head, args })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use netform_ir::{Node, parse_with_dialect};
 
     fn common_hint(line: &str) -> Option<String> {
-        let parsed = parse_ios_like_parts(line);
+        let parsed = parse_parts_with_punctuation(line, &[]);
         common_key_hint(parsed.as_ref())
     }
 

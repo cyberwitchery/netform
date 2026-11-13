@@ -10,7 +10,7 @@
 //!
 //! ```rust
 //! use netform_dialects::rules::{ArgGuard, KeyRule, KeyRuleAction, rule_key_hint};
-//! use netform_dialects::ios_like::parse_ios_like_parts;
+//! use netform_ir::parse_parts_with_punctuation;
 //!
 //! const RULES: &[KeyRule] = &[KeyRule {
 //!     head: "vpc",
@@ -18,7 +18,7 @@
 //!     action: KeyRuleAction::key("vpc-domain", &[1]),
 //! }];
 //!
-//! let parsed = parse_ios_like_parts("vpc domain 10");
+//! let parsed = parse_parts_with_punctuation("vpc domain 10", &[]);
 //! assert_eq!(
 //!     rule_key_hint(RULES, parsed.as_ref()),
 //!     Some("vpc-domain:10".to_string()),
@@ -168,7 +168,7 @@ pub fn rule_key_hint(rules: &[KeyRule], parsed: Option<&ParsedLineParts>) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ios_like::parse_ios_like_parts;
+    use netform_ir::parse_parts_with_punctuation;
 
     const RULES: &[KeyRule] = &[
         KeyRule {
@@ -194,7 +194,7 @@ mod tests {
     ];
 
     fn hint(line: &str) -> Option<String> {
-        rule_key_hint(RULES, parse_ios_like_parts(line).as_ref())
+        rule_key_hint(RULES, parse_parts_with_punctuation(line, &[]).as_ref())
     }
 
     #[test]
@@ -237,7 +237,7 @@ mod tests {
             action: KeyRuleAction::key("ntp-authentication", &[1]),
         }];
 
-        let parsed = parse_ios_like_parts("ntp server 1.2.3.4");
+        let parsed = parse_parts_with_punctuation("ntp server 1.2.3.4", &[]);
         assert_eq!(
             common_key_hint(parsed.as_ref()),
             Some("ntp:server:1.2.3.4".into()),

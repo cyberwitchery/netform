@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- the IOS-family dialect and dialect detection moved from `netform_ir` to `netform_dialects`: `IosLikeDialect`, `ios_like_literal_region`, `IosKeyHintConfig`, `ios_family_key_hint`, `common_key_hint`, `parse_interface`, `classify_ios_like_trivia` and `parse_ios_like_parts` are now in `netform_dialects::ios_like`, and `netform_ir::detect` is now `netform_dialects::detect`. they are removed from `netform_ir`, which keeps the `Dialect` trait, the parser and the generic helpers. detection and parsing results are unchanged
+- the IOS-family dialect and dialect detection moved from `netform_ir` to `netform_dialects`: `IosLikeDialect`, `ios_like_literal_region`, `IosKeyHintConfig`, `ios_family_key_hint`, `common_key_hint`, `parse_interface` and `classify_ios_like_trivia` are now in `netform_dialects::ios_like`, and `netform_ir::detect` is now `netform_dialects::detect`. they are removed from `netform_ir`, which keeps the `Dialect` trait, the parser and the generic helpers. `netform_ir::parse_ios_like_parts` is replaced by `netform_ir::parse_parts_with_punctuation`, which takes the characters that are split off as words of their own: `&[]` tokenizes as `parse_ios_like_parts` did, and Junos passes `&['{', '}', ';']`. detection and parsing results are unchanged
 
 ## [0.10.3] - 2026-11-04
 

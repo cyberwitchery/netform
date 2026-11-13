@@ -139,7 +139,7 @@ ip access-list extended MGMT-IN
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ios_like::parse_ios_like_parts;
+    use netform_ir::parse_parts_with_punctuation;
     use netform_ir::{Node, TriviaKind};
 
     /// `(raw, trivia, key_hint)` for each root line of a flat document.
@@ -185,7 +185,7 @@ mod tests {
     }
 
     fn hint(line: &str) -> Option<String> {
-        let parsed = parse_ios_like_parts(line);
+        let parsed = parse_parts_with_punctuation(line, &[]);
         key_hint(parsed.as_ref())
     }
 

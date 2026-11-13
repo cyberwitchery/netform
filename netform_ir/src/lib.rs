@@ -801,6 +801,17 @@ fn parse_parts(raw: &str) -> Option<ParsedLineParts> {
     })
 }
 
+/// split a content line into its `head` keyword and trailing `args`, using
+/// [`tokenize`] with `punctuation`.
+///
+/// returns `None` when the line has no tokens.
+pub fn parse_parts_with_punctuation(raw: &str, punctuation: &[char]) -> Option<ParsedLineParts> {
+    let tokens = tokenize(raw, punctuation);
+    let head = tokens.first()?.clone();
+    let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
+    Some(ParsedLineParts { head, args })
+}
+
 /// tokenize a raw configuration line, splitting on whitespace while preserving
 /// quoted strings. characters in `punctuation` are emitted as their own tokens
 /// (flushing any accumulated word first), matching the Junos-style brace/semicolon

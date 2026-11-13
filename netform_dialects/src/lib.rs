@@ -180,8 +180,8 @@ pub fn detect_dialect(input: &str) -> DialectHint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ios_like::parse_ios_like_parts;
     use netform_ir::ParsedLineParts;
+    use netform_ir::parse_parts_with_punctuation;
     use rules::KeyRuleAction;
 
     #[test]
@@ -264,7 +264,7 @@ mod tests {
             }],
         };
 
-        let parsed = parse_ios_like_parts("interface Ethernet1");
+        let parsed = parse_parts_with_punctuation("interface Ethernet1", &[]);
         assert_eq!(
             rule_key_hint(RULES.key_rules, parsed.as_ref()),
             Some("iface:Ethernet1".into()),
@@ -428,7 +428,7 @@ mod tests {
         ] {
             for (name, key_hint) in IOS_FAMILY {
                 assert_eq!(
-                    key_hint(parse_ios_like_parts(line).as_ref()).as_deref(),
+                    key_hint(parse_parts_with_punctuation(line, &[]).as_ref()).as_deref(),
                     expected,
                     "{name}: {line}",
                 );

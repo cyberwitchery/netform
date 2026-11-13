@@ -17,7 +17,7 @@
 //! ```
 
 use crate::detect::{MODERATE_SIGNAL, STRONG_SIGNAL, Signal, Test, WEAK_SIGNAL};
-use crate::ios_like::parse_ios_like_parts;
+use netform_ir::parse_parts_with_punctuation;
 use netform_ir::{
     Dialect, DialectHint, Document, LiteralTerminator, ParsedLineParts, TriviaKind,
     classify_trivia_with_prefixes, ends_inside_quoted_value, parse_with_dialect,
@@ -42,7 +42,7 @@ impl Dialect for FortiosDialect {
     }
 
     fn parse_parts(&self, raw: &str) -> Option<ParsedLineParts> {
-        parse_ios_like_parts(raw)
+        parse_parts_with_punctuation(raw, &[])
     }
 
     fn key_hint(
@@ -230,14 +230,14 @@ mod tests {
             ),
         ];
         for (line, head, args) in cases {
-            let parsed = parse_ios_like_parts(line).expect("should parse");
+            let parsed = parse_parts_with_punctuation(line, &[]).expect("should parse");
             assert_eq!(parsed.head, *head, "{line:?}");
             assert_eq!(parsed.args, *args, "{line:?}");
         }
     }
 
     fn hint(line: &str) -> Option<String> {
-        let parsed = parse_ios_like_parts(line);
+        let parsed = parse_parts_with_punctuation(line, &[]);
         fortios_key_hint(parsed.as_ref())
     }
 
