@@ -44,11 +44,6 @@ pub const RULES: IosRules = IosRules {
             action: KeyRuleAction::key("crypto:pki", &[1, 2]),
         },
         KeyRule {
-            head: "crypto",
-            guards: &[],
-            action: KeyRuleAction::Common,
-        },
-        KeyRule {
             head: "redundancy",
             guards: &[],
             action: KeyRuleAction::literal("redundancy"),

@@ -1,5 +1,5 @@
 //! a numbered `access-list N ...` rule's identity is its full text, not the
-//! shared ACL number (see `common_key_hint` in netform_ir).  these tests parse
+//! shared ACL number (see `netform_dialects::ios_like::SHARED_RULES`).  these tests parse
 //! real IOS XE configs and exercise `diff_documents` end to end.
 
 use netform_dialects::iosxe::parse;

@@ -4,29 +4,35 @@
 //! head keyword, optionally require some argument positions to be one of a
 //! fixed set of words, then build the key from a static prefix and zero or more
 //! captured arguments joined by `:`.  [`KeyRule`] is that shape as data, and
-//! [`rule_key_hint`] is its interpreter.
+//! [`IosRules::key_hint`] walks a vendor's rules, then
+//! [`SHARED_RULES`](crate::ios_like::SHARED_RULES), and the first rule that
+//! matches a line decides its hint.
 //!
 //! # Example
 //!
 //! ```rust
-//! use netform_dialects::rules::{ArgGuard, KeyRule, KeyRuleAction, rule_key_hint};
+//! use netform_dialects::IosRules;
+//! use netform_dialects::rules::{ArgGuard, KeyRule, KeyRuleAction};
 //! use netform_ir::parse_parts_with_punctuation;
 //!
-//! const RULES: &[KeyRule] = &[KeyRule {
-//!     head: "vpc",
-//!     guards: &[ArgGuard::new(0, &["domain"])],
-//!     action: KeyRuleAction::key("vpc-domain", &[1]),
-//! }];
+//! const RULES: IosRules = IosRules {
+//!     interface_types: &["ethernet"],
+//!     vrf_keyword: "context",
+//!     extra_router_protos: &[],
+//!     route_distance_is_identity: false,
+//!     key_rules: &[KeyRule {
+//!         head: "vpc",
+//!         guards: &[ArgGuard::new(0, &["domain"])],
+//!         action: KeyRuleAction::key("vpc-domain", &[1]),
+//!     }],
+//! };
 //!
-//! let parsed = parse_parts_with_punctuation("vpc domain 10", &[]);
-//! assert_eq!(
-//!     rule_key_hint(RULES, parsed.as_ref()),
-//!     Some("vpc-domain:10".to_string()),
-//! );
+//! let hint = |line| RULES.key_hint(parse_parts_with_punctuation(line, &[]).as_ref());
+//! assert_eq!(hint("vpc domain 10"), Some("vpc-domain:10".to_string()));
+//! assert_eq!(hint("interface Ethernet1"), Some("interface:ethernet:1".to_string()));
 //! ```
 
-use crate::ios_like::common_key_hint;
-use netform_ir::ParsedLineParts;
+use crate::IosRules;
 
 /// a requirement that the argument at `index` is one of `any_of`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +59,7 @@ impl ArgGuard {
 }
 
 /// what a matching [`KeyRule`] produces.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum KeyRuleAction {
     /// build the key from `prefix` and the arguments at `captures`, joined by
     /// `:`.
@@ -63,11 +69,9 @@ pub enum KeyRuleAction {
         /// argument positions to append, in order.
         captures: &'static [usize],
     },
-    /// defer to [`common_key_hint`].
-    ///
-    /// place this last among a head's rules to make that head fall through to
-    /// the shared arms instead of yielding no hint.
-    Common,
+    /// derive the key from the arguments and the vendor's [`IosRules`]; a
+    /// `None` from it is the line's answer.
+    Derive(fn(&[String], &IosRules) -> Option<String>),
 }
 
 impl KeyRuleAction {
@@ -85,11 +89,11 @@ impl KeyRuleAction {
     }
 }
 
-/// one vendor-specific key-hint rule.
+/// one key-hint rule.
 ///
 /// rules are tried in order and the first whose head and guards match wins, so
 /// a longer, more specific rule must precede a shorter one over the same head.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct KeyRule {
     /// the head keyword this rule applies to.
     pub head: &'static str,
@@ -107,18 +111,18 @@ impl KeyRule {
             KeyRuleAction::Key { captures, .. } => {
                 captures.iter().map(|i| i + 1).max().unwrap_or(0)
             }
-            KeyRuleAction::Common => 0,
+            KeyRuleAction::Derive(_) => 0,
         };
         guarded.max(captured)
     }
 
-    fn applies(&self, head: &str, args: &[String]) -> bool {
+    pub(crate) fn applies(&self, head: &str, args: &[String]) -> bool {
         self.head == head
             && args.len() >= self.required_args()
             && self.guards.iter().all(|guard| guard.holds(args))
     }
 
-    fn render(&self, args: &[String]) -> Option<String> {
+    pub(crate) fn render(&self, args: &[String], vendor: &IosRules) -> Option<String> {
         match self.action {
             KeyRuleAction::Key { prefix, captures } => {
                 let mut key = String::from(prefix);
@@ -128,40 +132,8 @@ impl KeyRule {
                 }
                 Some(key)
             }
-            KeyRuleAction::Common => None,
+            KeyRuleAction::Derive(derive) => derive(args, vendor),
         }
-    }
-}
-
-/// derive a key hint for `parsed` from `rules`.
-///
-/// a head no rule mentions falls through to [`common_key_hint`].  a head some
-/// rule mentions but none matches yields no hint, unless one of that head's
-/// rules is [`KeyRuleAction::Common`].
-pub fn rule_key_hint(rules: &[KeyRule], parsed: Option<&ParsedLineParts>) -> Option<String> {
-    let parts = parsed?;
-    let head = parts.head.as_str();
-    let args = parts.args.as_slice();
-
-    let mut head_is_claimed = false;
-    for rule in rules {
-        if rule.head != head {
-            continue;
-        }
-        head_is_claimed = true;
-        if !rule.applies(head, args) {
-            continue;
-        }
-        return match rule.action {
-            KeyRuleAction::Key { .. } => rule.render(args),
-            KeyRuleAction::Common => common_key_hint(parsed),
-        };
-    }
-
-    if head_is_claimed {
-        None
-    } else {
-        common_key_hint(parsed)
     }
 }
 
@@ -170,7 +142,17 @@ mod tests {
     use super::*;
     use netform_ir::parse_parts_with_punctuation;
 
-    const RULES: &[KeyRule] = &[
+    const fn vendor(key_rules: &'static [KeyRule]) -> IosRules {
+        IosRules {
+            interface_types: &[],
+            vrf_keyword: "vrf",
+            extra_router_protos: &[],
+            route_distance_is_identity: false,
+            key_rules,
+        }
+    }
+
+    const RULES: IosRules = vendor(&[
         KeyRule {
             head: "mlag",
             guards: &[ArgGuard::new(0, &["configuration"])],
@@ -186,15 +168,10 @@ mod tests {
             guards: &[ArgGuard::new(0, &["pki"])],
             action: KeyRuleAction::key("crypto:pki", &[1, 2]),
         },
-        KeyRule {
-            head: "crypto",
-            guards: &[],
-            action: KeyRuleAction::Common,
-        },
-    ];
+    ]);
 
-    fn hint(line: &str) -> Option<String> {
-        rule_key_hint(RULES, parse_parts_with_punctuation(line, &[]).as_ref())
+    fn hint(rules: &IosRules, line: &str) -> Option<String> {
+        rules.key_hint(parse_parts_with_punctuation(line, &[]).as_ref())
     }
 
     #[test]
@@ -202,46 +179,61 @@ mod tests {
         for (line, expected) in [
             // a literal action ignores the guarded argument.
             ("mlag configuration", Some("mlag")),
-            // a failed guard on a claimed head yields no hint.
+            // a failed guard on a head no shared rule covers yields no hint.
             ("mlag peer-link Port-Channel1", None),
-            // a claimed head with no matching rule yields no hint.
             ("mlag", None),
             // a guard accepts any of its words; too few args yields no hint.
             ("management ssh", None),
             ("management telnet vrf MGMT", Some("management:telnet:vrf")),
-            // missing captures yield no hint.
+            // missing captures fall through to the shared rule.
             ("crypto pki trustpoint", None),
-            // a Common rule lets its head fall through.
             (
                 "crypto ikev2 proposal PROP1",
                 Some("crypto:ikev2:proposal:PROP1"),
             ),
-            // an unclaimed head falls through to the shared arms.
+            // a head no vendor rule mentions goes to the shared rules.
             ("policy-map SHAPE", Some("policy-map:SHAPE")),
             ("hostname leaf-01", None),
         ] {
-            assert_eq!(hint(line).as_deref(), expected, "{line:?}");
+            assert_eq!(hint(&RULES, line).as_deref(), expected, "{line:?}");
         }
     }
 
     #[test]
     fn a_non_content_line_yields_no_hint() {
-        assert_eq!(rule_key_hint(RULES, None), None);
+        assert_eq!(RULES.key_hint(None), None);
     }
 
     #[test]
-    fn a_claimed_shared_head_does_not_fall_through() {
-        const CLAIMS_NTP: &[KeyRule] = &[KeyRule {
+    fn a_vendor_rule_deriving_no_key_keeps_its_head_from_the_shared_rule() {
+        fn no_key(_: &[String], _: &IosRules) -> Option<String> {
+            None
+        }
+        const AUTHENTICATION: KeyRule = KeyRule {
             head: "ntp",
             guards: &[ArgGuard::new(0, &["authentication"])],
             action: KeyRuleAction::key("ntp-authentication", &[1]),
-        }];
+        };
+        const FALLS_THROUGH: IosRules = vendor(&[AUTHENTICATION]);
+        const CLAIMS_NTP: IosRules = vendor(&[
+            AUTHENTICATION,
+            KeyRule {
+                head: "ntp",
+                guards: &[],
+                action: KeyRuleAction::Derive(no_key),
+            },
+        ]);
 
-        let parsed = parse_parts_with_punctuation("ntp server 1.2.3.4", &[]);
+        for rules in [&FALLS_THROUGH, &CLAIMS_NTP] {
+            assert_eq!(
+                hint(rules, "ntp authentication 1").as_deref(),
+                Some("ntp-authentication:1"),
+            );
+        }
         assert_eq!(
-            common_key_hint(parsed.as_ref()),
-            Some("ntp:server:1.2.3.4".into()),
+            hint(&FALLS_THROUGH, "ntp server 1.2.3.4").as_deref(),
+            Some("ntp:server:1.2.3.4"),
         );
-        assert_eq!(rule_key_hint(CLAIMS_NTP, parsed.as_ref()), None);
+        assert_eq!(hint(&CLAIMS_NTP, "ntp server 1.2.3.4"), None);
     }
 }

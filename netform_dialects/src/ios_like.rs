@@ -1,5 +1,7 @@
 //! the IOS-family dialect shared by EOS, IOS XE, IOS XR and NX-OS.
 
+use crate::IosRules;
+use crate::rules::{KeyRule, KeyRuleAction};
 use netform_ir::{
     Dialect, DialectHint, LiteralTerminator, ParsedLineParts, TriviaKind,
     classify_trivia_with_prefixes, parse_parts_with_punctuation,
@@ -13,10 +15,10 @@ use netform_ir::{
 /// [`IosLikeDialect::new`], passing the dialect name and its key-hint function:
 ///
 /// ```rust
-/// use netform_dialects::ios_like::{IosLikeDialect, common_key_hint};
+/// use netform_dialects::{ios_like::IosLikeDialect, iosxe};
 /// use netform_ir::parse_with_dialect;
 ///
-/// let dialect = IosLikeDialect::new("iosxe", common_key_hint);
+/// let dialect = IosLikeDialect::new("iosxe", iosxe::key_hint);
 /// let doc = parse_with_dialect("hostname edge-1\n", &dialect);
 /// ```
 #[derive(Debug, Clone, Copy)]
@@ -55,10 +57,10 @@ impl IosLikeDialect {
     /// [`Dialect::block_terminator`].
     ///
     /// ```rust
-    /// use netform_dialects::ios_like::{IosLikeDialect, common_key_hint};
+    /// use netform_dialects::{ios_like::IosLikeDialect, iosxr};
     /// use netform_ir::{Node, parse_with_dialect};
     ///
-    /// let dialect = IosLikeDialect::new("xr", common_key_hint)
+    /// let dialect = IosLikeDialect::new("xr", iosxr::key_hint)
     ///     .with_block_terminator(|raw| raw.trim() == "end-policy");
     /// let doc = parse_with_dialect("route-policy PASS\n  pass\nend-policy\n", &dialect);
     /// let Node::Block(block) = doc.node(doc.roots[0]).unwrap() else { unreachable!() };
@@ -77,10 +79,10 @@ impl IosLikeDialect {
     /// [`Dialect::empty_block`].
     ///
     /// ```rust
-    /// use netform_dialects::ios_like::{IosLikeDialect, common_key_hint};
+    /// use netform_dialects::{ios_like::IosLikeDialect, iosxr};
     /// use netform_ir::{Node, parse_with_dialect};
     ///
-    /// let dialect = IosLikeDialect::new("xr", common_key_hint)
+    /// let dialect = IosLikeDialect::new("xr", iosxr::key_hint)
     ///     .with_block_terminator(|raw| raw.trim() == "end-set")
     ///     .with_empty_block(|opener, _| opener.starts_with("rd-set "));
     /// let doc = parse_with_dialect("rd-set EMPTY\nend-set\n", &dialect);
@@ -223,170 +225,181 @@ fn split_first_token(raw: &str) -> Option<(&str, &str)> {
     Some(trimmed.split_at(end))
 }
 
-/// configuration for [`ios_family_key_hint`], parameterizing the constructs
-/// that differ across IOS-family dialects while sharing the common structure.
-pub struct IosKeyHintConfig {
-    /// interface type prefixes for normalization (longest-prefix-first).
-    pub interface_types: &'static [&'static str],
-    /// the VRF sub-command keyword (`"instance"`, `"definition"`, `"context"`).
-    pub vrf_keyword: &'static str,
-    /// router protocols (beyond BGP and OSPF) whose second argument should be
-    /// included in the hint — e.g. `&["eigrp"]` for IOS XE.
-    pub extra_router_protos: &'static [&'static str],
-    /// whether a static route's distance is part of its identity, as on EOS.
-    pub route_distance_is_identity: bool,
+/// the key-hint rules every IOS-family vendor shares, one per head, tried after
+/// the vendor's own [`IosRules::key_rules`].
+///
+/// numbered `access-list N ...` rules have no rule: their identity is their
+/// full text, not the ACL number they share.
+pub const SHARED_RULES: &[KeyRule] = &[
+    shared("interface", interface_key),
+    shared("vrf", vrf_key),
+    shared("router", router_key),
+    shared("ip", ip_key),
+    shared("vlan", vlan_key),
+    shared("route-map", route_map_key),
+    shared("class-map", class_map_key),
+    shared("policy-map", policy_map_key),
+    shared("ipv6", ipv6_key),
+    shared("crypto", crypto_key),
+    shared("spanning-tree", spanning_tree_key),
+    shared("line", line_key),
+    shared("monitor", monitor_key),
+    shared("ntp", ntp_key),
+];
+
+const fn shared(head: &'static str, derive: fn(&[String], &IosRules) -> Option<String>) -> KeyRule {
+    KeyRule {
+        head,
+        guards: &[],
+        action: KeyRuleAction::Derive(derive),
+    }
 }
 
-/// derive a key hint for constructs shared across IOS-family dialects.
-///
-/// handles `interface`, `vrf`, `router`, and `ip` using the provided
-/// [`IosKeyHintConfig`].  returns `None` when the head keyword is not one of
-/// these four, allowing the caller to try dialect-specific arms before falling
-/// back to [`common_key_hint`].
-pub fn ios_family_key_hint(
-    parsed: Option<&ParsedLineParts>,
-    config: &IosKeyHintConfig,
-) -> Option<String> {
-    let parsed_ref = parsed?;
-    let head = parsed_ref.head.as_str();
-    let args = parsed_ref.args.as_slice();
+fn interface_key(args: &[String], vendor: &IosRules) -> Option<String> {
+    let name = args.first()?;
+    if let Some((itype, id)) = parse_interface(name, vendor.interface_types) {
+        Some(format!("interface:{itype}:{id}"))
+    } else {
+        Some(format!("interface:{name}"))
+    }
+}
 
-    match head {
-        "interface" => {
-            let name = args.first()?;
-            if let Some((itype, id)) = parse_interface(name, config.interface_types) {
-                Some(format!("interface:{itype}:{id}"))
-            } else {
-                Some(format!("interface:{name}"))
-            }
-        }
-        "vrf" => match args {
-            [sub, name, ..] if sub == config.vrf_keyword => Some(format!("vrf:{name}")),
-            [name, ..] => Some(format!("vrf:{name}")),
-            _ => None,
-        },
-        "router" => match args {
-            [proto, id, ..] if proto == "bgp" => Some(format!("router:bgp:{id}")),
-            [proto, id, ..] if proto == "ospf" => Some(format!("router:ospf:{id}")),
-            [proto, id, ..] if config.extra_router_protos.contains(&proto.as_str()) => {
-                Some(format!("router:{proto}:{id}"))
-            }
-            [proto, ..] => Some(format!("router:{proto}")),
-            _ => None,
-        },
-        "ip" => match args {
-            [next, kind, name, ..] if next == "access-list" => {
-                Some(format!("ip-access-list:{kind}:{name}"))
-            }
-            [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
-            [next, rest @ ..] if next == "prefix-list" => prefix_list_key("prefix-list", rest),
-            [next, rest @ ..] if next == "route" => {
-                static_route_key("ip-route", rest, config.route_distance_is_identity)
-            }
-            _ => None,
-        },
+fn vrf_key(args: &[String], vendor: &IosRules) -> Option<String> {
+    match args {
+        [sub, name, ..] if sub == vendor.vrf_keyword => Some(format!("vrf:{name}")),
+        [name, ..] => Some(format!("vrf:{name}")),
         _ => None,
     }
 }
 
-/// derive a stable identity key for constructs shared across all IOS-like
-/// dialects (EOS, IOS XE, NX-OS).
-///
-/// this covers the match arms that are identical in every IOS-family dialect:
-/// `vlan`, `route-map`, `class-map`, `policy-map`, `ipv6`, `crypto`,
-/// `spanning-tree`, `line`, `monitor`, and `ntp`.  dialect-specific
-/// functions should match their own constructs first, then fall back here.
-///
-/// numbered `access-list N ...` rules are intentionally *not* keyed here:
-/// they are ordered sequence entries whose identity is their full text, so
-/// they must key on the line text (via no hint) rather than the shared ACL
-/// number — otherwise a rule-body change is invisible to the diff.
-pub fn common_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
-    let parsed = parsed?;
-    let head = parsed.head.as_str();
-    let args = parsed.args.as_slice();
+fn router_key(args: &[String], vendor: &IosRules) -> Option<String> {
+    match args {
+        [proto, id, ..] if proto == "bgp" => Some(format!("router:bgp:{id}")),
+        [proto, id, ..] if proto == "ospf" => Some(format!("router:ospf:{id}")),
+        [proto, id, ..] if vendor.extra_router_protos.contains(&proto.as_str()) => {
+            Some(format!("router:{proto}:{id}"))
+        }
+        [proto, ..] => Some(format!("router:{proto}")),
+        _ => None,
+    }
+}
 
-    match head {
-        "vlan" => match args {
-            // NX-OS `vlan configuration <id>` is a distinct per-VLAN block;
-            // key it on the id so different ids don't collapse to the literal
-            // "configuration" (and collide with each other).
-            [sub, id, ..] if sub == "configuration" => Some(format!("vlan-configuration:{id}")),
-            [id, ..] => Some(format!("vlan:{id}")),
-            _ => None,
-        },
-        "route-map" => match args {
-            [name, action, seq, ..] => Some(format!("route-map:{name}:{action}:{seq}")),
-            [name, action] => Some(format!("route-map:{name}:{action}")),
-            _ => None,
-        },
-        "class-map" => typed_map_key(head, args).or_else(|| match args {
-            [_match_kind, name, ..] => Some(format!("class-map:{name}")),
-            [name] => Some(format!("class-map:{name}")),
-            _ => None,
-        }),
-        "policy-map" => typed_map_key(head, args)
-            .or_else(|| args.first().map(|name| format!("policy-map:{name}"))),
-        "ipv6" => match args {
-            [next, name, ..] if next == "access-list" => Some(format!("ipv6-access-list:{name}")),
-            [next, rest @ ..] if next == "prefix-list" => prefix_list_key("ipv6-prefix-list", rest),
-            [next, rest @ ..] if next == "route" => static_route_key("ipv6-route", rest, false),
-            _ => None,
-        },
-        "crypto" => match args {
-            [kind, sub, name, ..] if kind == "ikev2" => Some(format!("crypto:ikev2:{sub}:{name}")),
-            [kind, sub, name, param, ..]
-                if kind == "ipsec"
-                    && sub == "security-association"
-                    && matches!(name.as_str(), "lifetime" | "replay") =>
-            {
-                Some(format!("crypto:ipsec:{sub}:{name}:{param}"))
-            }
-            [kind, sub, name, ..] if kind == "ipsec" => Some(format!("crypto:ipsec:{sub}:{name}")),
-            [kind, name, seq, ..] if kind == "map" && is_number(seq) => {
-                Some(format!("crypto:map:{name}:{seq}"))
-            }
-            [kind, name] if kind == "map" => Some(format!("crypto:map:{name}")),
-            [kind, sub, rest @ ..]
-                if kind == "isakmp"
-                    && matches!(sub.as_str(), "policy" | "profile" | "peer" | "client") =>
-            {
-                Some(format!("crypto:isakmp:{sub}:{}", rest.join(":")))
-            }
-            [kind, sub, rest @ ..] if kind == "isakmp" && sub == "key" => {
-                let peer = rest
-                    .iter()
-                    .rposition(|word| word == "address" || word == "hostname")?;
-                Some(format!("crypto:isakmp:key:{}", rest[peer..].join(":")))
-            }
-            [kind, num, ..] if kind == "isakmp" => Some(format!("crypto:isakmp:{num}")),
-            _ => None,
-        },
-        "spanning-tree" => match args {
-            [next, id, param, ..] if next == "vlan" => {
-                Some(format!("spanning-tree:vlan:{id}:{param}"))
-            }
-            [next, id] if next == "vlan" => Some(format!("spanning-tree:vlan:{id}")),
-            _ => None,
-        },
-        "line" => match args {
-            [kind, from, to, ..] => Some(format!("line:{kind}:{from}:{to}")),
-            [kind, one, ..] => Some(format!("line:{kind}:{one}")),
-            _ => None,
-        },
-        "monitor" => match args {
-            [sub, id] if sub == "session" => Some(format!("monitor-session:{id}")),
-            [sub, id, kind, ..] if sub == "session" && kind == "type" => {
-                Some(format!("monitor-session:{id}"))
-            }
-            _ => None,
-        },
-        "ntp" => match args {
-            [kind, rest @ ..] if kind == "server" || kind == "peer" => {
-                ntp_association_key(kind, rest)
-            }
-            _ => None,
-        },
+fn ip_key(args: &[String], vendor: &IosRules) -> Option<String> {
+    match args {
+        [next, kind, name, ..] if next == "access-list" => {
+            Some(format!("ip-access-list:{kind}:{name}"))
+        }
+        [next, name] if next == "access-list" => Some(format!("ip-access-list:{name}")),
+        [next, rest @ ..] if next == "prefix-list" => prefix_list_key("prefix-list", rest),
+        [next, rest @ ..] if next == "route" => {
+            static_route_key("ip-route", rest, vendor.route_distance_is_identity)
+        }
+        _ => None,
+    }
+}
+
+fn vlan_key(args: &[String], _: &IosRules) -> Option<String> {
+    match args {
+        // NX-OS `vlan configuration <id>` is a distinct per-VLAN block;
+        // key it on the id so different ids don't collapse to the literal
+        // "configuration" (and collide with each other).
+        [sub, id, ..] if sub == "configuration" => Some(format!("vlan-configuration:{id}")),
+        [id, ..] => Some(format!("vlan:{id}")),
+        _ => None,
+    }
+}
+
+fn route_map_key(args: &[String], _: &IosRules) -> Option<String> {
+    match args {
+        [name, action, seq, ..] => Some(format!("route-map:{name}:{action}:{seq}")),
+        [name, action] => Some(format!("route-map:{name}:{action}")),
+        _ => None,
+    }
+}
+
+fn class_map_key(args: &[String], _: &IosRules) -> Option<String> {
+    typed_map_key("class-map", args).or_else(|| match args {
+        [_match_kind, name, ..] => Some(format!("class-map:{name}")),
+        [name] => Some(format!("class-map:{name}")),
+        _ => None,
+    })
+}
+
+fn policy_map_key(args: &[String], _: &IosRules) -> Option<String> {
+    typed_map_key("policy-map", args)
+        .or_else(|| args.first().map(|name| format!("policy-map:{name}")))
+}
+
+fn ipv6_key(args: &[String], _: &IosRules) -> Option<String> {
+    match args {
+        [next, name, ..] if next == "access-list" => Some(format!("ipv6-access-list:{name}")),
+        [next, rest @ ..] if next == "prefix-list" => prefix_list_key("ipv6-prefix-list", rest),
+        [next, rest @ ..] if next == "route" => static_route_key("ipv6-route", rest, false),
+        _ => None,
+    }
+}
+
+fn crypto_key(args: &[String], _: &IosRules) -> Option<String> {
+    match args {
+        [kind, sub, name, ..] if kind == "ikev2" => Some(format!("crypto:ikev2:{sub}:{name}")),
+        [kind, sub, name, param, ..]
+            if kind == "ipsec"
+                && sub == "security-association"
+                && matches!(name.as_str(), "lifetime" | "replay") =>
+        {
+            Some(format!("crypto:ipsec:{sub}:{name}:{param}"))
+        }
+        [kind, sub, name, ..] if kind == "ipsec" => Some(format!("crypto:ipsec:{sub}:{name}")),
+        [kind, name, seq, ..] if kind == "map" && is_number(seq) => {
+            Some(format!("crypto:map:{name}:{seq}"))
+        }
+        [kind, name] if kind == "map" => Some(format!("crypto:map:{name}")),
+        [kind, sub, rest @ ..]
+            if kind == "isakmp"
+                && matches!(sub.as_str(), "policy" | "profile" | "peer" | "client") =>
+        {
+            Some(format!("crypto:isakmp:{sub}:{}", rest.join(":")))
+        }
+        [kind, sub, rest @ ..] if kind == "isakmp" && sub == "key" => {
+            let peer = rest
+                .iter()
+                .rposition(|word| word == "address" || word == "hostname")?;
+            Some(format!("crypto:isakmp:key:{}", rest[peer..].join(":")))
+        }
+        [kind, num, ..] if kind == "isakmp" => Some(format!("crypto:isakmp:{num}")),
+        _ => None,
+    }
+}
+
+fn spanning_tree_key(args: &[String], _: &IosRules) -> Option<String> {
+    match args {
+        [next, id, param, ..] if next == "vlan" => Some(format!("spanning-tree:vlan:{id}:{param}")),
+        [next, id] if next == "vlan" => Some(format!("spanning-tree:vlan:{id}")),
+        _ => None,
+    }
+}
+
+fn line_key(args: &[String], _: &IosRules) -> Option<String> {
+    match args {
+        [kind, from, to, ..] => Some(format!("line:{kind}:{from}:{to}")),
+        [kind, one, ..] => Some(format!("line:{kind}:{one}")),
+        _ => None,
+    }
+}
+
+fn monitor_key(args: &[String], _: &IosRules) -> Option<String> {
+    match args {
+        [sub, id] if sub == "session" => Some(format!("monitor-session:{id}")),
+        [sub, id, kind, ..] if sub == "session" && kind == "type" => {
+            Some(format!("monitor-session:{id}"))
+        }
+        _ => None,
+    }
+}
+
+fn ntp_key(args: &[String], _: &IosRules) -> Option<String> {
+    match args {
+        [kind, rest @ ..] if kind == "server" || kind == "peer" => ntp_association_key(kind, rest),
         _ => None,
     }
 }
@@ -549,13 +562,24 @@ mod tests {
     use super::*;
     use netform_ir::{Node, parse_with_dialect};
 
+    const PLAIN: IosRules = IosRules {
+        interface_types: &["ethernet"],
+        vrf_keyword: "context",
+        extra_router_protos: &[],
+        route_distance_is_identity: false,
+        key_rules: &[],
+    };
+
+    fn plain_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+        PLAIN.key_hint(parsed)
+    }
+
     fn common_hint(line: &str) -> Option<String> {
-        let parsed = parse_parts_with_punctuation(line, &[]);
-        common_key_hint(parsed.as_ref())
+        plain_key_hint(parse_parts_with_punctuation(line, &[]).as_ref())
     }
 
     #[test]
-    fn common_key_hint_table() {
+    fn shared_rules_table() {
         for (line, expected) in [
             ("vlan 100", Some("vlan:100")),
             // 0.8.0: `vlan configuration` keys apart from `vlan`.
@@ -688,19 +712,22 @@ mod tests {
                 Some("ipv6-route:MGMT:::/0:GigabitEthernet0/0:fe80::1"),
             ),
             ("ipv6 unicast-routing", None),
-            // constructs handled by dialect-specific functions.
-            ("interface Ethernet1", None),
-            ("vrf MGMT", None),
-            ("router bgp 65001", None),
-            ("ip access-list extended ACL", None),
+            // the rules that read the vendor's data.
+            ("interface Ethernet1", Some("interface:ethernet:1")),
+            ("vrf MGMT", Some("vrf:MGMT")),
+            ("router bgp 65001", Some("router:bgp:65001")),
+            (
+                "ip access-list extended ACL",
+                Some("ip-access-list:extended:ACL"),
+            ),
         ] {
             assert_eq!(common_hint(line), expected.map(String::from), "{line}");
         }
     }
 
     #[test]
-    fn common_key_hint_none_on_empty() {
-        assert_eq!(common_key_hint(None), None);
+    fn shared_rules_none_on_empty() {
+        assert_eq!(plain_key_hint(None), None);
     }
 
     #[test]
@@ -771,7 +798,7 @@ mod tests {
 
     #[test]
     fn ios_like_dialect_reports_no_block_terminator_by_default() {
-        let dialect = IosLikeDialect::new("plain", common_key_hint);
+        let dialect = IosLikeDialect::new("plain", plain_key_hint);
 
         for raw in ["end", "next", "end-policy", "end-set", "}", "exit"] {
             assert!(!dialect.block_terminator(raw), "{raw} became a terminator");
@@ -782,7 +809,7 @@ mod tests {
     fn ios_like_dialect_without_terminator_keeps_closing_lines_as_siblings() {
         let doc = parse_with_dialect(
             "route-policy PASS\n  pass\nend-policy\n",
-            &IosLikeDialect::new("plain", common_key_hint),
+            &IosLikeDialect::new("plain", plain_key_hint),
         );
 
         assert_eq!(doc.roots.len(), 2);
@@ -794,7 +821,7 @@ mod tests {
 
     #[test]
     fn ios_like_dialect_with_terminator_attaches_the_closing_line_as_a_footer() {
-        let dialect = IosLikeDialect::new("plain", common_key_hint)
+        let dialect = IosLikeDialect::new("plain", plain_key_hint)
             .with_block_terminator(|raw| raw.trim() == "end-policy");
         let cfg = "route-policy PASS\n  pass\nend-policy\n";
         let doc = parse_with_dialect(cfg, &dialect);
