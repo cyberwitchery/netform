@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::hash::Hash;
 
 use crate::model::{
     ComparisonLine, ComparisonView, DiffError, DiffLine, DiffStats, Edit, EditAnchor,
@@ -765,49 +766,26 @@ fn pair_blocks(
     inserted: Vec<Segment>,
     policy: OrderPolicy,
 ) -> (Vec<(Segment, Segment)>, Vec<Segment>, Vec<Segment>) {
-    let mut by_header: HashMap<u64, VecDeque<usize>> = HashMap::new();
-    let mut by_contents: HashMap<(u64, u64), VecDeque<usize>> = HashMap::new();
-    for (index, segment) in inserted.iter().enumerate() {
-        if segment.is_block {
-            let header = header_identity(segment, policy);
-            by_header.entry(header).or_default().push_back(index);
-            by_contents
-                .entry((header, tree_fingerprint(&segment.lines)))
-                .or_default()
-                .push_back(index);
-        }
-    }
+    let keys = |segments: &[Segment]| {
+        segments
+            .iter()
+            .map(|segment| {
+                segment.is_block.then(|| {
+                    (
+                        header_identity(segment, policy),
+                        tree_fingerprint(&segment.lines),
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let partners = pair_same_contents_first(&keys(&deleted), &keys(&inserted));
 
     let mut inserted = inserted.into_iter().map(Some).collect::<Vec<_>>();
-    let identical = deleted
-        .iter()
-        .map(|segment| {
-            if segment.is_block {
-                let key = (
-                    header_identity(segment, policy),
-                    tree_fingerprint(&segment.lines),
-                );
-                take_first(by_contents.get_mut(&key), &mut inserted)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
     let mut pairs = Vec::new();
     let mut unpaired_deleted = Vec::new();
-    for (segment, identical) in deleted.into_iter().zip(identical) {
-        let partner = identical.or_else(|| {
-            if segment.is_block {
-                take_first(
-                    by_header.get_mut(&header_identity(&segment, policy)),
-                    &mut inserted,
-                )
-            } else {
-                None
-            }
-        });
-        match partner {
+    for (segment, partner) in deleted.into_iter().zip(partners) {
+        match partner.and_then(|partner| inserted[partner].take()) {
             Some(right) => pairs.push((segment, right)),
             None => unpaired_deleted.push(segment),
         }
@@ -815,6 +793,44 @@ fn pair_blocks(
 
     let unpaired_inserted = inserted.into_iter().flatten().collect();
     (pairs, unpaired_deleted, unpaired_inserted)
+}
+
+/// the partner of each left `(identity, contents)` among `right`: the first unpaired one with the
+/// same identity and contents, else the first unpaired one with the same identity.
+pub(crate) fn pair_same_contents_first<K: Eq + Hash + Clone>(
+    left: &[Option<(K, u64)>],
+    right: &[Option<(K, u64)>],
+) -> Vec<Option<usize>> {
+    let mut by_identity: HashMap<K, VecDeque<usize>> = HashMap::new();
+    let mut by_contents: HashMap<(K, u64), VecDeque<usize>> = HashMap::new();
+    for (index, key) in right.iter().enumerate() {
+        if let Some((identity, contents)) = key {
+            by_identity
+                .entry(identity.clone())
+                .or_default()
+                .push_back(index);
+            by_contents
+                .entry((identity.clone(), *contents))
+                .or_default()
+                .push_back(index);
+        }
+    }
+
+    let mut taken = vec![false; right.len()];
+    let mut take = |queue: Option<&mut VecDeque<usize>>| {
+        let queue = queue?;
+        let index = std::iter::from_fn(|| queue.pop_front()).find(|&index| !taken[index])?;
+        taken[index] = true;
+        Some(index)
+    };
+    let identical = left
+        .iter()
+        .map(|key| take(by_contents.get_mut(key.as_ref()?)))
+        .collect::<Vec<_>>();
+    left.iter()
+        .zip(identical)
+        .map(|(key, identical)| identical.or_else(|| take(by_identity.get_mut(&key.as_ref()?.0))))
+        .collect()
 }
 
 /// pairs each unpaired block with the first unpaired leaf of its header identity on the other side.
@@ -885,7 +901,7 @@ fn take_first(
 }
 
 /// hashes a block as an unordered tree: its header text plus its children's sorted fingerprints.
-fn tree_fingerprint(lines: &[ComparisonLine]) -> u64 {
+pub(crate) fn tree_fingerprint(lines: &[ComparisonLine]) -> u64 {
     let depth = lines[0].path.0.len();
     let mut children = Vec::new();
     let mut start = 1;
@@ -898,10 +914,14 @@ fn tree_fingerprint(lines: &[ComparisonLine]) -> u64 {
         children.push(tree_fingerprint(&lines[start..end]));
         start = end;
     }
-    children.sort_unstable();
+    tree_hash(&lines[0].normalized, children)
+}
 
+/// `tree_fingerprint` of a line with text `header` whose children have the fingerprints `children`.
+pub(crate) fn tree_hash(header: &str, mut children: Vec<u64>) -> u64 {
+    children.sort_unstable();
     let mut hasher = xxhash_rust::xxh3::Xxh3Default::new();
-    hasher.update(lines[0].normalized.as_bytes());
+    hasher.update(header.as_bytes());
     for child in children {
         hasher.update(&child.to_le_bytes());
     }

@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use netform_ir::{BlockNode, DialectHint, Document, LineNode, Node, NodeId, Path, TriviaKind};
 use xxhash_rust::xxh3::Xxh3Default;
 
+use crate::engine::{pair_same_contents_first, tree_hash};
 use crate::model::{
     ComparisonLine, ComparisonView, KeyKind, NormalizeOptions, OrderPolicy, derive_content_key,
     derive_occurrence_key,
@@ -29,6 +30,8 @@ pub(crate) struct Cut<'a> {
     pub(crate) doc: &'a Document,
     pub(crate) block: NodeId,
     pub(crate) path: &'a Path,
+    /// the `tree_fingerprints` of its document's blocks.
+    pub(crate) trees: &'a HashMap<NodeId, u64>,
 }
 
 #[derive(Debug, Default)]
@@ -216,70 +219,87 @@ fn flatten_node(
     }
 }
 
-/// the emitted children of the left block a level below a cut is paired with.
+/// the left blocks the emitted children of a block a level below a cut are paired with.
 struct Guide<'g> {
     ordered: bool,
-    blocks: GuideBlocks<'g>,
+    partners: Vec<Option<(usize, &'g BlockNode)>>,
 }
 
-enum GuideBlocks<'g> {
-    /// each emitted child, if it is a block.
-    InOrder(Vec<Option<(usize, &'g BlockNode)>>),
-    /// the blocks under each header, last first.
-    ByHeader(HashMap<String, Vec<(usize, &'g BlockNode)>>),
+/// an emitted child's index, and its header text, id and node if it is a block.
+type Emitted<'d> = (usize, Option<(String, NodeId, &'d BlockNode)>);
+
+fn emitted<'d>(
+    cut: &Cut<'d>,
+    block: &'d BlockNode,
+    options: &NormalizeOptions,
+) -> Vec<Emitted<'d>> {
+    let quoted_values = quotes_delimit_values(cut.doc);
+    block
+        .children
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, &id)| match cut.doc.node(id)? {
+            Node::Line(line) => {
+                normalize_for_compare(&line.raw, line.trivia, quoted_values, options)?;
+                Some((idx, None))
+            }
+            Node::Block(child) => normalize_for_compare(
+                &child.header.raw,
+                child.header.trivia,
+                quoted_values,
+                options,
+            )
+            .map(|header| (idx, Some((header, id, child)))),
+        })
+        .collect()
+}
+
+fn contents_keys(cut: &Cut<'_>, children: &[Emitted<'_>]) -> Vec<Option<(String, u64)>> {
+    children
+        .iter()
+        .map(|(_, child)| {
+            child.as_ref().map(|(header, id, _)| {
+                (
+                    header.clone(),
+                    cut.trees.get(id).copied().unwrap_or_default(),
+                )
+            })
+        })
+        .collect()
 }
 
 impl<'g> Guide<'g> {
+    /// pairs `subject`'s emitted children with `guide`'s: in order if `path` is ordered, else as `pair_blocks` does.
     fn new(
-        doc: &'g Document,
-        block: &'g BlockNode,
+        subject: (&Cut<'_>, &BlockNode),
+        guide: (&Cut<'g>, &'g BlockNode),
         path: &Path,
         options: &NormalizeOptions,
     ) -> Self {
-        let quoted_values = quotes_delimit_values(doc);
-        let emitted =
-            block
-                .children
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, &id)| match doc.node(id)? {
-                    Node::Line(line) => {
-                        normalize_for_compare(&line.raw, line.trivia, quoted_values, options)?;
-                        Some((idx, None))
-                    }
-                    Node::Block(child) => normalize_for_compare(
-                        &child.header.raw,
-                        child.header.trivia,
-                        quoted_values,
-                        options,
-                    )
-                    .map(|header| (idx, Some((header, child)))),
-                });
         let ordered = options.policy_for_path(path) == OrderPolicy::Ordered;
-        let blocks = if ordered {
-            GuideBlocks::InOrder(
-                emitted
-                    .map(|(idx, child)| child.map(|(_, child)| (idx, child)))
-                    .collect(),
-            )
-        } else {
-            let mut by_header: HashMap<_, Vec<_>> = HashMap::new();
-            for (idx, child) in emitted.rev() {
-                if let Some((header, child)) = child {
-                    by_header.entry(header).or_default().push((idx, child));
-                }
-            }
-            GuideBlocks::ByHeader(by_header)
+        let guide_children = emitted(guide.0, guide.1, options);
+        let block = |partner: usize| {
+            let (idx, child) = &guide_children[partner];
+            child.as_ref().map(|&(_, _, node)| (*idx, node))
         };
-        Guide { ordered, blocks }
+        let partners = if ordered {
+            (0..guide_children.len()).map(block).collect()
+        } else {
+            let subject_children = emitted(subject.0, subject.1, options);
+            pair_same_contents_first(
+                &contents_keys(subject.0, &subject_children),
+                &contents_keys(guide.0, &guide_children),
+            )
+            .into_iter()
+            .map(|partner| partner.and_then(block))
+            .collect()
+        };
+        Guide { ordered, partners }
     }
 
-    /// the block paired with the subject's emitted child at `position`, a block headed `header`.
-    fn pair(&mut self, position: usize, header: &str) -> Option<(usize, &'g BlockNode)> {
-        match &mut self.blocks {
-            GuideBlocks::InOrder(blocks) => blocks.get(position).copied().flatten(),
-            GuideBlocks::ByHeader(blocks) => blocks.get_mut(header)?.pop(),
-        }
+    /// the block paired with the subject's emitted child at `position`.
+    fn pair(&self, position: usize) -> Option<(usize, &'g BlockNode)> {
+        self.partners.get(position).copied().flatten()
     }
 }
 
@@ -317,7 +337,12 @@ pub(crate) fn cut_fingerprint(
         children: root.children.iter(),
         footer: None,
         hashes: Vec::new(),
-        guide: Some(Guide::new(guide.doc, guide_root, &guide_path, options)),
+        guide: Some(Guide::new(
+            (&subject, root),
+            (&guide, guide_root),
+            &guide_path,
+            options,
+        )),
     }];
 
     while let Some(level) = stack.last_mut() {
@@ -335,13 +360,10 @@ pub(crate) fn cut_fingerprint(
                             continue;
                         }
                         let position = level.hashes.len();
-                        let paired = level
-                            .guide
-                            .as_mut()
-                            .and_then(|guide| guide.pair(position, &header));
+                        let paired = level.guide.as_ref().and_then(|guide| guide.pair(position));
                         let child_guide = paired.map(|(idx, paired)| {
                             guide_path.0.push(idx);
-                            Guide::new(guide.doc, paired, &guide_path, options)
+                            Guide::new((&subject, block), (&guide, paired), &guide_path, options)
                         });
                         stack.push(Level {
                             block: child_id,
@@ -387,6 +409,74 @@ pub(crate) fn cut_fingerprint(
         }
     }
     None
+}
+
+/// records the `tree_fingerprint` of `root` and of each block below it in `trees`.
+pub(crate) fn tree_fingerprints<'d>(
+    doc: &'d Document,
+    root: NodeId,
+    options: &NormalizeOptions,
+    trees: &mut HashMap<NodeId, u64>,
+) {
+    struct Level<'d> {
+        block: NodeId,
+        header: String,
+        children: std::slice::Iter<'d, NodeId>,
+        footer: Option<String>,
+        hashes: Vec<u64>,
+    }
+
+    let quoted_values = quotes_delimit_values(doc);
+    let normalize =
+        |line: &LineNode| normalize_for_compare(&line.raw, line.trivia, quoted_values, options);
+    let level = |block: NodeId, node: &'d BlockNode| {
+        Some(Level {
+            block,
+            header: normalize(&node.header)?,
+            children: node.children.iter(),
+            footer: node.footer.as_ref().and_then(normalize),
+            hashes: Vec::new(),
+        })
+    };
+    let (false, Some(Node::Block(node))) = (trees.contains_key(&root), doc.node(root)) else {
+        return;
+    };
+    let mut open = HashSet::from([root]);
+    let mut stack = Vec::from_iter(level(root, node));
+
+    while let Some(top) = stack.last_mut() {
+        if let Some(&child) = top.children.next() {
+            if let Some(&hash) = trees.get(&child) {
+                top.hashes.push(hash);
+                continue;
+            }
+            match doc.node(child) {
+                Some(Node::Line(line)) => {
+                    if let Some(text) = normalize(line) {
+                        top.hashes.push(tree_hash(&text, Vec::new()));
+                    }
+                }
+                Some(Node::Block(block)) => {
+                    if !open.insert(child) {
+                        top.hashes.push(leaf_hash(CYCLE, &block.header.raw));
+                    } else if let Some(level) = level(child, block) {
+                        stack.push(level);
+                    }
+                }
+                None => {}
+            }
+        } else if let Some(mut done) = stack.pop() {
+            if let Some(footer) = &done.footer {
+                done.hashes.push(tree_hash(footer, Vec::new()));
+            }
+            let hash = tree_hash(&done.header, done.hashes);
+            open.remove(&done.block);
+            trees.insert(done.block, hash);
+            if let Some(parent) = stack.last_mut() {
+                parent.hashes.push(hash);
+            }
+        }
+    }
 }
 
 const LINE: u8 = 0;

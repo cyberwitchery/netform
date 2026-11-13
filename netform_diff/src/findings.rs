@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
-use netform_ir::{Document, Node, Path};
+use netform_ir::{Document, Node, NodeId, Path};
 
-use crate::engine::sibling_identity;
+use crate::engine::{pair_same_contents_first, sibling_identity, tree_fingerprint};
 use crate::flatten::{
     Cut, MAX_NESTING_DEPTH, Truncation, content_counts, cut_fingerprint, extracted_key_counts,
+    tree_fingerprints,
 };
 use crate::model::{
     ComparisonLine, ComparisonView, Finding, FindingLevel, NormalizeOptions, OrderPolicy,
@@ -84,47 +85,158 @@ pub(crate) struct TruncatedRegion<'a> {
     pub(crate) differs: bool,
 }
 
-/// a truncated block, and the occurrence key of its parent's header.
+/// a truncated block, and its parent.
 struct Sibling<'a> {
     cut: Cut<'a>,
     header: &'a ComparisonLine,
-    parent: u64,
+    line: usize,
+    /// the index of the parent's header in the view, and the occurrence key of its parent's.
+    parent: (usize, u64),
+    /// how many earlier children of the parent share the header's content key.
+    rank: u64,
 }
 
 fn siblings<'a>(
     doc: &'a Document,
     view: &'a ComparisonView,
     truncations: &[Truncation],
+    trees: &'a HashMap<NodeId, u64>,
 ) -> Vec<Sibling<'a>> {
-    let mut parent = 0;
+    let mut grandparent = 0;
+    let mut parent = (0, 0);
+    let mut ranks = HashMap::new();
     let mut scanned = 0;
     truncations
         .iter()
         .map(|truncation| {
             let header = &view.lines[truncation.line];
-            for line in &view.lines[scanned..truncation.line] {
-                if line.path.0.len() + 1 == header.path.0.len() {
-                    parent = line.occurrence_key;
+            let depth = header.path.0.len();
+            for (index, line) in view.lines[..=truncation.line]
+                .iter()
+                .enumerate()
+                .skip(scanned)
+            {
+                match line.path.0.len() + 2 {
+                    len if len == depth => grandparent = line.occurrence_key,
+                    len if len == depth + 1 => {
+                        parent = (index, grandparent);
+                        ranks.clear();
+                    }
+                    len if len == depth + 2 => {
+                        *ranks.entry(line.content_key).or_insert(0u64) += 1;
+                    }
+                    _ => {}
                 }
             }
-            scanned = truncation.line;
+            scanned = truncation.line + 1;
             Sibling {
                 cut: Cut {
                     doc,
                     block: truncation.block,
                     path: &header.path,
+                    trees,
                 },
                 header,
+                line: truncation.line,
                 parent,
+                rank: ranks[&header.content_key] - 1,
             }
         })
         .collect()
 }
 
+fn node_at(doc: &Document, path: &[usize]) -> Option<NodeId> {
+    let (&first, rest) = path.split_first()?;
+    rest.iter()
+        .try_fold(*doc.roots.get(first)?, |id, &index| match doc.node(id)? {
+            Node::Block(block) => block.children.get(index).copied(),
+            Node::Line(_) => None,
+        })
+}
+
+/// the `tree_fingerprints` of each block at the depth of a truncated block's parent.
+fn cut_trees(
+    doc: &Document,
+    view: &ComparisonView,
+    options: &NormalizeOptions,
+) -> HashMap<NodeId, u64> {
+    let mut trees = HashMap::new();
+    for line in &view.lines {
+        if line.path.0.len() + 2 == MAX_NESTING_DEPTH
+            && let Some(node) = node_at(doc, &line.path.0)
+        {
+            tree_fingerprints(doc, node, options, &mut trees);
+        }
+    }
+    trees
+}
+
+/// a block at the depth of a truncated block's parent.
+struct Parent {
+    line: usize,
+    grandparent: u64,
+    /// its `tree_fingerprint` with and without the lines below the cut.
+    trees: (u64, u64),
+}
+
+fn parents(doc: &Document, view: &ComparisonView, trees: &HashMap<NodeId, u64>) -> Vec<Parent> {
+    let depth = MAX_NESTING_DEPTH - 2;
+    let mut parents = Vec::new();
+    let mut grandparent = 0;
+    for (line, header) in view.lines.iter().enumerate() {
+        match header.path.0.len() {
+            len if len + 1 == depth => grandparent = header.occurrence_key,
+            len if len == depth => {
+                let end = view.lines[line + 1..]
+                    .iter()
+                    .position(|next| next.path.0.len() <= depth)
+                    .map_or(view.lines.len(), |offset| line + 1 + offset);
+                let deep = node_at(doc, &header.path.0).and_then(|node| trees.get(&node));
+                if let (true, Some(&deep)) = (end > line + 1, deep) {
+                    let visible = tree_fingerprint(&view.lines[line..end]);
+                    parents.push(Parent {
+                        line,
+                        grandparent,
+                        trees: (deep, visible),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    parents
+}
+
+/// pairs `lefts` with `rights`, each `(identity, rank, tree_fingerprint)`, as the engine would.
+fn pair_siblings(
+    policy: OrderPolicy,
+    lefts: &[(u64, u64, u64)],
+    rights: &[(u64, u64, u64)],
+) -> Vec<Option<usize>> {
+    if policy == OrderPolicy::Ordered {
+        let by_rank = rights
+            .iter()
+            .enumerate()
+            .map(|(index, &(identity, rank, _))| ((identity, rank), index))
+            .collect::<HashMap<_, _>>();
+        return lefts
+            .iter()
+            .map(|&(identity, rank, _)| by_rank.get(&(identity, rank)).copied())
+            .collect();
+    }
+    let keys = |siblings: &[(u64, u64, u64)]| {
+        siblings
+            .iter()
+            .map(|&(identity, _, tree)| Some((identity, tree)))
+            .collect::<Vec<_>>()
+    };
+    pair_same_contents_first(&keys(lefts), &keys(rights))
+}
+
 /// pairs each side's truncated blocks; a pair is reported once, on the left.
 ///
-/// blocks pair under parents that share an occurrence key, as the engine pairs siblings under the
-/// left parent's policy: by occurrence key if `ordered`, else same contents first, then in order.
+/// parents pair under the policy of the left grandparent's path, blocks under that of the left
+/// parent's, as the engine pairs siblings: by rank if `ordered`, else same `tree_fingerprint` first.
 pub(crate) fn truncated_regions<'a>(
     a: &'a Document,
     a_view: &'a ComparisonView,
@@ -134,30 +246,61 @@ pub(crate) fn truncated_regions<'a>(
     b_truncations: &[Truncation],
     options: &NormalizeOptions,
 ) -> Vec<TruncatedRegion<'a>> {
-    let left = siblings(a, a_view, a_truncations)
+    let a_trees = cut_trees(a, a_view, options);
+    let b_trees = cut_trees(b, b_view, options);
+    let a_parents = parents(a, a_view, &a_trees);
+    let b_parents = parents(b, b_view, &b_trees);
+    let parent_partners = pair_parents((a_view, &a_parents), (b_view, &b_parents), options, |p| {
+        p.trees.0
+    });
+    let visible_partners = pair_parents((a_view, &a_parents), (b_view, &b_parents), options, |p| {
+        p.trees.1
+    });
+    let b_visible = b_parents
+        .iter()
+        .map(|parent| (parent.line, parent.trees.1))
+        .collect::<HashMap<_, _>>();
+    let mispaired = a_parents
+        .iter()
+        .filter(|parent| {
+            let partner = parent_partners.get(&parent.line);
+            partner != visible_partners.get(&parent.line)
+                && partner.is_none_or(|right| b_visible.get(right) != Some(&parent.trees.1))
+        })
+        .map(|parent| parent.grandparent)
+        .collect::<HashSet<_>>();
+    let left = siblings(a, a_view, a_truncations, &a_trees)
         .into_iter()
         .filter_map(|left| Some((cut_fingerprint(left.cut, left.cut, options)?, left)))
         .collect::<Vec<_>>();
-    let right = siblings(b, b_view, b_truncations);
+    let right = siblings(b, b_view, b_truncations, &b_trees);
+
+    let right_parents = parent_partners
+        .iter()
+        .map(|(&left, &right)| (right, left))
+        .collect::<HashMap<_, _>>();
 
     let mut policies = HashMap::new();
     let mut buckets = HashMap::new();
     for (index, (_, sibling)) in left.iter().enumerate() {
-        let policy = *policies.entry(sibling.parent).or_insert_with(|| {
-            let path = &sibling.header.path.0;
-            options.policy_for_path(&Path(path[..path.len() - 1].to_vec()))
-        });
+        let parent = sibling.parent.0;
+        let policy = *policies
+            .entry(parent)
+            .or_insert_with(|| options.policy_for_path(&Path(a_view.lines[parent].path.0.clone())));
         let identity = sibling_identity(sibling.header, policy);
         buckets
-            .entry((sibling.parent, identity))
+            .entry((parent, identity))
             .or_insert_with(|| (policy, Vec::new(), Vec::new()))
             .1
             .push(index);
     }
     for (index, sibling) in right.iter().enumerate() {
-        if let Some(&policy) = policies.get(&sibling.parent) {
+        let Some(&parent) = right_parents.get(&sibling.parent.0) else {
+            continue;
+        };
+        if let Some(&policy) = policies.get(&parent) {
             let identity = sibling_identity(sibling.header, policy);
-            if let Some(bucket) = buckets.get_mut(&(sibling.parent, identity)) {
+            if let Some(bucket) = buckets.get_mut(&(parent, identity)) {
                 bucket.2.push(index);
             }
         }
@@ -165,49 +308,35 @@ pub(crate) fn truncated_regions<'a>(
 
     let mut partners = vec![None; left.len()];
     let mut paired = vec![false; right.len()];
+    let key = |sibling: &Sibling<'_>, policy| {
+        (
+            sibling_identity(sibling.header, policy),
+            sibling.rank,
+            sibling
+                .cut
+                .trees
+                .get(&sibling.cut.block)
+                .copied()
+                .unwrap_or_default(),
+        )
+    };
     for (policy, lefts, rights) in buckets.values() {
-        if *policy == OrderPolicy::Ordered {
-            let by_occurrence = rights
+        let pairs = pair_siblings(
+            *policy,
+            &lefts
                 .iter()
-                .map(|&index| (right[index].header.occurrence_key, index))
-                .collect::<HashMap<_, _>>();
-            for &index in lefts {
-                if let Some(&partner) = by_occurrence.get(&left[index].1.header.occurrence_key) {
-                    partners[index] = Some(partner);
-                    paired[partner] = true;
-                }
-            }
-            continue;
-        }
-        let guide = left[lefts[0]].1.cut;
-        let mut by_contents: HashMap<u64, VecDeque<usize>> = HashMap::new();
-        for &index in rights {
-            if let Some(fingerprint) = cut_fingerprint(right[index].cut, guide, options) {
-                by_contents.entry(fingerprint).or_default().push_back(index);
-            }
-        }
-        for &index in lefts {
-            let partner = by_contents
-                .get_mut(&left[index].0)
-                .and_then(VecDeque::pop_front);
+                .map(|&index| key(&left[index].1, *policy))
+                .collect::<Vec<_>>(),
+            &rights
+                .iter()
+                .map(|&index| key(&right[index], *policy))
+                .collect::<Vec<_>>(),
+        );
+        for (&index, partner) in lefts.iter().zip(pairs) {
             if let Some(partner) = partner {
-                partners[index] = Some(partner);
-                paired[partner] = true;
+                partners[index] = Some(rights[partner]);
+                paired[rights[partner]] = true;
             }
-        }
-        let rest = rights
-            .iter()
-            .copied()
-            .filter(|&index| !paired[index])
-            .collect::<Vec<_>>();
-        let unmatched = lefts
-            .iter()
-            .copied()
-            .filter(|&index| partners[index].is_none())
-            .collect::<Vec<_>>();
-        for (index, partner) in unmatched.into_iter().zip(rest) {
-            partners[index] = Some(partner);
-            paired[partner] = true;
         }
     }
 
@@ -217,20 +346,69 @@ pub(crate) fn truncated_regions<'a>(
             partner.and_then(|partner| cut_fingerprint(right[partner].cut, sibling.cut, options));
         regions.push(TruncatedRegion {
             side: "left",
-            header: sibling.header,
-            differs: right != Some(*fingerprint),
+            header: &a_view.lines[sibling.line],
+            differs: right != Some(*fingerprint) || mispaired.contains(&sibling.parent.1),
         });
     }
     for (sibling, paired) in right.iter().zip(paired) {
         if !paired && cut_fingerprint(sibling.cut, sibling.cut, options).is_some() {
             regions.push(TruncatedRegion {
                 side: "right",
-                header: sibling.header,
+                header: &b_view.lines[sibling.line],
                 differs: true,
             });
         }
     }
     regions
+}
+
+/// the right parent each left parent is paired with on `tree`, by view index.
+fn pair_parents(
+    (a_view, lefts): (&ComparisonView, &[Parent]),
+    (b_view, rights): (&ComparisonView, &[Parent]),
+    options: &NormalizeOptions,
+    tree: impl Fn(&Parent) -> u64,
+) -> HashMap<usize, usize> {
+    let mut policies = HashMap::new();
+    let mut groups = HashMap::new();
+    for parent in lefts {
+        let (line, grandparent) = (parent.line, parent.grandparent);
+        let header = &a_view.lines[line];
+        let policy = *policies.entry(grandparent).or_insert_with(|| {
+            let path = &header.path.0;
+            options.policy_for_path(&Path(path[..path.len() - 1].to_vec()))
+        });
+        groups
+            .entry((grandparent, sibling_identity(header, policy)))
+            .or_insert_with(|| (policy, Vec::new(), Vec::new()))
+            .1
+            .push((line, header.occurrence_key, tree(parent)));
+    }
+    for parent in rights {
+        let (line, grandparent) = (parent.line, parent.grandparent);
+        let header = &b_view.lines[line];
+        if let Some(&policy) = policies.get(&grandparent)
+            && let Some(group) = groups.get_mut(&(grandparent, sibling_identity(header, policy)))
+        {
+            group.2.push((line, header.occurrence_key, tree(parent)));
+        }
+    }
+
+    let mut partners = HashMap::new();
+    for (policy, lefts, rights) in groups.into_values() {
+        let key = |&(_, occurrence, tree): &(usize, u64, u64)| (0, occurrence, tree);
+        let pairs = pair_siblings(
+            policy,
+            &lefts.iter().map(key).collect::<Vec<_>>(),
+            &rights.iter().map(key).collect::<Vec<_>>(),
+        );
+        for (&(left, _, _), partner) in lefts.iter().zip(pairs) {
+            if let Some(partner) = partner {
+                partners.insert(left, rights[partner].0);
+            }
+        }
+    }
+    partners
 }
 
 pub(crate) fn collect_findings(

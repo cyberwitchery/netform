@@ -133,6 +133,7 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
     );
     let ordered = || with_policy(OrderPolicy::Ordered, Vec::new());
     let unordered = || with_policy(OrderPolicy::Unordered, Vec::new());
+    let keyed_stable = || with_policy(OrderPolicy::KeyedStable, Vec::new());
     let left_alpha_ordered = |depth: usize| {
         let alpha = OrderPolicyOverride {
             context_prefix: vec![0; depth + 1],
@@ -180,6 +181,31 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
             &["dup", " y 1", " y 2", "dup", " x 1", " x 2"],
         ),
     ];
+    let bodies_swapped: (&[&str], &[&str]) = (
+        &["dup", " a", " b", "dup", " c"],
+        &["dup", " c", "dup", " a", " b"],
+    );
+    let first_reversed: (&[&str], &[&str]) = (
+        &["dup", " a", " b", "dup", " a", " b"],
+        &["dup", " b", " a", "dup", " a", " b"],
+    );
+    let marked: &[&str] = &["P", " m1", " dup", "  x", "P", " m2", " dup", "  y"];
+    let moved_with_marker: (&[&str], &[&str]) = (
+        marked,
+        &["P", " m2", " dup", "  y", "P", " m1", " dup", "  x"],
+    );
+    let moved_against_marker: (&[&str], &[&str]) = (
+        marked,
+        &["P", " m1", " dup", "  y", "P", " m2", " dup", "  x"],
+    );
+    let leaf_split: (&[&str], &[&str]) = (
+        &["P", " dup", "P", " dup", "  x", " dup", "P", " dup"],
+        &["P", " dup", "  x", "P", " dup", " dup", "P", " dup"],
+    );
+    let marked_cuts = || {
+        let parent = |index| Path([vec![0; 125], vec![index, 1]].concat());
+        vec![parent(0), parent(1)]
+    };
     let dups_swapped: (&[&str], &[&str]) = (
         &["dup", " a", "  x 1", "  x 2", "dup", " y 1"],
         &["dup", " y 1", "dup", " a", "  x 1", "  x 2"],
@@ -230,6 +256,47 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
         (130, mixed[2], left_alpha_ordered(130), true, 0, cut()),
         (130, mixed[3], left_alpha_ordered(130), true, 0, cut()),
         (130, dups_swapped, unordered(), false, 0, cut()),
+        (
+            130,
+            bodies_swapped,
+            left_alpha_ordered(130),
+            false,
+            0,
+            cut(),
+        ),
+        (
+            126,
+            first_reversed,
+            left_alpha_ordered(126),
+            true,
+            0,
+            cut_126(),
+        ),
+        (125, moved_with_marker, unordered(), false, 0, marked_cuts()),
+        (
+            125,
+            moved_with_marker,
+            keyed_stable(),
+            false,
+            0,
+            marked_cuts(),
+        ),
+        (
+            125,
+            moved_against_marker,
+            unordered(),
+            true,
+            0,
+            marked_cuts(),
+        ),
+        (
+            125,
+            leaf_split,
+            unordered(),
+            true,
+            0,
+            vec![Path([vec![0; 125], vec![1, 0]].concat())],
+        ),
     ];
 
     for (depth, (left, right), options, has_changes, edits, regions) in cases {
