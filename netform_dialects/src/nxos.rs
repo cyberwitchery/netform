@@ -99,7 +99,7 @@ interface port-channel10
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ios_like::parse_ios_like_parts;
+    use netform_ir::parse_parts_with_punctuation;
     use netform_ir::{Node, TriviaKind};
 
     fn root_trivia(doc: &Document) -> Vec<(&str, TriviaKind)> {
@@ -185,7 +185,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                key_hint(parse_ios_like_parts(line).as_ref()).as_deref(),
+                key_hint(parse_parts_with_punctuation(line, &[]).as_ref()).as_deref(),
                 expected,
                 "{line}",
             );

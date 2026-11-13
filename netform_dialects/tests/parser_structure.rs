@@ -1,4 +1,4 @@
-use netform_dialects::ios_like::{IosLikeDialect, common_key_hint};
+use netform_dialects::{eos, ios_like::IosLikeDialect};
 use netform_ir::{
     Dialect, Document, Node, NodeId, ParsedLineParts, TriviaKind, parse_generic, parse_with_dialect,
 };
@@ -47,7 +47,7 @@ fn outline(doc: &Document, ids: &[NodeId]) -> String {
 #[test]
 fn a_more_indented_comment_opens_the_block_above_it() {
     let brace = |input: &str| parse_with_dialect(input, &BraceDialect);
-    let eos = |input: &str| parse_with_dialect(input, &IosLikeDialect::new("eos", common_key_hint));
+    let eos = |input: &str| parse_with_dialect(input, &IosLikeDialect::new("eos", eos::key_hint));
     let rows: &[(&str, Parse, &str, &str)] = &[
         (
             "comment-only body",

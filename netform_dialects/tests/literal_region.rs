@@ -1,9 +1,9 @@
 //! parser coverage for multi-line literal regions (IOS-family banners).
 
-use netform_dialects::ios_like::{IosLikeDialect, common_key_hint};
+use netform_dialects::{ios_like::IosLikeDialect, iosxe};
 use netform_ir::{Node, TriviaKind, parse_with_dialect};
 
-const IOS_LIKE: IosLikeDialect = IosLikeDialect::new("iosxe", common_key_hint);
+const IOS_LIKE: IosLikeDialect = IosLikeDialect::new("iosxe", iosxe::key_hint);
 
 fn line_kinds(doc: &netform_ir::Document) -> Vec<(String, TriviaKind)> {
     fn walk(

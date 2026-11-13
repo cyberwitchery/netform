@@ -37,12 +37,12 @@ pub mod junos;
 pub mod nxos;
 
 use detect::{Signal, SignalTable};
-use ios_like::{IosKeyHintConfig, ios_family_key_hint};
+use ios_like::SHARED_RULES;
 use netform_ir::{DialectHint, Document, ParsedLineParts};
-use rules::{KeyRule, rule_key_hint};
+use rules::KeyRule;
 
 /// the data an IOS-family vendor needs to derive key hints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct IosRules {
     /// interface type prefixes in canonical lowercase form,
     /// longest-prefix-first (see `ios_like::parse_interface`).
@@ -54,28 +54,23 @@ pub struct IosRules {
     pub extra_router_protos: &'static [&'static str],
     /// whether a static route's distance is part of its identity.
     pub route_distance_is_identity: bool,
-    /// vendor-specific rules, tried after the shared IOS-family arms.
+    /// vendor-specific rules, tried before [`ios_like::SHARED_RULES`], so a
+    /// vendor rule that matches a line overrides the shared rule for its head.
     pub key_rules: &'static [KeyRule],
 }
 
 impl IosRules {
-    /// this vendor's configuration for [`ios_family_key_hint`].
-    pub const fn key_hint_config(&self) -> IosKeyHintConfig {
-        IosKeyHintConfig {
-            interface_types: self.interface_types,
-            vrf_keyword: self.vrf_keyword,
-            extra_router_protos: self.extra_router_protos,
-            route_distance_is_identity: self.route_distance_is_identity,
-        }
-    }
-
     /// derive a stable identity key for one of this vendor's configuration
-    /// lines.
+    /// lines: the first rule in [`IosRules::key_rules`], then
+    /// [`ios_like::SHARED_RULES`], that matches the line decides it.
     pub fn key_hint(&self, parsed: Option<&ParsedLineParts>) -> Option<String> {
-        if let Some(hint) = ios_family_key_hint(parsed, &self.key_hint_config()) {
-            return Some(hint);
-        }
-        rule_key_hint(self.key_rules, parsed)
+        let parsed = parsed?;
+        let (head, args) = (parsed.head.as_str(), parsed.args.as_slice());
+        self.key_rules
+            .iter()
+            .chain(SHARED_RULES)
+            .find(|rule| rule.applies(head, args))
+            .and_then(|rule| rule.render(args, self))
     }
 }
 
@@ -180,9 +175,9 @@ pub fn detect_dialect(input: &str) -> DialectHint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ios_like::parse_ios_like_parts;
     use netform_ir::ParsedLineParts;
-    use rules::KeyRuleAction;
+    use netform_ir::parse_parts_with_punctuation;
+    use rules::{ArgGuard, KeyRuleAction};
 
     #[test]
     fn registry_names_are_unique_and_sorted() {
@@ -251,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_arms_win_over_a_vendor_rule_on_the_same_head() {
+    fn a_vendor_rule_overrides_the_shared_rule_on_its_head() {
         const RULES: IosRules = IosRules {
             interface_types: &["ethernet"],
             vrf_keyword: "instance",
@@ -259,26 +254,23 @@ mod tests {
             route_distance_is_identity: false,
             key_rules: &[KeyRule {
                 head: "interface",
-                guards: &[],
+                guards: &[ArgGuard::new(0, &["Ethernet1"])],
                 action: KeyRuleAction::key("iface", &[0]),
             }],
         };
 
-        let parsed = parse_ios_like_parts("interface Ethernet1");
-        assert_eq!(
-            rule_key_hint(RULES.key_rules, parsed.as_ref()),
-            Some("iface:Ethernet1".into()),
-        );
-        assert_eq!(
-            RULES.key_hint(parsed.as_ref()),
-            Some("interface:ethernet:1".into()),
-        );
+        for (line, expected) in [
+            ("interface Ethernet1", "iface:Ethernet1"),
+            ("interface Ethernet2", "interface:ethernet:2"),
+        ] {
+            let parsed = parse_parts_with_punctuation(line, &[]);
+            assert_eq!(RULES.key_hint(parsed.as_ref()).as_deref(), Some(expected));
+        }
     }
 
     type KeyHintFn = fn(Option<&ParsedLineParts>) -> Option<String>;
 
-    /// the IOS-family vendors whose key hints share the `ios_family_key_hint`
-    /// and `common_key_hint` arms.
+    /// the IOS-family vendors whose key hints share `ios_like::SHARED_RULES`.
     const IOS_FAMILY: [(&str, KeyHintFn); 3] = [
         ("eos", eos::key_hint),
         ("iosxe", iosxe::key_hint),
@@ -428,7 +420,7 @@ mod tests {
         ] {
             for (name, key_hint) in IOS_FAMILY {
                 assert_eq!(
-                    key_hint(parse_ios_like_parts(line).as_ref()).as_deref(),
+                    key_hint(parse_parts_with_punctuation(line, &[]).as_ref()).as_deref(),
                     expected,
                     "{name}: {line}",
                 );
