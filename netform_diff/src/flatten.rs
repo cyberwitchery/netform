@@ -210,7 +210,7 @@ fn flatten_node(
                         content_key,
                         occurrence_key: derive_occurrence_key(content_key, 1),
                         key_hint: None,
-                        normalized: format!("{HIDDEN}{hash:016x}"),
+                        normalized: format!("{HIDDEN}{hash:032x}"),
                         original: String::new(),
                         path: Path([path.as_slice(), &[0]].concat()),
                         span: header_line.span.clone(),
@@ -258,18 +258,20 @@ const HIDDEN: &str = "\0hidden:";
 /// `--order-policy` or `--policy-override` makes the block's path `ordered`, and as a sorted
 /// multiset otherwise, and a block with two or more children also hashes which it was: equal
 /// hashes then mean equal lines under the policies at this side's paths.
+///
+/// the hash is 128 bits wide, since equal hashes are all that make those lines match.
 fn hidden_hash<'d>(
     doc: &'d Document,
     root: NodeId,
     path: &[usize],
     options: &NormalizeOptions,
-) -> Option<u64> {
+) -> Option<u128> {
     struct Level<'d> {
         block: NodeId,
         header: Option<String>,
         children: std::iter::Enumerate<std::slice::Iter<'d, NodeId>>,
         footer: Option<String>,
-        hashes: Vec<u64>,
+        hashes: Vec<u128>,
         ordered: bool,
     }
 
@@ -345,10 +347,10 @@ fn hidden_hash<'d>(
             update_field(&mut hasher, done.footer.as_deref());
             match stack.last_mut() {
                 Some(parent) => {
-                    parent.hashes.push(hasher.digest());
+                    parent.hashes.push(hasher.digest128());
                     path.0.pop();
                 }
-                None => return (!done.hashes.is_empty()).then(|| hasher.digest()),
+                None => return (!done.hashes.is_empty()).then(|| hasher.digest128()),
             }
         }
     }
@@ -359,11 +361,11 @@ const LINE: u8 = 0;
 const BLOCK: u8 = 1;
 const CYCLE: u8 = 2;
 
-fn leaf_hash(tag: u8, text: &str) -> u64 {
+fn leaf_hash(tag: u8, text: &str) -> u128 {
     let mut hasher = Xxh3Default::new();
     hasher.update(&[tag]);
     hasher.update(text.as_bytes());
-    hasher.digest()
+    hasher.digest128()
 }
 
 /// feeds `text`, or its absence, to `hasher` length-prefixed.

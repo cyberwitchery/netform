@@ -5,9 +5,9 @@ use netform_dialects::junos::parse as parse_junos;
 use netform_ir::{Path, Span, parse_generic};
 
 use super::{
-    Diff, DiffLine, Edit, EditAnchor, NormalizationStep, NormalizeOptions, OrderPolicy,
-    OrderPolicyConfig, OrderPolicyOverride, PlanAction, PlanLineEditKind, build_comparison_view,
-    build_plan, diff_documents, format_markdown_report, format_unified_diff,
+    Diff, DiffLine, Edit, EditAnchor, FindingLevel, NormalizationStep, NormalizeOptions,
+    OrderPolicy, OrderPolicyConfig, OrderPolicyOverride, PlanAction, PlanLineEditKind,
+    build_comparison_view, build_plan, diff_documents, format_markdown_report, format_unified_diff,
 };
 
 #[test]
@@ -444,6 +444,63 @@ fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_diffe
             !has_changes,
             "{case}"
         );
+    }
+}
+
+#[test]
+fn the_plan_reports_a_block_whose_lines_past_the_nesting_limit_differ() {
+    let left_cut = Some(Path(vec![0; 127]));
+    // left, right, the plan's finding paths, the diff's finding levels.
+    type Case = (
+        &'static [&'static str],
+        &'static [&'static str],
+        Vec<Option<Path>>,
+        Vec<FindingLevel>,
+    );
+    let cases: [Case; 3] = [
+        (
+            &["sub", " old"],
+            &["sub", " new"],
+            vec![left_cut],
+            vec![FindingLevel::Warning],
+        ),
+        (
+            &["sub", " same"],
+            &["sub", " same"],
+            Vec::new(),
+            vec![FindingLevel::Info],
+        ),
+        (
+            &[],
+            &["sub", " new"],
+            vec![None],
+            vec![FindingLevel::Warning],
+        ),
+    ];
+
+    for (left, right, plan_paths, levels) in cases {
+        let a = parse_generic(&nested(126, left));
+        let b = parse_generic(&nested(126, right));
+        let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
+        let plan = build_plan(&diff);
+        let case = format!("{left:?} -> {right:?}");
+        let diff_levels = diff
+            .findings
+            .iter()
+            .filter(|finding| finding.code == crate::finding_code::DIFF_UNRELIABLE_REGION)
+            .map(|finding| finding.level)
+            .collect::<Vec<_>>();
+        assert_eq!(diff_levels, levels, "{case}");
+        let found = plan
+            .findings
+            .iter()
+            .map(|finding| {
+                assert_eq!(finding.code, crate::finding_code::DIFF_UNRELIABLE_REGION);
+                assert!(finding.message.contains("under `sub`"), "{case}");
+                finding.path.clone()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(found, plan_paths, "{case}");
     }
 }
 

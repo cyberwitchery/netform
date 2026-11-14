@@ -418,11 +418,18 @@ fn collect_fallback_alignment_findings(contexts: &[Path], out: &mut Vec<Finding>
     }
 }
 
+/// the start of a truncation finding's message on the right document, whose path is a right path.
+pub(crate) const RIGHT_TRUNCATION: &str = "right document nests deeper than";
+
+/// a truncated block whose lines differ is a warning, one whose lines match is info.
 fn collect_truncation_findings(truncated: &[TruncatedRegion], out: &mut Vec<Finding>) {
     for region in truncated {
         out.push(Finding {
             code: finding_code::DIFF_UNRELIABLE_REGION.to_string(),
-            level: FindingLevel::Warning,
+            level: match region.differs {
+                true => FindingLevel::Warning,
+                false => FindingLevel::Info,
+            },
             message: format!(
                 "{} document nests deeper than {} levels under `{}`; those lines were compared as a whole and {}",
                 region.side,
