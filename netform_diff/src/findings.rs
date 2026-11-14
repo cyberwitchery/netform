@@ -1,9 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use netform_ir::{Document, Node, Path};
+use netform_ir::{Document, Node, Path, Span};
 
-use crate::flatten::{content_counts, extracted_key_counts};
-use crate::model::{ComparisonView, Finding, FindingLevel, finding_code};
+use crate::flatten::{Cut, MAX_NESTING_DEPTH, content_counts, extracted_key_counts};
+use crate::model::{
+    ComparisonView, DiffLine, Edit, EditAnchor, Finding, FindingLevel, finding_code,
+};
 
 #[derive(Debug)]
 pub(crate) struct DiffContext {
@@ -71,6 +73,189 @@ impl DiffContext {
     }
 }
 
+/// a block whose children the view leaves out, and whether they differ from the other side's.
+#[derive(Debug)]
+pub(crate) struct TruncatedRegion {
+    side: &'static str,
+    header: String,
+    path: Path,
+    span: Span,
+    pub(crate) differs: bool,
+}
+
+/// one side of a diff whose view has cut blocks.
+pub(crate) struct CutSide<'a> {
+    pub(crate) view: &'a ComparisonView,
+    pub(crate) cuts: &'a [Cut],
+}
+
+/// takes the hidden lines of both sides' cut blocks out of `edits`, and reports each cut block
+/// once: a left one with the right one the engine paired it with, then each right one paired with
+/// none. a block differs when its hidden line, or its partner's, was in an edit.
+pub(crate) fn truncated_regions(
+    edits: &mut Vec<Edit>,
+    left: CutSide<'_>,
+    right: CutSide<'_>,
+    cut_pairs: &[(Path, Path)],
+) -> Vec<TruncatedRegion> {
+    if left.cuts.is_empty() && right.cuts.is_empty() {
+        return Vec::new();
+    }
+    let by_path = |side: &CutSide<'_>, line: fn(&Cut) -> usize| {
+        side.cuts
+            .iter()
+            .enumerate()
+            .map(|(index, cut)| (side.view.lines[line(cut)].path.clone(), index))
+            .collect::<HashMap<_, _>>()
+    };
+    let hidden = (
+        by_path(&left, |cut| cut.hidden),
+        by_path(&right, |cut| cut.hidden),
+    );
+    let mut seen = (HashSet::new(), HashSet::new());
+    *edits = std::mem::take(edits)
+        .into_iter()
+        .filter_map(|edit| without_hidden(edit, (&hidden.0, &hidden.1), &mut seen))
+        .collect();
+
+    let right_headers = by_path(&right, |cut| cut.header);
+    let partners = cut_pairs
+        .iter()
+        .filter_map(|(left, right)| Some((left, *right_headers.get(right)?)))
+        .collect::<HashMap<_, _>>();
+    let region = |side, cut: &Cut, view: &ComparisonView, differs| {
+        let header = &view.lines[cut.header];
+        TruncatedRegion {
+            side,
+            header: header.original.trim().to_string(),
+            path: header.path.clone(),
+            span: header.span.clone(),
+            differs,
+        }
+    };
+    let mut paired = HashSet::new();
+    let mut regions = Vec::new();
+    for (index, cut) in left.cuts.iter().enumerate() {
+        let partner = partners.get(&left.view.lines[cut.header].path).copied();
+        paired.extend(partner);
+        let differs =
+            seen.0.contains(&index) || partner.is_some_and(|partner| seen.1.contains(&partner));
+        regions.push(region("left", cut, left.view, differs));
+    }
+    for (index, cut) in right.cuts.iter().enumerate() {
+        if !paired.contains(&index) && seen.1.contains(&index) {
+            regions.push(region("right", cut, right.view, true));
+        }
+    }
+    regions
+}
+
+/// `edit` without the hidden lines in `hidden`, recording the cut each belongs to in `seen`, or
+/// `None` when it had no other lines.
+fn without_hidden(
+    edit: Edit,
+    hidden: (&HashMap<Path, usize>, &HashMap<Path, usize>),
+    seen: &mut (HashSet<usize>, HashSet<usize>),
+) -> Option<Edit> {
+    let strip =
+        |lines: &mut Vec<DiffLine>, hidden: &HashMap<Path, usize>, seen: &mut HashSet<usize>| {
+            let before = lines.len();
+            lines.retain(|line| match hidden.get(&line.path) {
+                Some(&cut) => {
+                    seen.insert(cut);
+                    false
+                }
+                None => true,
+            });
+            lines.len() != before
+        };
+    let first = |lines: &[DiffLine]| {
+        lines.first().map(|line| {
+            let anchor = EditAnchor {
+                path: line.path.clone(),
+                span: line.span.clone(),
+            };
+            (line.occurrence_key, anchor)
+        })
+    };
+    match edit {
+        Edit::Delete {
+            right_anchor,
+            mut lines,
+            ..
+        } => {
+            strip(&mut lines, hidden.0, &mut seen.0);
+            let (at_key, left_anchor) = first(&lines)?;
+            Some(Edit::Delete {
+                at_key: Some(at_key),
+                left_anchor: Some(left_anchor),
+                right_anchor,
+                lines,
+            })
+        }
+        Edit::Insert {
+            left_anchor,
+            mut lines,
+            ..
+        } => {
+            strip(&mut lines, hidden.1, &mut seen.1);
+            let (at_key, right_anchor) = first(&lines)?;
+            Some(Edit::Insert {
+                at_key: Some(at_key),
+                left_anchor,
+                right_anchor: Some(right_anchor),
+                lines,
+            })
+        }
+        Edit::Replace {
+            old_at_key,
+            new_at_key,
+            left_anchor,
+            right_anchor,
+            mut old_lines,
+            mut new_lines,
+        } => {
+            let stripped = strip(&mut old_lines, hidden.0, &mut seen.0)
+                | strip(&mut new_lines, hidden.1, &mut seen.1);
+            if !stripped {
+                return Some(Edit::Replace {
+                    old_at_key,
+                    new_at_key,
+                    left_anchor,
+                    right_anchor,
+                    old_lines,
+                    new_lines,
+                });
+            }
+            match (first(&old_lines), first(&new_lines)) {
+                (None, None) => None,
+                (Some((at_key, left_anchor)), None) => Some(Edit::Delete {
+                    at_key: Some(at_key),
+                    left_anchor: Some(left_anchor),
+                    right_anchor: None,
+                    lines: old_lines,
+                }),
+                (None, Some((at_key, right_anchor))) => Some(Edit::Insert {
+                    at_key: Some(at_key),
+                    left_anchor: None,
+                    right_anchor: Some(right_anchor),
+                    lines: new_lines,
+                }),
+                (Some((old_at_key, left_anchor)), Some((new_at_key, right_anchor))) => {
+                    Some(Edit::Replace {
+                        old_at_key: Some(old_at_key),
+                        new_at_key: Some(new_at_key),
+                        left_anchor: Some(left_anchor),
+                        right_anchor: Some(right_anchor),
+                        old_lines,
+                        new_lines,
+                    })
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn collect_findings(
     a_doc: &Document,
     b_doc: &Document,
@@ -78,6 +263,7 @@ pub(crate) fn collect_findings(
     b_view: &ComparisonView,
     ctx: &DiffContext,
     fallback_contexts: &[Path],
+    truncated: &[TruncatedRegion],
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
     collect_parse_findings(
@@ -99,6 +285,7 @@ pub(crate) fn collect_findings(
     collect_ambiguity_findings(a_view, ctx, &mut findings);
     collect_extracted_key_ambiguity_findings(a_view, ctx, &mut findings);
     collect_fallback_alignment_findings(fallback_contexts, &mut findings);
+    collect_truncation_findings(truncated, &mut findings);
     findings.sort_by(|a, b| {
         let ap = a.path.as_ref().map(|p| p.0.as_slice()).unwrap_or(&[]);
         let bp = b.path.as_ref().map(|p| p.0.as_slice()).unwrap_or(&[]);
@@ -168,18 +355,23 @@ fn collect_parse_findings(
 
 fn collect_unknown_block_findings(doc: &Document, side: &str, out: &mut Vec<Finding>) {
     let mut path = Vec::new();
-    let mut stack = vec![doc.roots.iter().enumerate()];
-    while let Some(siblings) = stack.last_mut() {
+    let mut open = HashSet::new();
+    let mut stack = vec![(None, doc.roots.iter().enumerate())];
+    while let Some((_, siblings)) = stack.last_mut() {
         let Some((idx, &node_id)) = siblings.next() else {
-            stack.pop();
+            if let Some((Some(block), _)) = stack.pop() {
+                open.remove(&block);
+            }
             path.pop();
             continue;
         };
         path.push(idx);
-        let Some(Node::Block(block)) = doc.node(node_id) else {
+        let Some(Node::Block(block)) = doc.node(node_id).filter(|_| !open.contains(&node_id))
+        else {
             path.pop();
             continue;
         };
+        open.insert(node_id);
         if block.kind_label.as_deref() == Some("unknown") {
             out.push(Finding {
                 code: finding_code::UNKNOWN_UNPARSED_CONSTRUCT.to_string(),
@@ -189,7 +381,7 @@ fn collect_unknown_block_findings(doc: &Document, side: &str, out: &mut Vec<Find
                 span: Some(block.header.span.clone()),
             });
         }
-        stack.push(block.children.iter().enumerate());
+        stack.push((Some(node_id), block.children.iter().enumerate()));
     }
 }
 
@@ -222,6 +414,24 @@ fn collect_fallback_alignment_findings(contexts: &[Path], out: &mut Vec<Finding>
             message: "diff used fallback segment alignment for this context".to_string(),
             path: Some(context.clone()),
             span: None,
+        });
+    }
+}
+
+fn collect_truncation_findings(truncated: &[TruncatedRegion], out: &mut Vec<Finding>) {
+    for region in truncated {
+        out.push(Finding {
+            code: finding_code::DIFF_UNRELIABLE_REGION.to_string(),
+            level: FindingLevel::Warning,
+            message: format!(
+                "{} document nests deeper than {} levels under `{}`; those lines were compared as a whole and {}",
+                region.side,
+                MAX_NESTING_DEPTH - 1,
+                region.header,
+                if region.differs { "differ" } else { "match" }
+            ),
+            path: Some(region.path.clone()),
+            span: Some(region.span.clone()),
         });
     }
 }
@@ -533,7 +743,7 @@ mod tests {
         let ctx = DiffContext::from_views(&a_view, &b_view);
         let contexts = vec![Path(vec![1]), Path(vec![0])];
 
-        let findings = collect_findings(&a_doc, &b_doc, &a_view, &b_view, &ctx, &contexts);
+        let findings = collect_findings(&a_doc, &b_doc, &a_view, &b_view, &ctx, &contexts, &[]);
 
         assert_eq!(findings.len(), 2);
         assert_eq!(findings[0].path.as_ref().unwrap().0, vec![0]);

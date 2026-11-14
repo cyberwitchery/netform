@@ -7,7 +7,7 @@ use netform_ir::{Path, Span, parse_generic};
 use super::{
     Diff, DiffLine, Edit, EditAnchor, NormalizationStep, NormalizeOptions, OrderPolicy,
     OrderPolicyConfig, OrderPolicyOverride, PlanAction, PlanLineEditKind, build_comparison_view,
-    build_plan, diff_documents,
+    build_plan, diff_documents, format_markdown_report, format_unified_diff,
 };
 
 #[test]
@@ -105,6 +105,458 @@ fn fallback_alignment_emits_finding() {
         .map(|f| f.path.clone())
         .collect::<Vec<_>>();
     assert_eq!(unreliable, [Some(Path(vec![0]))]);
+}
+
+fn nested(depth: usize, leaves: &[&str]) -> String {
+    let headers = (0..depth).map(|level| format!("{}level{level}\n", " ".repeat(level)));
+    let leaves = leaves
+        .iter()
+        .map(|leaf| format!("{}{leaf}\n", " ".repeat(depth)));
+    headers.chain(leaves).collect()
+}
+
+#[test]
+fn lines_past_the_nesting_limit_are_flagged_and_count_as_changes_when_they_differ() {
+    let cut = || vec![Path(vec![0; 127])];
+    let changed: (&[&str], &[&str]) = (&["leaf old"], &["leaf new"]);
+    let same: (&[&str], &[&str]) = (&["leaf old"], &["leaf old"]);
+    let reordered: (&[&str], &[&str]) = (&["leaf one", "leaf two"], &["leaf two", "leaf one"]);
+    let renamed: (&[&str], &[&str]) = (&["sub old", " leaf"], &["sub new", " leaf"]);
+    let comment_to_line: (&[&str], &[&str]) = (&["sub", " ! note"], &["sub", " leaf"]);
+    let comment_only_block: (&[&str], &[&str]) = (&["sub"], &["sub", " ! note"]);
+    let swap_reversed: (&[&str], &[&str]) = (
+        &["alpha", " a1", " a2", "beta", " b1"],
+        &["beta", " b1", "alpha", " a2", " a1"],
+    );
+    let swapped: (&[&str], &[&str]) = (
+        &["alpha", " a2", " a1", "beta", " b1"],
+        &["beta", " b1", "alpha", " a2", " a1"],
+    );
+    let ordered = || with_policy(OrderPolicy::Ordered, Vec::new());
+    let unordered = || with_policy(OrderPolicy::Unordered, Vec::new());
+    let keyed_stable = || with_policy(OrderPolicy::KeyedStable, Vec::new());
+    let left_alpha_ordered = |depth: usize| {
+        let alpha = OrderPolicyOverride {
+            context_prefix: vec![0; depth + 1],
+            policy: OrderPolicy::Ordered,
+        };
+        with_policy(OrderPolicy::Unordered, vec![alpha])
+    };
+    let ignore_comments = || NormalizeOptions::new(vec![NormalizationStep::IgnoreComments]);
+    let cut_126 = || vec![Path(vec![0; 127]), Path([vec![0; 126], vec![1]].concat())];
+    let second_126 = || Path([vec![0; 126], vec![1]].concat());
+    let emptied_same: (&[&str], &[&str]) =
+        (&["dup", " ! c", "dup", " x"], &["dup", " ! c", "dup", " x"]);
+    let leaf_moved: (&[&str], &[&str]) = (&["dup", "dup", " x"], &["dup", " x", "dup"]);
+    let emptied_swapped: (&[&str], &[&str]) =
+        (&["dup", " ! c", "dup", " x"], &["dup", " x", "dup", " ! c"]);
+    let across_parents: (&[&str], &[&str]) = (
+        &["P", " dup", "  x", "Q", " dup", "  y"],
+        &["P", " dup", "  y", "Q", " dup", "  x"],
+    );
+    let dups: (&[&str], &[&str]) = (&["dup", " x", "dup", " y"], &["dup", " y", "dup", " x"]);
+    let parent_ordered = || {
+        let parent = OrderPolicyOverride {
+            context_prefix: vec![0; 126],
+            policy: OrderPolicy::Ordered,
+        };
+        with_policy(OrderPolicy::Unordered, vec![parent])
+    };
+    // one row per child order: which one needs the policy hashed depends on hash order.
+    let mixed: [(&[&str], &[&str]); 4] = [
+        (
+            &["dup", " x 1", " x 2", "dup", " y 1", " y 2"],
+            &["dup", " y 2", " y 1", "dup", " x 2", " x 1"],
+        ),
+        (
+            &["dup", " x 1", " x 2", "dup", " y 2", " y 1"],
+            &["dup", " y 1", " y 2", "dup", " x 2", " x 1"],
+        ),
+        (
+            &["dup", " x 2", " x 1", "dup", " y 1", " y 2"],
+            &["dup", " y 2", " y 1", "dup", " x 1", " x 2"],
+        ),
+        (
+            &["dup", " x 2", " x 1", "dup", " y 2", " y 1"],
+            &["dup", " y 1", " y 2", "dup", " x 1", " x 2"],
+        ),
+    ];
+    let bodies_swapped: (&[&str], &[&str]) = (
+        &["dup", " a", " b", "dup", " c"],
+        &["dup", " c", "dup", " a", " b"],
+    );
+    let first_reversed: (&[&str], &[&str]) = (
+        &["dup", " a", " b", "dup", " a", " b"],
+        &["dup", " b", " a", "dup", " a", " b"],
+    );
+    let marked: &[&str] = &["P", " m1", " dup", "  x", "P", " m2", " dup", "  y"];
+    let moved_with_marker: (&[&str], &[&str]) = (
+        marked,
+        &["P", " m2", " dup", "  y", "P", " m1", " dup", "  x"],
+    );
+    let moved_against_marker: (&[&str], &[&str]) = (
+        marked,
+        &["P", " m1", " dup", "  y", "P", " m2", " dup", "  x"],
+    );
+    let leaf_split: (&[&str], &[&str]) = (
+        &["P", " dup", "P", " dup", "  x", " dup", "P", " dup"],
+        &["P", " dup", "  x", "P", " dup", " dup", "P", " dup"],
+    );
+    let marked_cuts = || {
+        let parent = |index| Path([vec![0; 125], vec![index, 1]].concat());
+        vec![parent(0), parent(1)]
+    };
+    let dups_swapped: (&[&str], &[&str]) = (
+        &["dup", " a", "  x 1", "  x 2", "dup", " y 1"],
+        &["dup", " y 1", "dup", " a", "  x 1", "  x 2"],
+    );
+    let swapped_grandparents: (&[&str], &[&str]) = (
+        &["G", " P", "  dup", "   a", "G", " P", "  dup", "   b"],
+        &["G", " P", "  dup", "   b", "G", " P", "  dup", "   a"],
+    );
+    let moved_against_grandparent_markers: (&[&str], &[&str]) = (
+        &[
+            "G", " m1", " P", "  dup", "   a", "G", " m2", " P", "  dup", "   b",
+        ],
+        &[
+            "G", " m2", " P", "  dup", "   a", "G", " m1", " P", "  dup", "   b",
+        ],
+    );
+    let swapped_parents: (&[&str], &[&str]) = (
+        &["P", " dup", "  a", "P", " dup", "  b"],
+        &["P", " dup", "  b", "P", " dup", "  a"],
+    );
+    let first_reordered: (&[&str], &[&str]) = (
+        &["P", " j", "  b", "  c", " j", "  b", "  c"],
+        &["P", " j", "  c", "  b", " j", "  b", "  c"],
+    );
+    let parents_crossed: (&[&str], &[&str]) = (
+        &[
+            "G", " Q", "  dup", "   x", "  dup", "   y", " Q", "  dup", "   x", "  dup", "   y",
+        ],
+        &[
+            "G", " Q", "  dup", "   y", "  dup", "   x", " Q", "  dup", "   x", "  dup", "   y",
+        ],
+    );
+    let below_reordered: (&[&str], &[&str]) = (
+        &[
+            "G", " P", "  alt", "   j", "    b", "    c", "   j", "    b", "    c",
+        ],
+        &[
+            "G", " P", "  alt", "   j", "    c", "    b", "   j", "    b", "    c",
+        ],
+    );
+    let first_overridden = |default: OrderPolicy, len: usize, policy: OrderPolicy| {
+        let first = OrderPolicyOverride {
+            context_prefix: vec![0; len],
+            policy,
+        };
+        with_policy(default, vec![first])
+    };
+    let first_unordered = |len| first_overridden(OrderPolicy::Ordered, len, OrderPolicy::Unordered);
+    let at = |prefix: usize, tail: &[usize]| Path([vec![0; prefix], tail.to_vec()].concat());
+    let g_cuts = || vec![Path(vec![0; 127]), at(124, &[1, 0, 0])];
+    let marked_g_cuts = || vec![at(124, &[0, 1, 0]), at(124, &[1, 1, 0])];
+    let p_cuts = || vec![Path(vec![0; 127]), at(125, &[1, 0])];
+    let cases = [
+        (126, changed, ordered(), true, 1, Vec::new()),
+        (127, changed, ordered(), true, 0, cut()),
+        (130, changed, ordered(), true, 0, cut()),
+        (130, same, ordered(), false, 0, cut()),
+        (130, reordered, ordered(), true, 0, cut()),
+        (130, reordered, unordered(), false, 0, cut()),
+        (130, renamed, ordered(), true, 0, cut()),
+        (126, comment_to_line, ignore_comments(), true, 0, cut()),
+        (127, comment_only_block, ignore_comments(), false, 0, cut()),
+        (
+            126,
+            emptied_same,
+            ignore_comments(),
+            false,
+            0,
+            vec![second_126()],
+        ),
+        (
+            126,
+            emptied_swapped,
+            ignore_comments(),
+            true,
+            2,
+            vec![second_126()],
+        ),
+        (126, leaf_moved, ordered(), true, 2, vec![second_126()]),
+        (
+            126,
+            dups,
+            parent_ordered(),
+            true,
+            2,
+            vec![Path(vec![0; 127]), second_126(), second_126()],
+        ),
+        (
+            125,
+            across_parents,
+            unordered(),
+            true,
+            0,
+            vec![
+                Path(vec![0; 127]),
+                Path([vec![0; 125], vec![1, 0]].concat()),
+            ],
+        ),
+        (130, swap_reversed, left_alpha_ordered(130), true, 0, cut()),
+        // the override names alpha on the left and beta on the right, and lines past the limit
+        // are hashed under their own side's paths: a change, where depth 3 sees none.
+        (126, swapped, left_alpha_ordered(126), true, 0, cut_126()),
+        (130, swapped, left_alpha_ordered(130), true, 0, cut()),
+        (130, mixed[0], left_alpha_ordered(130), true, 0, cut()),
+        (130, mixed[1], left_alpha_ordered(130), true, 0, cut()),
+        (130, mixed[2], left_alpha_ordered(130), true, 0, cut()),
+        (130, mixed[3], left_alpha_ordered(130), true, 0, cut()),
+        (130, dups_swapped, unordered(), false, 0, cut()),
+        (130, bodies_swapped, left_alpha_ordered(130), true, 0, cut()),
+        (
+            126,
+            first_reversed,
+            left_alpha_ordered(126),
+            true,
+            0,
+            cut_126(),
+        ),
+        (125, moved_with_marker, unordered(), false, 0, marked_cuts()),
+        (
+            125,
+            moved_with_marker,
+            keyed_stable(),
+            false,
+            0,
+            marked_cuts(),
+        ),
+        (
+            125,
+            moved_against_marker,
+            unordered(),
+            true,
+            0,
+            marked_cuts(),
+        ),
+        (
+            125,
+            leaf_split,
+            unordered(),
+            true,
+            2,
+            vec![Path([vec![0; 125], vec![1, 0]].concat())],
+        ),
+        (124, swapped_grandparents, unordered(), false, 0, g_cuts()),
+        (
+            124,
+            swapped_grandparents,
+            keyed_stable(),
+            false,
+            0,
+            g_cuts(),
+        ),
+        (
+            124,
+            moved_against_grandparent_markers,
+            unordered(),
+            true,
+            4,
+            marked_g_cuts(),
+        ),
+        (
+            124,
+            moved_against_grandparent_markers,
+            keyed_stable(),
+            true,
+            4,
+            marked_g_cuts(),
+        ),
+        (125, swapped_parents, unordered(), false, 0, p_cuts()),
+        (125, swapped_parents, keyed_stable(), false, 0, p_cuts()),
+        (
+            125,
+            swapped_parents,
+            first_overridden(OrderPolicy::Unordered, 126, OrderPolicy::Ordered),
+            false,
+            0,
+            p_cuts(),
+        ),
+        // paired in place, both `j` blocks match under their left paths' policies: no change. depth
+        // 3 pairs the identical pair first and then the ordered `j` with the reordered one.
+        (
+            125,
+            first_reordered,
+            first_unordered(127),
+            false,
+            0,
+            cut_126(),
+        ),
+        (
+            124,
+            parents_crossed,
+            first_unordered(126),
+            true,
+            2,
+            vec![
+                at(125, &[1, 0]),
+                at(125, &[1, 1]),
+                at(125, &[0, 0]),
+                at(125, &[0, 1]),
+                at(125, &[0, 0]),
+                at(125, &[0, 1]),
+            ],
+        ),
+        (124, below_reordered, first_unordered(128), false, 0, cut()),
+    ];
+
+    for (depth, (left, right), options, has_changes, edits, regions) in cases {
+        let a = parse_generic(&nested(depth, left));
+        let b = parse_generic(&nested(depth, right));
+        let diff = diff_documents(&a, &b, options.clone()).unwrap();
+        let case = format!("{depth} levels, {left:?} -> {right:?}, {options:?}");
+        assert_eq!(
+            (
+                diff.has_changes,
+                diff.edits.len(),
+                unreliable_regions(&diff)
+            ),
+            (has_changes, edits, regions),
+            "{case}"
+        );
+        // without overrides, the verdict is the one the same lines get under 3 levels.
+        if options.order_policy.overrides.is_empty() {
+            let a = parse_generic(&nested(3, left));
+            let b = parse_generic(&nested(3, right));
+            let at_3 = diff_documents(&a, &b, options.clone()).unwrap();
+            assert_eq!(at_3.has_changes, has_changes, "{case}, at 3 levels");
+        }
+        let unified = format_unified_diff(&diff, "a", "b", 10);
+        assert_eq!(unified.is_empty(), !has_changes, "{case}");
+        assert_eq!(
+            unified.contains("under `level126`"),
+            has_changes && depth >= 127,
+            "{case}"
+        );
+        assert_eq!(
+            format_markdown_report(&diff, "a", "b", 10).contains("No changes detected."),
+            !has_changes,
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn blocks_at_the_nesting_limit_pair_as_their_parent_policy_pairs_siblings() {
+    let swapped: (&[&str], &[&str]) = (&["dup", " x", "dup", " y"], &["dup", " y", "dup", " x"]);
+    let swapped_and_changed: (&[&str], &[&str]) =
+        (&["dup", " x", "dup", " y"], &["dup", " y", "dup", " z"]);
+    let cases = [
+        (swapped, OrderPolicy::Unordered, false, 0, 2),
+        (swapped, OrderPolicy::KeyedStable, false, 0, 2),
+        (swapped, OrderPolicy::Ordered, true, 2, 3),
+        (swapped_and_changed, OrderPolicy::Unordered, true, 1, 2),
+        (swapped_and_changed, OrderPolicy::KeyedStable, true, 1, 2),
+    ];
+
+    for ((left, right), policy, has_changes, differing, regions) in cases {
+        let a = parse_generic(&nested(126, left));
+        let b = parse_generic(&nested(126, right));
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        let differ = diff
+            .findings
+            .iter()
+            .filter(|finding| finding.message.ends_with("and differ"))
+            .count();
+        assert_eq!(
+            (diff.has_changes, differ, unreliable_regions(&diff).len()),
+            (has_changes, differing, regions),
+            "{left:?} -> {right:?}, {policy:?}"
+        );
+    }
+}
+
+#[test]
+fn blocks_at_the_nesting_limit_pair_on_their_hidden_footers() {
+    let junos = |footers: [&str; 2]| {
+        let mut payload = vec!["P {"];
+        for footer in footers {
+            payload.extend([" dup {", "  k {", "   x;", footer, " }"]);
+        }
+        payload.push("}");
+        let open = (0..125).map(|level| format!("{}level{level} {{\n", " ".repeat(level)));
+        let payload = payload
+            .into_iter()
+            .map(|line| format!("{}{line}\n", " ".repeat(125)));
+        let close = (0..125)
+            .rev()
+            .map(|level| format!("{}}}\n", " ".repeat(level)));
+        open.chain(payload).chain(close).collect::<String>()
+    };
+    let a = parse_junos(&junos(["  }", "  };"]));
+    let b = parse_junos(&junos(["  };", "  }"]));
+
+    for policy in [OrderPolicy::Unordered, OrderPolicy::KeyedStable] {
+        let diff = diff_documents(&a, &b, with_policy(policy, Vec::new())).unwrap();
+        assert!(!diff.has_changes, "{policy:?}");
+        assert_eq!(unreliable_regions(&diff).len(), 2, "{policy:?}");
+    }
+}
+
+#[test]
+fn an_empty_block_past_the_nesting_limit_differs_from_its_text_on_one_line() {
+    let junos = |payload: &[&str]| {
+        let open = (0..127).map(|level| format!("{}level{level} {{\n", " ".repeat(level)));
+        let payload = payload
+            .iter()
+            .map(|line| format!("{}{line}\n", " ".repeat(127)));
+        let close = (0..127)
+            .rev()
+            .map(|level| format!("{}}}\n", " ".repeat(level)));
+        open.chain(payload).chain(close).collect::<String>()
+    };
+    let junos_line = format!("foo {{{}}}", " ".repeat(127));
+    let fortios_line = format!("edit 1{}next", " ".repeat(127));
+    let cases = [
+        (
+            parse_junos(&junos(&["foo {", "}"])),
+            parse_junos(&junos(&[&junos_line])),
+        ),
+        (
+            parse_fortios(&nested(127, &["edit 1", "next"])),
+            parse_fortios(&nested(127, &[&fortios_line])),
+        ),
+    ];
+
+    for (a, b) in cases {
+        let diff = diff_documents(&a, &b, NormalizeOptions::default()).unwrap();
+        assert_eq!(
+            (diff.has_changes, unreliable_regions(&diff)),
+            (true, vec![Path(vec![0; 127])]),
+            "{:?}",
+            a.metadata.dialect_hint
+        );
+    }
+}
+
+#[test]
+fn a_cycle_past_the_nesting_limit_does_not_hang_the_diff() {
+    let mut doc = parse_generic(&nested(130, &["leaf"]));
+    let mut chain = vec![doc.roots[0]];
+    while let Some(netform_ir::Node::Block(block)) = doc.node(*chain.last().unwrap()) {
+        match block.children.first() {
+            Some(&child) => chain.push(child),
+            None => break,
+        }
+    }
+    assert!(doc.add_child(chain[128], chain[127]));
+
+    let diff = diff_documents(&doc, &doc, NormalizeOptions::default()).unwrap();
+    assert_eq!(
+        (diff.has_changes, unreliable_regions(&diff)),
+        (false, vec![Path(vec![0; 127])])
+    );
 }
 
 #[test]
