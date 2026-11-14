@@ -7,7 +7,7 @@ use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
 use netform_ir::{Document, ParsedLineParts, parse_with_dialect};
 
 /// IOS XR key-hint data.
-pub const RULES: IosRules = IosRules {
+pub(crate) const RULES: IosRules = IosRules {
     interface_types: &[
         "gigabitethernet",
         "bundle-ether",
@@ -85,7 +85,7 @@ pub const RULES: IosRules = IosRules {
 
 /// the IOS XR dialect profile, including its delimiter-terminated policy and
 /// set blocks.
-pub const DIALECT: IosLikeDialect = IosLikeDialect::new("iosxr", key_hint)
+pub(crate) const DIALECT: IosLikeDialect = IosLikeDialect::new("iosxr", key_hint)
     .with_block_terminator(is_block_terminator)
     .with_empty_block(is_empty_block);
 
@@ -115,7 +115,7 @@ fn is_empty_block(opener: &str, terminator: &str) -> bool {
 }
 
 /// derive a stable identity key for an IOS XR configuration line.
-pub fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+pub(crate) fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     RULES.key_hint(parsed)
 }
 
@@ -127,7 +127,7 @@ pub fn parse(input: &str) -> Document {
 /// the patterns that make configuration text read as IOS XR: Routing Policy
 /// Language and its `*-set` families, the BGP group templates, `ipv4`-scoped
 /// addressing, and the interface names only XR spells.
-pub const SIGNALS: &[Signal] = &[
+pub(crate) const SIGNALS: &[Signal] = &[
     Signal {
         weight: STRONG_SIGNAL,
         tests: &[Test::InterfaceName(NameShape::Iosxr)],
@@ -162,7 +162,7 @@ pub const SIGNALS: &[Signal] = &[
 ];
 
 /// a canonical IOS XR excerpt.
-pub const SAMPLE: &str = "\
+pub(crate) const SAMPLE: &str = "\
 interface HundredGigE0/0/0/0
  description spine-uplink-1
  ipv4 address 192.0.2.2 255.255.255.252

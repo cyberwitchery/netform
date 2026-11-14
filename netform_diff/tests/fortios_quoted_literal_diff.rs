@@ -7,7 +7,7 @@ use netform_diff::{
     Diff, Edit, NormalizationStep, NormalizeOptions, OrderPolicy, OrderPolicyConfig,
     diff_documents, finding_code,
 };
-use netform_ir::{Dialect, Path, parse_with_dialect};
+use netform_ir::Path;
 
 fn diff(a: &str, b: &str, options: NormalizeOptions) -> Diff {
     diff_documents(&parse(a), &parse(b), options).unwrap()
@@ -243,22 +243,26 @@ fn a_hash_line_inside_a_quoted_value_survives_ignore_comments() {
 fn the_ios_family_dialects_read_a_quote_as_plain_text() {
     let collapse = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
 
-    for (name, dialect) in [
-        ("iosxe", &netform_dialects::iosxe::DIALECT),
-        ("eos", &netform_dialects::eos::DIALECT),
-        ("nxos", &netform_dialects::nxos::DIALECT),
-    ] {
+    for entry in netform_dialects::REGISTRY
+        .iter()
+        .filter(|entry| entry.rules.is_some())
+    {
+        let name = entry.name;
         for quoted in [
             // FortiOS
             "    set private-key \"-----BEGIN ENCRYPTED PRIVATE KEY-----",
             // Junos
             "                certificate \"-----BEGIN CERTIFICATE-----",
         ] {
-            assert_eq!(dialect.literal_region(quoted), None, "{name}: {quoted}");
+            let region = |body: &str| format!("{quoted}\n{body}\n-----END-----\"\n");
+            let before = (entry.parse)(&region("hostname  edge"));
+            let after = (entry.parse)(&region("hostname edge"));
+            let diff = diff_documents(&before, &after, collapse.clone()).unwrap();
+            assert!(!diff.has_changes, "{name}: {quoted}");
         }
 
-        let before = parse_with_dialect("interface Gi0/1\n description \"to  core\"\n", dialect);
-        let after = parse_with_dialect("interface Gi0/1\n description \"to core\"\n", dialect);
+        let before = (entry.parse)("interface Gi0/1\n description \"to  core\"\n");
+        let after = (entry.parse)("interface Gi0/1\n description \"to core\"\n");
         let diff = diff_documents(&before, &after, collapse.clone()).unwrap();
         assert!(!diff.has_changes, "{name}");
     }

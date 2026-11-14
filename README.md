@@ -52,10 +52,10 @@ cargo install netform_cli
 parse and round-trip:
 
 ```rust
-use netform_dialects::junos::parse;
+let junos = netform_dialects::find("junos").expect("junos is registered");
 
 let input = "interfaces {\n    ge-0/0/0 {\n        disable;\n    }\n}\n";
-let doc = parse(input);
+let doc = (junos.parse)(input);
 assert_eq!(doc.render(), input);
 ```
 

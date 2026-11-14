@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use netform_diff::{NormalizeOptions, OrderPolicyConfig, diff_documents};
-use netform_ir::{Document, parse_generic};
+use netform_ir::Document;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -24,15 +24,14 @@ struct Expected {
     finding_codes: Vec<String>,
 }
 
-/// the vendor a fixture is written in, as `netform_dialects::REGISTRY` spells
-/// it; `generic` for the vendor-neutral parser.
+/// the parser a fixture is written for, as `netform_dialects::find` spells it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(transparent)]
 struct FixtureDialect(String);
 
 impl Default for FixtureDialect {
     fn default() -> Self {
-        Self("generic".into())
+        Self(netform_dialects::GENERIC.name.into())
     }
 }
 
@@ -116,10 +115,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn parse_config(input: &str, dialect: &FixtureDialect) -> Result<Document, String> {
-    if dialect.0 == "generic" {
-        return Ok(parse_generic(input));
-    }
-
     netform_dialects::find(&dialect.0)
         .map(|entry| (entry.parse)(input))
         .ok_or_else(|| format!("unknown dialect `{}`", dialect.0))

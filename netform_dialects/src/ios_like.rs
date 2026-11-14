@@ -15,10 +15,12 @@ use netform_ir::{
 /// [`IosLikeDialect::new`], passing the dialect name and its key-hint function:
 ///
 /// ```rust
-/// use netform_dialects::{ios_like::IosLikeDialect, iosxe};
+/// use netform_dialects::ios_like::IosLikeDialect;
 /// use netform_ir::parse_with_dialect;
 ///
-/// let dialect = IosLikeDialect::new("iosxe", iosxe::key_hint);
+/// let dialect = IosLikeDialect::new("iosxe", |parsed| {
+///     netform_dialects::find("iosxe")?.rules?.key_hint(parsed)
+/// });
 /// let doc = parse_with_dialect("hostname edge-1\n", &dialect);
 /// ```
 #[derive(Debug, Clone, Copy)]
@@ -57,10 +59,10 @@ impl IosLikeDialect {
     /// [`Dialect::block_terminator`].
     ///
     /// ```rust
-    /// use netform_dialects::{ios_like::IosLikeDialect, iosxr};
+    /// use netform_dialects::ios_like::IosLikeDialect;
     /// use netform_ir::{Node, parse_with_dialect};
     ///
-    /// let dialect = IosLikeDialect::new("xr", iosxr::key_hint)
+    /// let dialect = IosLikeDialect::new("xr", |_| None)
     ///     .with_block_terminator(|raw| raw.trim() == "end-policy");
     /// let doc = parse_with_dialect("route-policy PASS\n  pass\nend-policy\n", &dialect);
     /// let Node::Block(block) = doc.node(doc.roots[0]).unwrap() else { unreachable!() };
@@ -79,10 +81,10 @@ impl IosLikeDialect {
     /// [`Dialect::empty_block`].
     ///
     /// ```rust
-    /// use netform_dialects::{ios_like::IosLikeDialect, iosxr};
+    /// use netform_dialects::ios_like::IosLikeDialect;
     /// use netform_ir::{Node, parse_with_dialect};
     ///
-    /// let dialect = IosLikeDialect::new("xr", iosxr::key_hint)
+    /// let dialect = IosLikeDialect::new("xr", |_| None)
     ///     .with_block_terminator(|raw| raw.trim() == "end-set")
     ///     .with_empty_block(|opener, _| opener.starts_with("rd-set "));
     /// let doc = parse_with_dialect("rd-set EMPTY\nend-set\n", &dialect);

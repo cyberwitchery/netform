@@ -69,8 +69,9 @@ fn set_of(names: &[&str]) -> BTreeSet<String> {
 
 #[test]
 fn fixture_dialects_are_generic_and_every_registered_vendor() {
-    let mut expected = set_of(&["generic"]);
-    expected.extend(netform_dialects::names().map(String::from));
+    let expected = netform_dialects::entries()
+        .map(|entry| entry.name.to_string())
+        .collect();
 
     assert_eq!(
         schema_enum("fixture.schema.json", "/properties/dialect/enum"),

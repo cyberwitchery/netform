@@ -7,7 +7,7 @@ use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
 use netform_ir::{Document, ParsedLineParts, parse_with_dialect};
 
 /// NX-OS key-hint data.
-pub const RULES: IosRules = IosRules {
+pub(crate) const RULES: IosRules = IosRules {
     interface_types: &[
         "port-channel",
         "ethernet",
@@ -46,10 +46,10 @@ pub const RULES: IosRules = IosRules {
 };
 
 /// the NX-OS dialect profile.
-pub const DIALECT: IosLikeDialect = IosLikeDialect::new("nxos", key_hint);
+pub(crate) const DIALECT: IosLikeDialect = IosLikeDialect::new("nxos", key_hint);
 
 /// derive a stable identity key for an NX-OS configuration line.
-pub fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+pub(crate) fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     RULES.key_hint(parsed)
 }
 
@@ -60,7 +60,7 @@ pub fn parse(input: &str) -> Document {
 
 /// the patterns that make configuration text read as NX-OS: `feature`, vPC,
 /// RBAC roles and its plain `Ethernet<slot>/<port>` interface naming.
-pub const SIGNALS: &[Signal] = &[
+pub(crate) const SIGNALS: &[Signal] = &[
     Signal {
         weight: STRONG_SIGNAL,
         tests: &[Test::StartsWithAny(&["feature "])],
@@ -83,7 +83,7 @@ pub const SIGNALS: &[Signal] = &[
 ];
 
 /// a canonical NX-OS excerpt.
-pub const SAMPLE: &str = "\
+pub(crate) const SAMPLE: &str = "\
 feature bgp
 feature interface-vlan
 feature vpc

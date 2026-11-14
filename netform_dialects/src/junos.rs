@@ -25,9 +25,9 @@ use netform_ir::{
 
 /// dialect implementation for Junos-like configuration text.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct JunosDialect;
+pub(crate) struct JunosDialect;
 
-/// parse text using [`JunosDialect`].
+/// parse text as Junos.
 pub fn parse(input: &str) -> Document {
     parse_with_dialect(input, &JunosDialect)
 }
@@ -378,7 +378,7 @@ fn set_hint(section: &str, identity: &[&str]) -> String {
 /// the patterns that make configuration text read as Junos: its top-level
 /// stanza names in either the hierarchical or the `set` form, and the
 /// brace-and-semicolon syntax the hierarchical form is written in.
-pub const SIGNALS: &[Signal] = &[
+pub(crate) const SIGNALS: &[Signal] = &[
     Signal {
         weight: STRONG_SIGNAL,
         tests: &[
@@ -412,7 +412,7 @@ pub const SIGNALS: &[Signal] = &[
 ];
 
 /// a canonical Junos excerpt.
-pub const SAMPLE: &str = "\
+pub(crate) const SAMPLE: &str = "\
 interfaces {
     ge-0/0/0 {
         description uplink-core-a;

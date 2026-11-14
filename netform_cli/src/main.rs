@@ -11,7 +11,7 @@ use netform_diff::{
     OrderPolicyConfig, OrderPolicyOverride, build_plan, diff_documents, format_markdown_report,
     format_unified_diff_with_color,
 };
-use netform_ir::{DialectHint, Document, parse_generic};
+use netform_ir::{DialectHint, Document};
 
 #[derive(Debug, Parser)]
 #[command(name = "config-diff")]
@@ -100,34 +100,25 @@ enum CliOrderPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CliDialect {
     Auto,
-    Generic,
-    Vendor(&'static DialectEntry),
+    Fixed(&'static DialectEntry),
 }
 
-impl CliDialect {
-    fn from_name(name: &str) -> Self {
-        match name {
-            "auto" => CliDialect::Auto,
-            "generic" => CliDialect::Generic,
-            _ => netform_dialects::find(name).map_or(CliDialect::Generic, CliDialect::Vendor),
-        }
+/// the parser for a detected dialect: the named vendor's, else generic.
+fn detected(hint: &DialectHint) -> &'static DialectEntry {
+    match hint {
+        DialectHint::Named(name) => netform_dialects::find(name),
+        DialectHint::Generic | DialectHint::Unknown => None,
     }
-
-    fn from_hint(hint: &DialectHint) -> Self {
-        match hint {
-            DialectHint::Named(name) => CliDialect::from_name(name),
-            _ => CliDialect::Generic,
-        }
-    }
+    .unwrap_or(&netform_dialects::GENERIC)
 }
 
-/// accept `auto`, `generic`, and every vendor in `netform_dialects::REGISTRY`.
+/// accept `auto` and every name `netform_dialects::find` resolves.
 fn dialect_value_parser() -> impl clap::builder::TypedValueParser<Value = CliDialect> {
-    let choices: Vec<&'static str> = ["auto", "generic"]
-        .into_iter()
-        .chain(netform_dialects::names())
+    let choices: Vec<&'static str> = std::iter::once("auto")
+        .chain(netform_dialects::entries().map(|entry| entry.name))
         .collect();
-    clap::builder::PossibleValuesParser::new(choices).map(|name| CliDialect::from_name(&name))
+    clap::builder::PossibleValuesParser::new(choices)
+        .map(|name| netform_dialects::find(&name).map_or(CliDialect::Auto, CliDialect::Fixed))
 }
 
 fn parse_policy_override(s: &str) -> Result<OrderPolicyOverride, String> {
@@ -184,7 +175,7 @@ fn main() {
             let a_hint = netform_dialects::detect_dialect(&a_text);
             let b_hint = netform_dialects::detect_dialect(&b_text);
             if a_hint == b_hint {
-                CliDialect::from_hint(&a_hint)
+                CliDialect::Fixed(detected(&a_hint))
             } else {
                 // disagreement: fall back to Generic rather than risk
                 // parsing two files with different grammars.
@@ -194,7 +185,7 @@ fn main() {
                     hint_label(&a_hint),
                     hint_label(&b_hint),
                 );
-                CliDialect::Generic
+                CliDialect::Fixed(&netform_dialects::GENERIC)
             }
         }
         other => other,
@@ -303,7 +294,7 @@ fn resolve_color(
 fn hint_label(hint: &DialectHint) -> &str {
     match hint {
         DialectHint::Named(name) => name.as_str(),
-        DialectHint::Generic => "generic",
+        DialectHint::Generic => netform_dialects::GENERIC.name,
         DialectHint::Unknown => "unknown",
     }
 }
@@ -331,9 +322,9 @@ fn read_input(path: &Path) -> (String, String) {
 
 /// parse input with automatic dialect detection and full dialect dispatch.
 ///
-/// runs dialect detection on the input and dispatches to the appropriate
-/// dialect-specific parser (Junos, FortiOS, EOS, IOS XE, IOS XR, NX-OS) so that
-/// trivia classification, tokenization, and key hints are dialect-aware.
+/// runs dialect detection on the input and dispatches to the detected
+/// vendor's parser so that trivia classification, tokenization, and key hints
+/// are dialect-aware.
 /// falls back to the generic parser when no dialect is detected with
 /// sufficient confidence.
 #[cfg(test)]
@@ -342,15 +333,11 @@ fn auto_parse(input: &str) -> Document {
 }
 
 fn parse_config(input: &str, dialect: CliDialect) -> Document {
-    let resolved = match dialect {
-        CliDialect::Auto => CliDialect::from_hint(&netform_dialects::detect_dialect(input)),
-        other => other,
+    let entry = match dialect {
+        CliDialect::Auto => detected(&netform_dialects::detect_dialect(input)),
+        CliDialect::Fixed(entry) => entry,
     };
-    match resolved {
-        CliDialect::Auto => unreachable!(),
-        CliDialect::Generic => parse_generic(input),
-        CliDialect::Vendor(entry) => (entry.parse)(input),
-    }
+    (entry.parse)(input)
 }
 
 #[cfg(test)]
