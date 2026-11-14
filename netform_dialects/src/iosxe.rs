@@ -7,7 +7,7 @@ use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
 use netform_ir::{Document, ParsedLineParts, parse_with_dialect};
 
 /// IOS XE key-hint data.
-pub const RULES: IosRules = IosRules {
+pub(crate) const RULES: IosRules = IosRules {
     interface_types: &[
         "appgigabitethernet",
         "fortygigabitethernet",
@@ -72,10 +72,10 @@ pub const RULES: IosRules = IosRules {
 };
 
 /// the IOS XE dialect profile.
-pub const DIALECT: IosLikeDialect = IosLikeDialect::new("iosxe", key_hint);
+pub(crate) const DIALECT: IosLikeDialect = IosLikeDialect::new("iosxe", key_hint);
 
 /// derive a stable identity key for an IOS XE configuration line.
-pub fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+pub(crate) fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     RULES.key_hint(parsed)
 }
 
@@ -87,7 +87,7 @@ pub fn parse(input: &str) -> Document {
 /// the patterns that make configuration text read as IOS XE: its
 /// speed-prefixed Ethernet naming, extended ACLs, and the dotted-decimal masks
 /// it writes where the other vendors write prefix lengths.
-pub const SIGNALS: &[Signal] = &[
+pub(crate) const SIGNALS: &[Signal] = &[
     Signal {
         weight: MODERATE_SIGNAL,
         tests: &[Test::InterfaceName(NameShape::IosxeEthernet)],
@@ -120,7 +120,7 @@ pub const SIGNALS: &[Signal] = &[
 ];
 
 /// a canonical IOS XE excerpt.
-pub const SAMPLE: &str = "\
+pub(crate) const SAMPLE: &str = "\
 interface GigabitEthernet0/0/0
   description uplink-core-a
   ip address 192.0.2.2 255.255.255.252

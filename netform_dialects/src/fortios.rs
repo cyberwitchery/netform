@@ -25,9 +25,9 @@ use netform_ir::{
 
 /// dialect implementation for FortiOS configuration text.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct FortiosDialect;
+pub(crate) struct FortiosDialect;
 
-/// parse text using [`FortiosDialect`].
+/// parse text as FortiOS.
 pub fn parse(input: &str) -> Document {
     parse_with_dialect(input, &FortiosDialect)
 }
@@ -153,7 +153,7 @@ fn fortios_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
 /// the patterns that make configuration text read as FortiOS: its
 /// `config`/`edit` block structure, the bare `end`/`next` terminators that
 /// close them, and plain `set <field> <value>` assignments.
-pub const SIGNALS: &[Signal] = &[
+pub(crate) const SIGNALS: &[Signal] = &[
     Signal {
         weight: STRONG_SIGNAL,
         tests: &[
@@ -180,7 +180,7 @@ pub const SIGNALS: &[Signal] = &[
 ];
 
 /// a canonical FortiOS excerpt.
-pub const SAMPLE: &str = "\
+pub(crate) const SAMPLE: &str = "\
 config system global
     set hostname \"fw-edge-01\"
     set timezone 26

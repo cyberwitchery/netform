@@ -38,7 +38,7 @@ pub mod nxos;
 
 use detect::{Signal, SignalTable};
 use ios_like::SHARED_RULES;
-use netform_ir::{DialectHint, Document, ParsedLineParts};
+use netform_ir::{DialectHint, Document, ParsedLineParts, parse_generic};
 use rules::KeyRule;
 
 /// the data an IOS-family vendor needs to derive key hints.
@@ -74,7 +74,7 @@ impl IosRules {
     }
 }
 
-/// one vendor netform can parse.
+/// one vendor netform can parse, or [`GENERIC`].
 #[derive(Debug, Clone, Copy)]
 pub struct DialectEntry {
     /// the vendor's name, as `--dialect` spells it and as
@@ -145,9 +145,25 @@ pub const REGISTRY: &[DialectEntry] = &[
     },
 ];
 
-/// look up a vendor by the name `--dialect` spells.
+/// netform_ir's vendor-neutral parser, the entry [`find`] returns for
+/// `generic`.  it is not in [`REGISTRY`], so [`detect_dialect`] never picks it.
+pub const GENERIC: DialectEntry = DialectEntry {
+    name: "generic",
+    parse: parse_generic,
+    rules: None,
+    signals: &[],
+    sample: "",
+};
+
+/// every entry [`find`] resolves: [`GENERIC`], then each [`REGISTRY`] vendor.
+pub fn entries() -> impl Iterator<Item = &'static DialectEntry> {
+    std::iter::once(&GENERIC).chain(REGISTRY)
+}
+
+/// look up a parser by the name `--dialect` spells: `generic` or a
+/// registered vendor.
 pub fn find(name: &str) -> Option<&'static DialectEntry> {
-    REGISTRY.iter().find(|entry| entry.name == name)
+    entries().find(|entry| entry.name == name)
 }
 
 /// every registered vendor's name.
@@ -175,7 +191,6 @@ pub fn detect_dialect(input: &str) -> DialectHint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::ParsedLineParts;
     use netform_ir::parse_parts_with_punctuation;
     use rules::{ArgGuard, KeyRuleAction};
 
@@ -190,8 +205,23 @@ mod tests {
 
     #[test]
     fn every_entry_is_reachable_by_name() {
-        for entry in REGISTRY {
+        for entry in entries() {
             assert_eq!(find(entry.name), Some(entry));
+        }
+    }
+
+    #[test]
+    fn generic_is_found_by_name_but_is_not_a_registered_vendor() {
+        assert!(!REGISTRY.contains(&GENERIC));
+        let generic = find("generic").expect("generic resolves");
+        for entry in REGISTRY {
+            let doc = (generic.parse)(entry.sample);
+            assert_eq!(
+                doc.metadata.dialect_hint,
+                DialectHint::Generic,
+                "{} sample",
+                entry.name,
+            );
         }
     }
 
@@ -268,14 +298,12 @@ mod tests {
         }
     }
 
-    type KeyHintFn = fn(Option<&ParsedLineParts>) -> Option<String>;
-
-    /// the IOS-family vendors whose key hints share `ios_like::SHARED_RULES`.
-    const IOS_FAMILY: [(&str, KeyHintFn); 3] = [
-        ("eos", eos::key_hint),
-        ("iosxe", iosxe::key_hint),
-        ("nxos", nxos::key_hint),
-    ];
+    /// the IOS-family vendors: every entry whose key hints come from [`IosRules`].
+    fn ios_family() -> impl Iterator<Item = (&'static str, &'static IosRules)> {
+        REGISTRY
+            .iter()
+            .filter_map(|entry| Some((entry.name, entry.rules?)))
+    }
 
     #[test]
     fn ios_family_shared_key_hints() {
@@ -287,10 +315,7 @@ mod tests {
             ("router bgp 65000", Some("router:bgp:65000")),
             ("router ospf 1", Some("router:ospf:1")),
             ("router ospf", Some("router:ospf")),
-            ("router eigrp 100", Some("router:eigrp:100")),
-            ("router eigrp ENTERPRISE", Some("router:eigrp:ENTERPRISE")),
             ("router isis", Some("router:isis")),
-            ("router isis AREA-A", Some("router:isis:AREA-A")),
             (
                 "route-map REDISTRIBUTE permit 10",
                 Some("route-map:REDISTRIBUTE:permit:10"),
@@ -418,9 +443,11 @@ mod tests {
             ("line con 0", Some("line:con:0")),
             ("hostname leaf-01", None),
         ] {
-            for (name, key_hint) in IOS_FAMILY {
+            for (name, rules) in ios_family() {
                 assert_eq!(
-                    key_hint(parse_parts_with_punctuation(line, &[]).as_ref()).as_deref(),
+                    rules
+                        .key_hint(parse_parts_with_punctuation(line, &[]).as_ref())
+                        .as_deref(),
                     expected,
                     "{name}: {line}",
                 );
@@ -429,9 +456,35 @@ mod tests {
     }
 
     #[test]
+    fn ios_family_router_hints_keep_the_instance_only_for_extra_router_protos() {
+        for (name, rules) in ios_family() {
+            for (line, proto, with_instance) in [
+                ("router eigrp 100", "eigrp", "router:eigrp:100"),
+                (
+                    "router eigrp ENTERPRISE",
+                    "eigrp",
+                    "router:eigrp:ENTERPRISE",
+                ),
+                ("router isis AREA-A", "isis", "router:isis:AREA-A"),
+            ] {
+                let expected = if rules.extra_router_protos.contains(&proto) {
+                    with_instance.to_string()
+                } else {
+                    format!("router:{proto}")
+                };
+                assert_eq!(
+                    rules.key_hint(parse_parts_with_punctuation(line, &[]).as_ref()),
+                    Some(expected),
+                    "{name}: {line}",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn ios_family_key_hint_is_none_on_empty() {
-        for (name, key_hint) in IOS_FAMILY {
-            assert_eq!(key_hint(None), None, "{name}");
+        for (name, rules) in ios_family() {
+            assert_eq!(rules.key_hint(None), None, "{name}");
         }
     }
 }

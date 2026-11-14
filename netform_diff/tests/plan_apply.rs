@@ -805,7 +805,7 @@ struct Fixture {
 }
 
 fn generic() -> String {
-    "generic".to_string()
+    netform_dialects::GENERIC.name.to_string()
 }
 
 #[test]
@@ -817,14 +817,9 @@ fn plans_apply_to_the_left_side_of_every_fixture() {
         let fixture: Fixture =
             serde_json::from_str(&fs::read_to_string(&path).expect("read fixture"))
                 .expect("parse fixture");
-        let parse: Parse = match fixture.dialect.as_str() {
-            "generic" => parse_generic,
-            name => {
-                netform_dialects::find(name)
-                    .unwrap_or_else(|| panic!("{}: unknown dialect {name}", fixture.name))
-                    .parse
-            }
-        };
+        let parse: Parse = netform_dialects::find(&fixture.dialect)
+            .unwrap_or_else(|| panic!("{}: unknown dialect {}", fixture.name, fixture.dialect))
+            .parse;
         let steps = fixture.normalization_steps;
         let configs = POLICIES
             .map(|policy| OrderPolicyConfig {

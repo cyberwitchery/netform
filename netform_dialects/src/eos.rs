@@ -7,7 +7,7 @@ use crate::rules::{ArgGuard, KeyRule, KeyRuleAction};
 use netform_ir::{Document, ParsedLineParts, parse_with_dialect};
 
 /// EOS key-hint data.
-pub const RULES: IosRules = IosRules {
+pub(crate) const RULES: IosRules = IosRules {
     interface_types: &[
         "port-channel",
         "management",
@@ -54,10 +54,10 @@ pub const RULES: IosRules = IosRules {
 };
 
 /// the EOS dialect profile.
-pub const DIALECT: IosLikeDialect = IosLikeDialect::new("eos", key_hint);
+pub(crate) const DIALECT: IosLikeDialect = IosLikeDialect::new("eos", key_hint);
 
 /// derive a stable identity key for an EOS configuration line.
-pub fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
+pub(crate) fn key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     RULES.key_hint(parsed)
 }
 
@@ -69,7 +69,7 @@ pub fn parse(input: &str) -> Document {
 /// the patterns that make configuration text read as EOS: its non-slot
 /// interface naming, CIDR addresses on interfaces, unqualified ACLs and their
 /// sequence-numbered entries.
-pub const SIGNALS: &[Signal] = &[
+pub(crate) const SIGNALS: &[Signal] = &[
     Signal {
         weight: MODERATE_SIGNAL,
         tests: &[Test::InterfaceName(NameShape::StartsWithAny(&[
@@ -107,7 +107,7 @@ pub const SIGNALS: &[Signal] = &[
 ];
 
 /// a canonical EOS excerpt.
-pub const SAMPLE: &str = "\
+pub(crate) const SAMPLE: &str = "\
 interface Ethernet1
    description uplink-spine-1
    ip address 192.0.2.2/31
