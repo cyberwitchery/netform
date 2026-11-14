@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use netform_ir::{DialectHint, Document, Node, NodeId, Path, TriviaKind};
+use netform_ir::{BlockNode, DialectHint, Document, LineNode, Node, NodeId, Path, TriviaKind};
+use xxhash_rust::xxh3::Xxh3Default;
 
 use crate::model::{
-    ComparisonLine, ComparisonView, KeyKind, NormalizeOptions, derive_content_key,
+    ComparisonLine, ComparisonView, KeyKind, NormalizeOptions, OrderPolicy, derive_content_key,
     derive_occurrence_key,
 };
 use crate::normalize::normalize_for_compare;
@@ -12,7 +13,16 @@ use crate::normalize::normalize_for_compare;
 /// configs rarely exceed 10–15 levels; a limit of 128 is generous enough to
 /// handle any legitimate document while preventing stack overflow on
 /// pathologically deep (or cyclic) input.
-const MAX_NESTING_DEPTH: usize = 128;
+pub(crate) const MAX_NESTING_DEPTH: usize = 128;
+
+/// a block whose children `flatten_node` leaves out, standing in the view for them with one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Cut {
+    /// the index of the block's header in the view.
+    pub(crate) header: usize,
+    /// the index of the line that holds a hash of the left-out lines.
+    pub(crate) hidden: usize,
+}
 
 #[derive(Debug, Default)]
 struct KeyAllocator {
@@ -45,8 +55,23 @@ impl KeyAllocator {
 }
 
 /// build a flattened comparison view from a parsed document.
+///
+/// lines nested under more than `MAX_NESTING_DEPTH - 1` blocks are left out.
 pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> ComparisonView {
-    let mut out = Vec::new();
+    let (view, cuts) = flatten_document(doc, options);
+    without_hidden(view, &cuts)
+}
+
+/// the comparison view of `doc` with a hidden line under each block whose children it leaves
+/// out, and those blocks.
+///
+/// the hidden line is the block's only child in the view. its text is a hash of the lines left
+/// out, so the engine pairs and compares those blocks on them too.
+pub(crate) fn flatten_document(
+    doc: &Document,
+    options: &NormalizeOptions,
+) -> (ComparisonView, Vec<Cut>) {
+    let mut out = Flattened::default();
     let mut keys = KeyAllocator {
         annotations: annotations(doc),
         ..KeyAllocator::default()
@@ -59,7 +84,26 @@ pub fn build_comparison_view(doc: &Document, options: &NormalizeOptions) -> Comp
         flatten_node(doc, root, 0, &mut path, &mut out, &mut keys, options);
     }
 
-    ComparisonView { lines: out }
+    (ComparisonView { lines: out.lines }, out.cuts)
+}
+
+/// `view` without the hidden lines of `cuts`.
+pub(crate) fn without_hidden(mut view: ComparisonView, cuts: &[Cut]) -> ComparisonView {
+    if !cuts.is_empty() {
+        let hidden = cuts.iter().map(|cut| cut.hidden).collect::<HashSet<_>>();
+        let mut index = 0;
+        view.lines.retain(|_| {
+            index += 1;
+            !hidden.contains(&(index - 1))
+        });
+    }
+    view
+}
+
+#[derive(Debug, Default)]
+struct Flattened {
+    lines: Vec<ComparisonLine>,
+    cuts: Vec<Cut>,
 }
 
 /// compute keys for a line and push a [`ComparisonLine`] onto the output.
@@ -105,14 +149,10 @@ fn flatten_node(
     node_id: NodeId,
     parent_signature: u64,
     path: &mut Vec<usize>,
-    out: &mut Vec<ComparisonLine>,
+    out: &mut Flattened,
     keys: &mut KeyAllocator,
     options: &NormalizeOptions,
 ) {
-    if path.len() >= MAX_NESTING_DEPTH {
-        return;
-    }
-
     let Some(node) = doc.node(node_id) else {
         return;
     };
@@ -124,7 +164,7 @@ fn flatten_node(
                 normalize_for_compare(&line.raw, line.trivia, quoted_values, options)
             {
                 push_comparison_line(
-                    out,
+                    &mut out.lines,
                     keys,
                     parent_signature,
                     KeyKind::Line,
@@ -141,8 +181,9 @@ fn flatten_node(
                 quoted_values,
                 options,
             ) {
+                let header = out.lines.len();
                 let header_content_key = push_comparison_line(
-                    out,
+                    &mut out.lines,
                     keys,
                     parent_signature,
                     KeyKind::BlockHeader,
@@ -151,10 +192,35 @@ fn flatten_node(
                     path,
                 );
 
-                for (child_idx, child_id) in block.children.iter().copied().enumerate() {
-                    path.push(child_idx);
-                    flatten_node(doc, child_id, header_content_key, path, out, keys, options);
-                    path.pop();
+                if path.len() + 1 < MAX_NESTING_DEPTH {
+                    for (child_idx, child_id) in block.children.iter().copied().enumerate() {
+                        path.push(child_idx);
+                        flatten_node(doc, child_id, header_content_key, path, out, keys, options);
+                        path.pop();
+                    }
+                } else if let Some(hash) = hidden_hash(doc, node_id, path, options) {
+                    let content_key = derive_content_key(
+                        header_content_key,
+                        KeyKind::Line,
+                        TriviaKind::Content,
+                        HIDDEN,
+                    );
+                    let header_line = &out.lines[header];
+                    let hidden = ComparisonLine {
+                        content_key,
+                        occurrence_key: derive_occurrence_key(content_key, 1),
+                        key_hint: None,
+                        normalized: format!("{HIDDEN}{hash:032x}"),
+                        original: String::new(),
+                        path: Path([path.as_slice(), &[0]].concat()),
+                        span: header_line.span.clone(),
+                        trivia: TriviaKind::Content,
+                    };
+                    out.cuts.push(Cut {
+                        header,
+                        hidden: out.lines.len(),
+                    });
+                    out.lines.push(hidden);
                 }
 
                 if let Some(footer) = &block.footer {
@@ -164,7 +230,7 @@ fn flatten_node(
                         normalize_for_compare(&footer.raw, footer.trivia, quoted_values, options)
                     {
                         push_comparison_line(
-                            out,
+                            &mut out.lines,
                             keys,
                             header_content_key,
                             KeyKind::BlockFooter,
@@ -178,6 +244,139 @@ fn flatten_node(
                 }
             }
         }
+    }
+}
+
+/// the text a hidden line starts with, which no parsed line has.
+const HIDDEN: &str = "\0hidden:";
+
+/// hashes the lines `flatten_node` leaves out below the block `root` at `path`, or `None` when
+/// there are none.
+///
+/// a block hashes its header, its children and its footer, framed so that no two different
+/// trees of lines feed the hasher the same bytes. its children are hashed in order where
+/// `--order-policy` or `--policy-override` makes the block's path `ordered`, and as a sorted
+/// multiset otherwise, and a block with two or more children also hashes which it was: equal
+/// hashes then mean equal lines under the policies at this side's paths.
+///
+/// the hash is 128 bits wide, since equal hashes are all that make those lines match.
+fn hidden_hash<'d>(
+    doc: &'d Document,
+    root: NodeId,
+    path: &[usize],
+    options: &NormalizeOptions,
+) -> Option<u128> {
+    struct Level<'d> {
+        block: NodeId,
+        header: Option<String>,
+        children: std::iter::Enumerate<std::slice::Iter<'d, NodeId>>,
+        footer: Option<String>,
+        hashes: Vec<u128>,
+        ordered: bool,
+    }
+
+    let quoted_values = quotes_delimit_values(doc);
+    let normalize =
+        |line: &LineNode| normalize_for_compare(&line.raw, line.trivia, quoted_values, options);
+    let mut path = Path(path.to_vec());
+    let ordered = |path: &Path| options.policy_for_path(path) == OrderPolicy::Ordered;
+    let level = |block: NodeId, node: &'d BlockNode, header, path: &Path| Level {
+        block,
+        header,
+        children: node.children.iter().enumerate(),
+        footer: node.footer.as_ref().and_then(normalize),
+        hashes: Vec::new(),
+        ordered: ordered(path),
+    };
+    let Some(Node::Block(node)) = doc.node(root) else {
+        return None;
+    };
+    let mut open = HashSet::from([root]);
+    let mut stack = vec![Level {
+        footer: None,
+        ..level(root, node, None, &path)
+    }];
+
+    while let Some(top) = stack.last_mut() {
+        if let Some((idx, &child)) = top.children.next() {
+            match doc.node(child) {
+                Some(Node::Line(line)) => {
+                    if let Some(text) = normalize(line) {
+                        top.hashes.push(leaf_hash(LINE, &text));
+                    }
+                }
+                Some(Node::Block(block)) => {
+                    if let Some(header) = normalize(&block.header) {
+                        if !open.insert(child) {
+                            top.hashes.push(leaf_hash(CYCLE, &header));
+                            continue;
+                        }
+                        path.0.push(idx);
+                        let next = level(child, block, Some(header), &path);
+                        stack.push(next);
+                    }
+                }
+                None => {}
+            }
+        } else if let Some(mut done) = stack.pop() {
+            open.remove(&done.block);
+            if let (Some(parent), Some(header), true, None) = (
+                stack.last_mut(),
+                &done.header,
+                done.hashes.is_empty(),
+                &done.footer,
+            ) {
+                // the view emits a block with no lines below its header as a line.
+                parent.hashes.push(leaf_hash(LINE, header));
+                path.0.pop();
+                continue;
+            }
+            if !done.ordered {
+                done.hashes.sort_unstable();
+            }
+            let mut hasher = Xxh3Default::new();
+            hasher.update(&[BLOCK]);
+            update_field(&mut hasher, done.header.as_deref());
+            hasher.update(&(done.hashes.len() as u64).to_le_bytes());
+            if done.hashes.len() > 1 {
+                hasher.update(&[u8::from(done.ordered)]);
+            }
+            for hash in &done.hashes {
+                hasher.update(&hash.to_le_bytes());
+            }
+            update_field(&mut hasher, done.footer.as_deref());
+            match stack.last_mut() {
+                Some(parent) => {
+                    parent.hashes.push(hasher.digest128());
+                    path.0.pop();
+                }
+                None => return (!done.hashes.is_empty()).then(|| hasher.digest128()),
+            }
+        }
+    }
+    None
+}
+
+const LINE: u8 = 0;
+const BLOCK: u8 = 1;
+const CYCLE: u8 = 2;
+
+fn leaf_hash(tag: u8, text: &str) -> u128 {
+    let mut hasher = Xxh3Default::new();
+    hasher.update(&[tag]);
+    hasher.update(text.as_bytes());
+    hasher.digest128()
+}
+
+/// feeds `text`, or its absence, to `hasher` length-prefixed.
+fn update_field(hasher: &mut Xxh3Default, text: Option<&str>) {
+    match text {
+        Some(text) => {
+            hasher.update(&[1]);
+            hasher.update(&(text.len() as u64).to_le_bytes());
+            hasher.update(text.as_bytes());
+        }
+        None => hasher.update(&[0]),
     }
 }
 

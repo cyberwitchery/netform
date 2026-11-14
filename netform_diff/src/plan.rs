@@ -3,9 +3,11 @@ use std::collections::{HashMap, HashSet};
 
 use netform_ir::Path;
 
+use crate::findings::RIGHT_TRUNCATION;
+use crate::flatten::MAX_NESTING_DEPTH;
 use crate::model::{
-    Diff, DiffLine, Edit, EditAnchor, FindingLevel, Plan, PlanAction, PlanFinding, PlanLineEdit,
-    PlanLineEditKind, finding_code,
+    Diff, DiffLine, Edit, EditAnchor, Finding, FindingLevel, Plan, PlanAction, PlanFinding,
+    PlanLineEdit, PlanLineEditKind, finding_code,
 };
 use crate::util::{parent_path, path_starts_with};
 
@@ -13,10 +15,16 @@ use crate::util::{parent_path, path_starts_with};
 ///
 /// every `context_path` and `target_path` in the plan names a node of the
 /// original left-hand document, the one the plan is applied to, and actions
-/// come deepest first.
+/// come deepest first. lines nested too deep to diff line by line get no
+/// action: each block whose such lines differ is reported as a
+/// `diff_unreliable_region` finding instead.
 pub fn build_plan(diff: &Diff) -> Plan {
     let mut lines = PlanLines::default();
-    let mut findings = Vec::new();
+    let mut findings = diff
+        .findings
+        .iter()
+        .filter_map(truncation_finding)
+        .collect::<Vec<_>>();
     for (order, edit) in diff.edits.iter().enumerate() {
         lines.add(order, edit, &mut findings);
     }
@@ -27,6 +35,24 @@ pub fn build_plan(diff: &Diff) -> Plan {
         actions,
         findings,
     }
+}
+
+/// the plan's finding for a diff finding on a truncated block whose lines differ.
+///
+/// a right-side block has no left-side path, so its finding has none.
+fn truncation_finding(finding: &Finding) -> Option<PlanFinding> {
+    let path = finding.path.as_ref()?;
+    let truncated = finding.code == finding_code::DIFF_UNRELIABLE_REGION
+        && finding.level == FindingLevel::Warning
+        && path.0.len() == MAX_NESTING_DEPTH - 1;
+    let left = !finding.message.starts_with(RIGHT_TRUNCATION);
+    truncated.then(|| PlanFinding {
+        code: finding.code.clone(),
+        message: format!("{}; the plan cannot show them", finding.message),
+        level: Some(FindingLevel::Warning),
+        path: left.then(|| path.clone()),
+        span: left.then(|| finding.span.clone()).flatten(),
+    })
 }
 
 fn missing_anchor_finding(edit_kind: &str, anchor_side: &str) -> PlanFinding {

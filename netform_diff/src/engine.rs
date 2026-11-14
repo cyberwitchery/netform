@@ -1,9 +1,13 @@
 use std::collections::{HashMap, VecDeque};
 
+use crate::flatten::MAX_NESTING_DEPTH;
 use crate::model::{
     ComparisonLine, ComparisonView, DiffError, DiffLine, DiffStats, Edit, EditAnchor,
     NormalizeOptions, OrderPolicy,
 };
+
+/// the path length of a block header whose children `flatten` leaves out.
+const CUT_HEADER_DEPTH: usize = MAX_NESTING_DEPTH - 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Op {
@@ -23,6 +27,15 @@ struct Segment {
 pub(crate) struct DiffComputation {
     pub edits: Vec<Edit>,
     pub fallback_contexts: Vec<netform_ir::Path>,
+    /// the header paths of each left and right block at the flatten depth limit paired as siblings.
+    pub cut_pairs: Vec<(netform_ir::Path, netform_ir::Path)>,
+}
+
+/// what a diff records besides its edits.
+#[derive(Debug, Default)]
+struct Notes {
+    fallback_contexts: Vec<netform_ir::Path>,
+    cut_pairs: Vec<(netform_ir::Path, netform_ir::Path)>,
 }
 
 pub(crate) fn diff_views(
@@ -31,7 +44,7 @@ pub(crate) fn diff_views(
     options: &NormalizeOptions,
 ) -> Result<DiffComputation, DiffError> {
     let mut edits = Vec::new();
-    let mut fallback_contexts = Vec::new();
+    let mut notes = Notes::default();
     let mut budget = SHARED_LINES_BUDGET;
     let root = netform_ir::Path(Vec::new());
     if options.policy_for_path(&root) == OrderPolicy::Unordered {
@@ -41,7 +54,7 @@ pub(crate) fn diff_views(
             options,
             &mut budget,
             &mut edits,
-            &mut fallback_contexts,
+            &mut notes,
         )?;
     } else {
         diff_segment_level(
@@ -51,12 +64,13 @@ pub(crate) fn diff_views(
             options,
             &mut budget,
             &mut edits,
-            &mut fallback_contexts,
+            &mut notes,
         )?;
     }
     Ok(DiffComputation {
         edits,
-        fallback_contexts,
+        fallback_contexts: notes.fallback_contexts,
+        cut_pairs: notes.cut_pairs,
     })
 }
 
@@ -68,7 +82,7 @@ fn diff_unordered_root(
     options: &NormalizeOptions,
     budget: &mut usize,
     edits: &mut Vec<Edit>,
-    fallback_contexts: &mut Vec<netform_ir::Path>,
+    notes: &mut Notes,
 ) -> Result<(), DiffError> {
     let a_segments = segment_at(a_lines, 0);
     let b_segments = segment_at(b_lines, 0);
@@ -88,10 +102,10 @@ fn diff_unordered_root(
         options,
         budget,
         edits,
-        fallback_contexts,
+        notes,
     )?;
     if !fallback.is_empty() {
-        fallback_contexts.extend(contexts);
+        notes.fallback_contexts.extend(contexts);
     }
     edits.append(&mut fallback);
     Ok(())
@@ -141,7 +155,7 @@ fn diff_segment_level(
     options: &NormalizeOptions,
     budget: &mut usize,
     edits: &mut Vec<Edit>,
-    fallback_contexts: &mut Vec<netform_ir::Path>,
+    notes: &mut Notes,
 ) -> Result<(), DiffError> {
     let depth = level_path.0.len();
     let level_policy = options.policy_for_path(level_path);
@@ -176,10 +190,10 @@ fn diff_segment_level(
                         options,
                         budget,
                         edits,
-                        fallback_contexts,
+                        notes,
                     )?;
                     if record_fallbacks {
-                        fallback_contexts.extend(unreliable);
+                        notes.fallback_contexts.extend(unreliable);
                     }
                 }
                 run_open = false;
@@ -196,7 +210,7 @@ fn diff_segment_level(
                     a_count,
                     b_count,
                 })?;
-                diff_matched_segment(&left, &right, options, budget, edits, fallback_contexts)?;
+                diff_matched_segment(&left, &right, options, budget, edits, notes)?;
             }
             Op::Delete => {
                 if !run_open {
@@ -234,10 +248,10 @@ fn diff_segment_level(
         options,
         budget,
         edits,
-        fallback_contexts,
+        notes,
     )?;
     if record_fallbacks {
-        fallback_contexts.extend(unreliable);
+        notes.fallback_contexts.extend(unreliable);
     }
     Ok(())
 }
@@ -609,10 +623,16 @@ fn diff_matched_segment(
     options: &NormalizeOptions,
     budget: &mut usize,
     edits: &mut Vec<Edit>,
-    fallback_contexts: &mut Vec<netform_ir::Path>,
+    notes: &mut Notes,
 ) -> Result<(), DiffError> {
     let first_edit = edits.len();
-    diff_matched_contents(left, right, options, budget, edits, fallback_contexts)?;
+    let (left_header, right_header) = (&left.lines[0], &right.lines[0]);
+    if left_header.path.0.len() == CUT_HEADER_DEPTH {
+        notes
+            .cut_pairs
+            .push((left_header.path.clone(), right_header.path.clone()));
+    }
+    diff_matched_contents(left, right, options, budget, edits, notes)?;
     anchor_child_inserts(&mut edits[first_edit..], &left.lines[0], &right.lines[0]);
     Ok(())
 }
@@ -647,7 +667,7 @@ fn diff_matched_contents(
     options: &NormalizeOptions,
     budget: &mut usize,
     edits: &mut Vec<Edit>,
-    fallback_contexts: &mut Vec<netform_ir::Path>,
+    notes: &mut Notes,
 ) -> Result<(), DiffError> {
     if !(left.is_block && right.is_block) {
         edits.extend(diff_matched_lines(&left.lines, &right.lines));
@@ -681,7 +701,7 @@ fn diff_matched_contents(
             options,
             budget,
             edits,
-            fallback_contexts,
+            notes,
         )?,
         policy => {
             let depth = left_header.path.0.len();
@@ -692,7 +712,7 @@ fn diff_matched_contents(
                 options,
                 budget,
                 edits,
-                fallback_contexts,
+                notes,
             )?;
             edits.append(&mut chunked);
         }
@@ -715,7 +735,7 @@ fn diff_sibling_multiset(
     options: &NormalizeOptions,
     budget: &mut usize,
     edits: &mut Vec<Edit>,
-    fallback_contexts: &mut Vec<netform_ir::Path>,
+    notes: &mut Notes,
 ) -> Result<Vec<Edit>, DiffError> {
     let unordered = policy == OrderPolicy::Unordered;
     let (mut pairs, deleted, inserted) = pair_blocks(deleted, inserted, policy);
@@ -725,7 +745,7 @@ fn diff_sibling_multiset(
         pair_blocks_with_leaves(&mut pairs, deleted, inserted, policy)
     };
     for (left, right) in &pairs {
-        diff_matched_segment(left, right, options, budget, edits, fallback_contexts)?;
+        diff_matched_segment(left, right, options, budget, edits, notes)?;
     }
 
     let (deleted_blocks, deleted): (Vec<_>, Vec<_>) = deleted
@@ -977,7 +997,7 @@ fn flush_replaced_segments(
     options: &NormalizeOptions,
     budget: &mut usize,
     edits: &mut Vec<Edit>,
-    fallback_contexts: &mut Vec<netform_ir::Path>,
+    notes: &mut Notes,
 ) -> Result<Vec<netform_ir::Path>, DiffError> {
     if deleted.is_empty() && inserted.is_empty() {
         runs.clear();
@@ -994,7 +1014,7 @@ fn flush_replaced_segments(
         options,
         budget,
         edits,
-        fallback_contexts,
+        notes,
     )?;
     let unreliable = if fallback.is_empty() {
         Vec::new()
@@ -1715,7 +1735,7 @@ mod tests {
                 &default_options(),
                 &mut remaining,
                 &mut edits,
-                &mut Vec::new(),
+                &mut Notes::default(),
             )
             .unwrap();
             let ntp = edit_texts(&edits)
