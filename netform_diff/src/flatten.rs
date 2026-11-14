@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use netform_ir::{BlockNode, DialectHint, Document, LineNode, Node, NodeId, Path, TriviaKind};
 use xxhash_rust::xxh3::Xxh3Default;
 
-use crate::engine::{pair_same_contents_first, tree_hash};
+use crate::engine::{pair_in_order, pair_same_contents_first, sequence_hash, tree_hash};
 use crate::model::{
     ComparisonLine, ComparisonView, KeyKind, NormalizeOptions, OrderPolicy, derive_content_key,
     derive_occurrence_key,
@@ -31,7 +31,7 @@ pub(crate) struct Cut<'a> {
     pub(crate) block: NodeId,
     pub(crate) path: &'a Path,
     /// the `tree_fingerprints` of its document's blocks.
-    pub(crate) trees: &'a HashMap<NodeId, u64>,
+    pub(crate) trees: &'a HashMap<NodeId, (u64, u64)>,
 }
 
 #[derive(Debug, Default)]
@@ -225,8 +225,8 @@ struct Guide<'g> {
     partners: Vec<Option<(usize, &'g BlockNode)>>,
 }
 
-/// an emitted child's index, and its header text, id and node if it is a block.
-type Emitted<'d> = (usize, Option<(String, NodeId, &'d BlockNode)>);
+/// an emitted child's index and text, and its id and node if it is a block.
+type Emitted<'d> = (usize, String, Option<(NodeId, &'d BlockNode)>);
 
 fn emitted<'d>(
     cut: &Cut<'d>,
@@ -240,8 +240,8 @@ fn emitted<'d>(
         .enumerate()
         .filter_map(|(idx, &id)| match cut.doc.node(id)? {
             Node::Line(line) => {
-                normalize_for_compare(&line.raw, line.trivia, quoted_values, options)?;
-                Some((idx, None))
+                normalize_for_compare(&line.raw, line.trivia, quoted_values, options)
+                    .map(|text| (idx, text, None))
             }
             Node::Block(child) => normalize_for_compare(
                 &child.header.raw,
@@ -249,7 +249,7 @@ fn emitted<'d>(
                 quoted_values,
                 options,
             )
-            .map(|header| (idx, Some((header, id, child)))),
+            .map(|header| (idx, header, Some((id, child)))),
         })
         .collect()
 }
@@ -257,19 +257,30 @@ fn emitted<'d>(
 fn contents_keys(cut: &Cut<'_>, children: &[Emitted<'_>]) -> Vec<Option<(String, u64)>> {
     children
         .iter()
-        .map(|(_, child)| {
-            child.as_ref().map(|(header, id, _)| {
-                (
-                    header.clone(),
-                    cut.trees.get(id).copied().unwrap_or_default(),
-                )
+        .map(|(_, header, child)| {
+            child.as_ref().map(|(id, _)| {
+                let tree = cut.trees.get(id).map_or(0, |&(tree, _)| tree);
+                (header.clone(), tree)
             })
         })
         .collect()
 }
 
+fn sequence_keys(cut: &Cut<'_>, children: &[Emitted<'_>]) -> Vec<(u64, u64)> {
+    children
+        .iter()
+        .map(|(_, text, child)| {
+            let sequence = match child {
+                Some((id, _)) => cut.trees.get(id).map_or(0, |&(_, sequence)| sequence),
+                None => line_fingerprints(text).1,
+            };
+            (xxhash_rust::xxh3::xxh3_64(text.as_bytes()), sequence)
+        })
+        .collect()
+}
+
 impl<'g> Guide<'g> {
-    /// pairs `subject`'s emitted children with `guide`'s: in order if `path` is ordered, else as `pair_blocks` does.
+    /// pairs `subject`'s emitted children with `guide`'s as the engine pairs siblings under `path`'s policy.
     fn new(
         subject: (&Cut<'_>, &BlockNode),
         guide: (&Cut<'g>, &'g BlockNode),
@@ -279,13 +290,23 @@ impl<'g> Guide<'g> {
         let ordered = options.policy_for_path(path) == OrderPolicy::Ordered;
         let guide_children = emitted(guide.0, guide.1, options);
         let block = |partner: usize| {
-            let (idx, child) = &guide_children[partner];
-            child.as_ref().map(|&(_, _, node)| (*idx, node))
+            let (idx, _, child) = &guide_children[partner];
+            child.as_ref().map(|&(_, node)| (*idx, node))
         };
+        let subject_children = emitted(subject.0, subject.1, options);
         let partners = if ordered {
-            (0..guide_children.len()).map(block).collect()
+            let mut partners = vec![None; subject_children.len()];
+            let pairs = pair_in_order(
+                &sequence_keys(guide.0, &guide_children),
+                &sequence_keys(subject.0, &subject_children),
+            );
+            for (partner, position) in pairs.into_iter().enumerate() {
+                if let Some(position) = position {
+                    partners[position] = block(partner);
+                }
+            }
+            partners
         } else {
-            let subject_children = emitted(subject.0, subject.1, options);
             pair_same_contents_first(
                 &contents_keys(subject.0, &subject_children),
                 &contents_keys(guide.0, &guide_children),
@@ -416,14 +437,14 @@ pub(crate) fn tree_fingerprints<'d>(
     doc: &'d Document,
     root: NodeId,
     options: &NormalizeOptions,
-    trees: &mut HashMap<NodeId, u64>,
+    trees: &mut HashMap<NodeId, (u64, u64)>,
 ) {
     struct Level<'d> {
         block: NodeId,
         header: String,
         children: std::slice::Iter<'d, NodeId>,
         footer: Option<String>,
-        hashes: Vec<u64>,
+        hashes: Vec<(u64, u64)>,
     }
 
     let quoted_values = quotes_delimit_values(doc);
@@ -453,12 +474,13 @@ pub(crate) fn tree_fingerprints<'d>(
             match doc.node(child) {
                 Some(Node::Line(line)) => {
                     if let Some(text) = normalize(line) {
-                        top.hashes.push(tree_hash(&text, Vec::new()));
+                        top.hashes.push(line_fingerprints(&text));
                     }
                 }
                 Some(Node::Block(block)) => {
                     if !open.insert(child) {
-                        top.hashes.push(leaf_hash(CYCLE, &block.header.raw));
+                        let cycle = leaf_hash(CYCLE, &block.header.raw);
+                        top.hashes.push((cycle, cycle));
                     } else if let Some(level) = level(child, block) {
                         stack.push(level);
                     }
@@ -467,9 +489,14 @@ pub(crate) fn tree_fingerprints<'d>(
             }
         } else if let Some(mut done) = stack.pop() {
             if let Some(footer) = &done.footer {
-                done.hashes.push(tree_hash(footer, Vec::new()));
+                done.hashes.push(line_fingerprints(footer));
             }
-            let hash = tree_hash(&done.header, done.hashes);
+            let sequence = done.hashes.iter().map(|hash| hash.1).collect::<Vec<_>>();
+            let tree = done.hashes.into_iter().map(|hash| hash.0).collect();
+            let hash = (
+                tree_hash(&done.header, tree),
+                sequence_hash(&done.header, &sequence),
+            );
             open.remove(&done.block);
             trees.insert(done.block, hash);
             if let Some(parent) = stack.last_mut() {
@@ -477,6 +504,11 @@ pub(crate) fn tree_fingerprints<'d>(
             }
         }
     }
+}
+
+/// the `tree_fingerprints` of a line with text `text` and no children.
+fn line_fingerprints(text: &str) -> (u64, u64) {
+    (tree_hash(text, Vec::new()), sequence_hash(text, &[]))
 }
 
 const LINE: u8 = 0;

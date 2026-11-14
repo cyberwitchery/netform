@@ -266,32 +266,71 @@ fn align_segments(
         matches = prefer_shared_lines(a, b, matches, options, budget);
     }
 
+    let pairs = pair_runs(
+        &matches,
+        (&keys(a), &keys(b)),
+        (
+            |index| segment_fingerprint(&a[index]),
+            |index| segment_fingerprint(&b[index]),
+        ),
+    )?;
+    Ok(ops_from_pairs(a.len(), b.len(), &pairs))
+}
+
+/// re-pairs each run of same-key `matches` identical `contents` first.
+fn pair_runs(
+    matches: &[(usize, usize)],
+    (a_keys, b_keys): (&[u64], &[u64]),
+    contents: (impl Fn(usize) -> u64, impl Fn(usize) -> u64),
+) -> Result<Vec<(usize, usize)>, DiffError> {
     let mut pairs = Vec::with_capacity(matches.len());
     let mut start = 0;
     while start < matches.len() {
-        let key = a[matches[start].0].segment_key;
+        let key = a_keys[matches[start].0];
         let end = matches[start..]
             .iter()
-            .position(|&(left, _)| a[left].segment_key != key)
+            .position(|&(left, _)| a_keys[left] != key)
             .map_or(matches.len(), |offset| start + offset);
         let (a_from, b_from) = pairs
             .last()
             .map_or((0, 0), |&(left, right)| (left + 1, right + 1));
-        let (a_to, b_to) = matches.get(end).copied().unwrap_or((a.len(), b.len()));
-        let with_key = |segments: &[Segment], range: std::ops::Range<usize>| {
+        let (a_to, b_to) = matches
+            .get(end)
+            .copied()
+            .unwrap_or((a_keys.len(), b_keys.len()));
+        let with_key = |keys: &[u64], range: std::ops::Range<usize>| {
             range
-                .filter(|&index| segments[index].segment_key == key)
+                .filter(|&index| keys[index] == key)
                 .collect::<Vec<_>>()
         };
         pairs.extend(pair_identical_first(
-            a,
-            b,
-            &with_key(a, a_from..a_to),
-            &with_key(b, b_from..b_to),
+            &with_key(a_keys, a_from..a_to),
+            &with_key(b_keys, b_from..b_to),
+            &contents,
         )?);
         start = end;
     }
-    Ok(ops_from_pairs(a.len(), b.len(), &pairs))
+    Ok(pairs)
+}
+
+/// the partner of each `(key, contents)` of `a` among `b`, as an ordered level pairs its siblings.
+pub(crate) fn pair_in_order(a: &[(u64, u64)], b: &[(u64, u64)]) -> Vec<Option<usize>> {
+    let keys = |side: &[(u64, u64)]| side.iter().map(|&(key, _)| key).collect::<Vec<_>>();
+    let (a_keys, b_keys) = (keys(a), keys(b));
+    let pairs = compute_ops(&a_keys, &b_keys)
+        .and_then(|ops| {
+            pair_runs(
+                &matched_pairs(&ops),
+                (&a_keys, &b_keys),
+                (|index| a[index].1, |index| b[index].1),
+            )
+        })
+        .unwrap_or_default();
+    let mut partners = vec![None; a.len()];
+    for (left, right) in pairs {
+        partners[left] = Some(right);
+    }
+    partners
 }
 
 /// re-pairs siblings by key, keeping as many pairs as Myers found and choosing, among
@@ -536,15 +575,14 @@ fn matched_pairs(ops: &[Op]) -> Vec<(usize, usize)> {
 
 /// pairs identical siblings first, then the rest by position between those pairs.
 fn pair_identical_first(
-    a: &[Segment],
-    b: &[Segment],
     left: &[usize],
     right: &[usize],
+    (a, b): &(impl Fn(usize) -> u64, impl Fn(usize) -> u64),
 ) -> Result<Vec<(usize, usize)>, DiffError> {
-    let fingerprints = |segments: &[Segment], indices: &[usize]| {
+    let fingerprints = |contents: &dyn Fn(usize) -> u64, indices: &[usize]| {
         indices
             .iter()
-            .map(|&index| segment_fingerprint(&segments[index]))
+            .map(|&index| contents(index))
             .collect::<Vec<_>>()
     };
     let ops = compute_ops(&fingerprints(a, left), &fingerprints(b, right))?;
@@ -921,6 +959,17 @@ pub(crate) fn tree_fingerprint(lines: &[ComparisonLine]) -> u64 {
 pub(crate) fn tree_hash(header: &str, mut children: Vec<u64>) -> u64 {
     children.sort_unstable();
     let mut hasher = xxhash_rust::xxh3::Xxh3Default::new();
+    hasher.update(header.as_bytes());
+    for child in children {
+        hasher.update(&child.to_le_bytes());
+    }
+    hasher.digest()
+}
+
+/// hashes a line with text `header` whose children, in order, have the hashes `children`.
+pub(crate) fn sequence_hash(header: &str, children: &[u64]) -> u64 {
+    let mut hasher = xxhash_rust::xxh3::Xxh3Default::new();
+    hasher.update(&(header.len() as u64).to_le_bytes());
     hasher.update(header.as_bytes());
     for child in children {
         hasher.update(&child.to_le_bytes());
