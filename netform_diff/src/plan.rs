@@ -48,7 +48,7 @@ fn truncation_finding(finding: &Finding) -> Option<PlanFinding> {
     let left = !finding.message.starts_with(RIGHT_TRUNCATION);
     truncated.then(|| PlanFinding {
         code: finding.code.clone(),
-        message: format!("{}; no action changes them", finding.message),
+        message: format!("{}; the plan cannot show them", finding.message),
         level: Some(FindingLevel::Warning),
         path: left.then(|| path.clone()),
         span: left.then(|| finding.span.clone()).flatten(),

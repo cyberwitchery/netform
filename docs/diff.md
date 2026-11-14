@@ -88,7 +88,7 @@ block and its siblings. apply them in order.
 an action's line edits are its deletes, then its replaces, then its inserts. a block that is
 removed or added is planned whole under its parent: its header, then its lines in document order.
 an inserted line that cannot be placed under a left-side context is reported as a `missing_anchor`
-finding instead of an action. lines nested under more than 127 blocks are compared as a whole, not
+finding instead of an action. lines nested under 127 or more blocks are compared as a whole, not
 line by line, so a change among them has no action: each block whose such lines differ is reported
 as a `diff_unreliable_region` finding instead, at its left-side path, or with no path when only the
 right-hand document has it.
