@@ -64,7 +64,12 @@ fn diff_json_carries_exactly_the_schema_fields() {
             assert_eq!(keys(edit), required(def), "{intended:?}");
             for side in ["old_lines", "new_lines"] {
                 for line in edit[side].as_array().expect("lines array") {
-                    assert_eq!(keys(line), required(&defs["diff_line"]), "{intended:?}");
+                    let def = &defs["diff_line"];
+                    assert!(keys(line).is_superset(&required(def)), "{intended:?}");
+                    assert!(
+                        keys(line).is_subset(&keys(&def["properties"])),
+                        "{intended:?}"
+                    );
                 }
             }
         }

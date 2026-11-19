@@ -1302,6 +1302,7 @@ fn to_diff_line(line: &ComparisonLine) -> DiffLine {
         text: line.original.clone(),
         path: line.path.clone(),
         span: line.span.clone(),
+        after_path: None,
     }
 }
 
@@ -1478,6 +1479,7 @@ mod tests {
             text: text.to_string(),
             path: Path(vec![line]),
             span: span(line),
+            after_path: None,
         }
     }
 
@@ -1561,6 +1563,7 @@ mod tests {
                     text: "a".into(),
                     path: Path(vec![0]),
                     span: span(0),
+                    after_path: None,
                 },
                 DiffLine {
                     content_key: 2,
@@ -1568,6 +1571,7 @@ mod tests {
                     text: "b".into(),
                     path: Path(vec![1]),
                     span: span(1),
+                    after_path: None,
                 },
             ],
         }];
@@ -1590,6 +1594,7 @@ mod tests {
                 text: "old".into(),
                 path: Path(vec![0]),
                 span: span(0),
+                after_path: None,
             }],
             new_lines: vec![
                 DiffLine {
@@ -1598,6 +1603,7 @@ mod tests {
                     text: "new1".into(),
                     path: Path(vec![0]),
                     span: span(0),
+                    after_path: None,
                 },
                 DiffLine {
                     content_key: 3,
@@ -1605,6 +1611,7 @@ mod tests {
                     text: "new2".into(),
                     path: Path(vec![1]),
                     span: span(1),
+                    after_path: None,
                 },
             ],
         }];
@@ -1627,6 +1634,7 @@ mod tests {
                     text: "i".into(),
                     path: Path(vec![0]),
                     span: span(0),
+                    after_path: None,
                 }],
             },
             Edit::Delete {
@@ -1639,6 +1647,7 @@ mod tests {
                     text: "d".into(),
                     path: Path(vec![1]),
                     span: span(1),
+                    after_path: None,
                 }],
             },
             Edit::Insert {
@@ -1651,6 +1660,7 @@ mod tests {
                     text: "i2".into(),
                     path: Path(vec![2]),
                     span: span(2),
+                    after_path: None,
                 }],
             },
         ];
@@ -3300,6 +3310,7 @@ mod tests {
             text: "added".into(),
             path: Path(vec![0]),
             span: span(0),
+            after_path: None,
         }];
         let result = finalize_chunked_edits(vec![], inserts);
         assert_eq!(result.len(), 1);

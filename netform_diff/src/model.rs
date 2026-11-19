@@ -167,6 +167,12 @@ pub struct DiffLine {
     pub text: String,
     pub path: Path,
     pub span: Span,
+    /// for a right-side line directly under a block the left-hand document also has, the
+    /// left-side path of the line it comes after: the nearest earlier sibling that the
+    /// left-hand document keeps or rewrites in place, or that block's header when there
+    /// is none (`[]` at the top level).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_path: Option<Path>,
 }
 
 /// path/span anchor for edit placement and diagnostics.
@@ -288,6 +294,16 @@ pub enum PlanAction {
 pub struct PlanLineEdit {
     pub kind: PlanLineEditKind,
     pub text: String,
+    /// for a replace, the left-side line it rewrites; for a delete, the left-side line it
+    /// removes, its subtree included. a delete without one belongs to the removed block
+    /// before it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_path: Option<Path>,
+    /// for an insert placed directly under the action's context, the left-side line it
+    /// goes after: a child of the context, or the context itself when it comes first.
+    /// an insert without one belongs to the inserted block before it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_path: Option<Path>,
 }
 
 /// line operation kind for [`PlanLineEdit`].

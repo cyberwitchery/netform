@@ -43,7 +43,11 @@
         "occurrence_key": { "type": "integer", "minimum": 0 },
         "text": { "type": "string" },
         "path": { "$ref": "#/$defs/path" },
-        "span": { "$ref": "#/$defs/span" }
+        "span": { "$ref": "#/$defs/span" },
+        "after_path": {
+          "$ref": "#/$defs/path",
+          "description": "for a right-side line directly under a block the left-hand document also has: the left-side line it comes after, the nearest earlier sibling the left side keeps or rewrites in place, or that block's header when there is none ([] at the top level)"
+        }
       }
     },
     "edit_anchor": {

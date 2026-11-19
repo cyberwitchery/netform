@@ -577,6 +577,7 @@ mod tests {
                 start_byte: 0,
                 end_byte: 0,
             },
+            after_path: None,
         }
     }
 

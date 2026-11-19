@@ -26,6 +26,7 @@ mod flatten;
 mod inline;
 mod model;
 mod normalize;
+mod place;
 mod plan;
 mod report;
 mod util;
@@ -68,6 +69,7 @@ pub fn diff_documents(
     );
     let a_view = flatten::without_hidden(a_view, &a_cuts);
     let b_view = flatten::without_hidden(b_view, &b_cuts);
+    place::place_new_lines(&mut computation.edits, &a_view, &b_view);
     let ctx = findings::DiffContext::from_views(&a_view, &b_view);
     let stats = engine::build_stats(&computation.edits);
     let findings = findings::collect_findings(

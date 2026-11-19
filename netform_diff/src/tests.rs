@@ -656,6 +656,7 @@ fn build_plan_replace_of_sibling_lines_deletes_them_and_inserts_under_their_cont
                         start_byte: 10,
                         end_byte: 29,
                     },
+                    after_path: None,
                 },
                 DiffLine {
                     content_key: 11,
@@ -667,6 +668,7 @@ fn build_plan_replace_of_sibling_lines_deletes_them_and_inserts_under_their_cont
                         start_byte: 30,
                         end_byte: 49,
                     },
+                    after_path: None,
                 },
             ],
             new_lines: vec![DiffLine {
@@ -679,6 +681,7 @@ fn build_plan_replace_of_sibling_lines_deletes_them_and_inserts_under_their_cont
                     start_byte: 10,
                     end_byte: 30,
                 },
+                after_path: None,
             }],
         }],
         ..Diff::default()
@@ -730,6 +733,7 @@ fn build_plan_mixed_edit_types_group_under_same_context() {
             start_byte: idx * 20,
             end_byte: idx * 20 + text.len(),
         },
+        after_path: None,
     };
 
     let diff = Diff {

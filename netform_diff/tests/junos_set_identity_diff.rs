@@ -427,6 +427,11 @@ set interfaces ge-0/0/0 description uplink
             vec![PlanLineEdit {
                 kind: PlanLineEditKind::Delete,
                 text: removed.to_string(),
+                target_path: match &diff.edits[..] {
+                    [Edit::Delete { lines, .. }] => Some(lines[0].path.clone()),
+                    other => panic!("{case}: expected one delete, got {other:?}"),
+                },
+                after_path: None,
             }],
             "{case}"
         );

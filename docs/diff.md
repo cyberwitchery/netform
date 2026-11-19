@@ -56,7 +56,10 @@ an `Insert` below the top level carries as its `left_anchor` the header of the l
 lines go into, or the left-side line they become the first children of. it has none at the top
 level, nor when that block exists only on the right.
 
-changed lines also carry path/span references for diagnostics.
+changed lines also carry path/span references for diagnostics. a right-side line directly under a
+block the left-hand document also has carries `after_path`: the left-side line it comes after, which
+is the nearest earlier sibling the left-hand document keeps or rewrites in place, or that block's
+header when there is none (`[]` at the top level).
 
 ## findings
 
@@ -81,9 +84,12 @@ subtree included. `apply_line_edits_under_context.context_path` names the left-s
 children the line edits change, a left-side line whose first children they insert, or `[]` for the
 top level.
 
-line edits carry no paths: a delete picks a child of its context by its text. actions come deepest
-first, so everything planned inside a block is applied before its parent's deletes pick among that
-block and its siblings. apply them in order.
+a delete or a replace names the left-side line it removes or rewrites in `target_path`, a removed
+line's subtree included. an insert names the left-side line it goes after in `after_path`: a child of
+the context, or the context itself when it comes first. inserts with the same `after_path` go in the
+order listed. the lines of a removed or added block after its header carry no path: they go with the
+header. actions come deepest first, so everything planned inside a block is applied before its
+parent's line edits. apply them in order.
 
 an action's line edits are its deletes, then its replaces, then its inserts. a block that is
 removed or added is planned whole under its parent: its header, then its lines in document order.

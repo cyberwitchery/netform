@@ -29,6 +29,12 @@ impl Tree {
         children.sort();
         format!("{}{{{}}}", self.text, children.join("\u{1}"))
     }
+
+    /// the tree's normalized text with every level's children in order.
+    fn ordered(&self) -> String {
+        let children = self.children.iter().map(Tree::ordered).collect::<Vec<_>>();
+        format!("{}{{{}}}", self.text, children.join("\u{1}"))
+    }
 }
 
 /// parses `text` and nests its comparison lines by path.
@@ -66,13 +72,14 @@ struct Node {
 struct Applier<'a> {
     nodes: Vec<Node>,
     by_path: HashMap<Vec<usize>, usize>,
-    replaced_from: HashMap<(usize, String), Vec<String>>,
+    /// the node most recently inserted after each node, by its parent and that node.
+    inserted_after: HashMap<(usize, usize), usize>,
     parse: Parse,
     options: &'a NormalizeOptions,
 }
 
 impl<'a> Applier<'a> {
-    fn new(left: &str, diff: &Diff, parse: Parse, options: &'a NormalizeOptions) -> Self {
+    fn new(left: &str, parse: Parse, options: &'a NormalizeOptions) -> Self {
         let mut applier = Self {
             nodes: vec![Node {
                 original: String::new(),
@@ -81,7 +88,7 @@ impl<'a> Applier<'a> {
                 children: Vec::new(),
             }],
             by_path: HashMap::from([(Vec::new(), 0)]),
-            replaced_from: HashMap::new(),
+            inserted_after: HashMap::new(),
             parse,
             options,
         };
@@ -89,23 +96,6 @@ impl<'a> Applier<'a> {
             let parent = applier.by_path[&line.path.0[..line.path.0.len() - 1]];
             let index = applier.push(parent, line.original, line.normalized);
             applier.by_path.insert(line.path.0, index);
-        }
-        // a plan's replace carries only the new text; the diff says which line it replaces.
-        for edit in &diff.edits {
-            if let Edit::Replace {
-                old_lines,
-                new_lines,
-                ..
-            } = edit
-                && let ([old], [new]) = (old_lines.as_slice(), new_lines.as_slice())
-            {
-                let context = applier.by_path[&old.path.0[..old.path.0.len() - 1]];
-                applier
-                    .replaced_from
-                    .entry((context, new.text.clone()))
-                    .or_default()
-                    .push(old.text.clone());
-            }
         }
         applier
     }
@@ -127,6 +117,14 @@ impl<'a> Applier<'a> {
         for child in tree.children {
             self.graft(index, child);
         }
+        index
+    }
+
+    /// grafts `tree` under `parent` at `position` among its children.
+    fn graft_at(&mut self, parent: usize, position: usize, tree: Tree) -> usize {
+        let index = self.graft(parent, tree);
+        self.nodes[parent].children.pop();
+        self.nodes[parent].children.insert(position, index);
         index
     }
 
@@ -170,9 +168,18 @@ impl<'a> Applier<'a> {
                     let target = self.node_at(target_path)?;
                     let parent = self.nodes[target].parent;
                     let fragment = self.fragment(intended_lines);
-                    self.nodes[parent].children.retain(|&child| child != target);
-                    for tree in fragment {
-                        self.graft(parent, tree);
+                    let position = self.nodes[parent]
+                        .children
+                        .iter()
+                        .position(|&child| child == target)
+                        .ok_or("replace_block target is gone")?;
+                    self.nodes[parent].children.remove(position);
+                    let mut last = None;
+                    for (offset, tree) in fragment.into_iter().enumerate() {
+                        last = Some(self.graft_at(parent, position + offset, tree));
+                    }
+                    if let Some(last) = last {
+                        self.inserted_after.insert((parent, target), last);
                     }
                 }
                 PlanAction::ApplyLineEditsUnderContext {
@@ -190,40 +197,56 @@ impl<'a> Applier<'a> {
     }
 
     fn apply_run(&mut self, context: usize, run: &[PlanLineEdit]) -> Result<(), String> {
-        let texts = run.iter().map(|edit| &edit.text);
         match run[0].kind {
             PlanLineEditKind::Insert => {
-                for tree in self.fragment(texts) {
-                    self.graft(context, tree);
+                for block in run.chunk_by(|_, next| next.after_path.is_none()) {
+                    let after = block[0]
+                        .after_path
+                        .as_ref()
+                        .ok_or_else(|| format!("insert `{}` has no after_path", block[0].text))?;
+                    let anchor = self.node_at(after)?;
+                    let previous = self
+                        .inserted_after
+                        .get(&(context, anchor))
+                        .copied()
+                        .unwrap_or(anchor);
+                    let position = if previous == context {
+                        0
+                    } else {
+                        self.nodes[context]
+                            .children
+                            .iter()
+                            .position(|&child| child == previous)
+                            .ok_or_else(|| {
+                                format!("`{}` is not under its context", block[0].text)
+                            })?
+                            + 1
+                    };
+                    let fragment = self.fragment(block.iter().map(|edit| &edit.text));
+                    for (offset, tree) in fragment.into_iter().enumerate() {
+                        let index = self.graft_at(context, position + offset, tree);
+                        self.inserted_after.insert((context, anchor), index);
+                    }
                 }
             }
             PlanLineEditKind::Delete => {
-                for tree in self.fragment(texts) {
-                    let wanted = tree.canonical();
+                for edit in run.iter().filter(|edit| edit.target_path.is_some()) {
+                    let target = self.node_at(edit.target_path.as_ref().expect("filtered"))?;
                     let position = self.nodes[context]
                         .children
                         .iter()
-                        .position(|&child| self.tree(child).canonical() == wanted)
-                        .ok_or_else(|| format!("no `{}` to delete", tree.original))?;
+                        .position(|&child| child == target)
+                        .ok_or_else(|| format!("no `{}` to delete", edit.text))?;
                     self.nodes[context].children.remove(position);
                 }
             }
             PlanLineEditKind::Replace => {
                 for edit in run {
-                    let olds = self
-                        .replaced_from
-                        .get_mut(&(context, edit.text.clone()))
-                        .ok_or_else(|| format!("no line for replace `{}`", edit.text))?;
-                    let (child, old) = self.nodes[context]
-                        .children
-                        .iter()
-                        .find_map(|&child| {
-                            let original = &self.nodes[child].original;
-                            let old = olds.iter().position(|old| old == original)?;
-                            Some((child, old))
-                        })
-                        .ok_or_else(|| format!("no line for replace `{}`", edit.text))?;
-                    olds.swap_remove(old);
+                    let target = edit
+                        .target_path
+                        .as_ref()
+                        .ok_or_else(|| format!("replace `{}` has no target_path", edit.text))?;
+                    let child = self.node_at(target)?;
                     let new = self
                         .fragment([&edit.text])
                         .pop()
@@ -247,7 +270,7 @@ fn check_plan(left: &str, right: &str, parse: Parse, options: &NormalizeOptions)
         "plan has findings\nleft:\n{left}\nright:\n{right}\nplan: {plan_json}"
     );
 
-    let mut applier = Applier::new(left, &diff, parse, options);
+    let mut applier = Applier::new(left, parse, options);
     if let Err(error) = applier.apply(&plan) {
         panic!("{error}\nleft:\n{left}\nright:\n{right}\nplan: {plan_json}");
     }
@@ -257,9 +280,19 @@ fn check_plan(left: &str, right: &str, parse: Parse, options: &NormalizeOptions)
         text: String::new(),
         children: trees(right, parse, options),
     };
+    // under `ordered` the order of siblings is part of the configuration.
+    let ordered = options.order_policy.default == OrderPolicy::Ordered
+        && options.order_policy.overrides.is_empty();
+    let shape = |tree: &Tree| {
+        if ordered {
+            tree.ordered()
+        } else {
+            tree.canonical()
+        }
+    };
     assert_eq!(
-        applied.canonical(),
-        expected.canonical(),
+        shape(&applied),
+        shape(&expected),
         "applying the plan to the left document does not give the right one\n\
          left:\n{left}\nright:\n{right}\nplan: {plan_json}"
     );

@@ -58,7 +58,15 @@
                 "type": "string",
                 "enum": ["insert", "delete", "replace"]
               },
-              "text": { "type": "string" }
+              "text": { "type": "string" },
+              "target_path": {
+                "$ref": "#/$defs/path",
+                "description": "for a delete or a replace, the left-side line it removes or rewrites; a delete without one belongs to the removed block before it"
+              },
+              "after_path": {
+                "$ref": "#/$defs/path",
+                "description": "for an insert, the left-side line it goes after: a child of the context, or the context itself when it comes first; an insert without one belongs to the inserted block before it"
+              }
             }
           }
         }

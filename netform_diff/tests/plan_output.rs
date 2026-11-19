@@ -88,6 +88,7 @@ fn preserves_first_seen_action_order_when_grouping_line_actions() {
                     text: "  description old".to_string(),
                     path: Path(vec![0, 1]),
                     span: line_anchor.span.clone(),
+                    after_path: None,
                 }],
                 new_lines: vec![DiffLine {
                     content_key: 2,
@@ -95,6 +96,7 @@ fn preserves_first_seen_action_order_when_grouping_line_actions() {
                     text: "  description new".to_string(),
                     path: Path(vec![0, 1]),
                     span: line_anchor.span.clone(),
+                    after_path: None,
                 }],
             },
             Edit::Replace {
@@ -113,6 +115,7 @@ fn preserves_first_seen_action_order_when_grouping_line_actions() {
                             start_byte: 100,
                             end_byte: 114,
                         },
+                        after_path: None,
                     },
                     DiffLine {
                         content_key: 31,
@@ -124,6 +127,7 @@ fn preserves_first_seen_action_order_when_grouping_line_actions() {
                             start_byte: 115,
                             end_byte: 149,
                         },
+                        after_path: None,
                     },
                 ],
                 new_lines: vec![
@@ -137,6 +141,7 @@ fn preserves_first_seen_action_order_when_grouping_line_actions() {
                             start_byte: 100,
                             end_byte: 114,
                         },
+                        after_path: None,
                     },
                     DiffLine {
                         content_key: 41,
@@ -148,6 +153,7 @@ fn preserves_first_seen_action_order_when_grouping_line_actions() {
                             start_byte: 115,
                             end_byte: 149,
                         },
+                        after_path: None,
                     },
                 ],
             },
@@ -162,4 +168,39 @@ fn preserves_first_seen_action_order_when_grouping_line_actions() {
         PlanAction::ApplyLineEditsUnderContext { .. }
     ));
     assert!(matches!(plan.actions[1], PlanAction::ReplaceBlock { .. }));
+}
+
+fn iosxe_plan(left: &str, right: &str) -> netform_diff::Plan {
+    let parse = netform_dialects::find("iosxe")
+        .expect("iosxe dialect")
+        .parse;
+    let diff = diff_documents(&parse(left), &parse(right), NormalizeOptions::default()).unwrap();
+    build_plan(&diff)
+}
+
+#[test]
+fn a_replace_names_the_line_it_replaces() {
+    let left = "ip access-list extended EDGE\n deny ip host 203.0.113.66 any\n permit tcp any any eq 443\n";
+    let first = "ip access-list extended EDGE\n permit ip any any\n permit tcp any any eq 443\n";
+    let second =
+        "ip access-list extended EDGE\n deny ip host 203.0.113.66 any\n permit ip any any\n";
+
+    assert_ne!(
+        iosxe_plan(left, first),
+        iosxe_plan(left, second),
+        "replacing different lines gives the same plan"
+    );
+}
+
+#[test]
+fn an_insert_says_where_it_goes() {
+    let left = "ip access-list extended EDGE\n permit tcp any any eq 443\n deny ip any any log\n";
+    let first = "ip access-list extended EDGE\n deny ip host 203.0.113.66 any\n permit tcp any any eq 443\n deny ip any any log\n";
+    let last = "ip access-list extended EDGE\n permit tcp any any eq 443\n deny ip any any log\n deny ip host 203.0.113.66 any\n";
+
+    assert_ne!(
+        iosxe_plan(left, first),
+        iosxe_plan(left, last),
+        "inserting at different positions gives the same plan"
+    );
 }

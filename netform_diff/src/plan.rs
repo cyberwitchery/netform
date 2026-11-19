@@ -310,21 +310,31 @@ impl ContextEdits<'_> {
         let line_edit = |kind: PlanLineEditKind, text: &str| PlanLineEdit {
             kind,
             text: text.to_string(),
+            target_path: None,
+            after_path: None,
         };
-        let deleted = self
-            .deleted
-            .iter()
-            .flatten()
-            .map(|line| line_edit(PlanLineEditKind::Delete, &line.text));
-        let replaced = self
-            .replaced
-            .iter()
-            .map(|(_, text)| line_edit(PlanLineEditKind::Replace, text));
-        let inserted = self
-            .inserted
-            .iter()
-            .flatten()
-            .map(|line| line_edit(PlanLineEditKind::Insert, &line.text));
+        let deleted = self.deleted.iter().flat_map(|fragment| {
+            fragment
+                .iter()
+                .enumerate()
+                .map(|(index, line)| PlanLineEdit {
+                    target_path: (index == 0).then(|| line.path.clone()),
+                    ..line_edit(PlanLineEditKind::Delete, &line.text)
+                })
+        });
+        let replaced = self.replaced.iter().map(|(left, text)| PlanLineEdit {
+            target_path: Some((*left).clone()),
+            ..line_edit(PlanLineEditKind::Replace, text)
+        });
+        let inserted = self.inserted.iter().flat_map(|fragment| {
+            fragment
+                .iter()
+                .enumerate()
+                .map(|(index, line)| PlanLineEdit {
+                    after_path: line.after_path.clone().filter(|_| index == 0),
+                    ..line_edit(PlanLineEditKind::Insert, &line.text)
+                })
+        });
         deleted.chain(replaced).chain(inserted).collect()
     }
 }
@@ -383,6 +393,7 @@ mod tests {
             text: text.to_string(),
             path: Path(path),
             span: span(line),
+            after_path: None,
         }
     }
 
