@@ -1312,33 +1312,22 @@ fn to_anchor(line: &DiffLine) -> EditAnchor {
     }
 }
 
-/// compact snapshot of the v-vector at a single Myers edit step.
+/// how many parts a range of edit steps is split into to find its path.
+const PARTS: isize = 16;
+
+/// the shortest edit script from `a` to `b` that Myers' greedy search finds,
+/// read off the furthest-reaching path back from the end.
 ///
-/// at step d, only diagonals -d, -d+2, ..., d are live (d+1 values).
-/// storing just those instead of cloning the full v-vector (length
-/// 2*(a+b)+3) reduces trace memory from O(D*(a+b)) to O(D^2).
-struct TraceSnapshot {
-    d: isize,
-    values: Vec<isize>,
-}
-
-impl TraceSnapshot {
-    fn capture(d: isize, v: &[isize], offset: isize) -> Self {
-        let count = (d + 1) as usize;
-        let mut values = Vec::with_capacity(count);
-        let mut k = -d;
-        while k <= d {
-            values.push(v[(k + offset) as usize]);
-            k += 2;
-        }
-        TraceSnapshot { d, values }
-    }
-
-    fn get(&self, k: isize) -> isize {
-        self.values[((k + self.d) / 2) as usize]
-    }
-}
-
+/// keeping each step's frontier for that backtrack took O(D^2) memory, which
+/// ran to gigabytes for a few thousand changed lines. the search instead keeps
+/// the frontier at a few checkpoints, along with the diagonal each one's paths
+/// crossed at the checkpoint before, so the path's diagonal at every
+/// checkpoint can be read back from the end. each range between two
+/// checkpoints is then searched again from its first frontier the same way,
+/// until every step is known. a step's frontier depends only on its
+/// neighbours one step earlier, so a range searches only the diagonals that
+/// can reach its end. this keeps memory at O(N+M), the work close to that of
+/// one search, and the script the same one the backtrack produced.
 pub(crate) fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
     if a.is_empty() {
         return Ok(vec![Op::Insert; b.len()]);
@@ -1347,100 +1336,253 @@ pub(crate) fn compute_ops(a: &[u64], b: &[u64]) -> Result<Vec<Op>, DiffError> {
         return Ok(vec![Op::Delete; a.len()]);
     }
 
-    let n = a.len() as isize;
-    let m = b.len() as isize;
-    let max = (a.len() + b.len()) as isize;
-    let offset = max + 1;
-    let v_len = (2 * max + 3) as usize;
-
-    // Myers SES trace over diagonals. this avoids the quadratic LCS matrix and
-    // remains deterministic for a fixed input/order.
-    let mut v = vec![0isize; v_len];
-    let mut trace: Vec<TraceSnapshot> = Vec::with_capacity((max + 1) as usize);
-
-    for d in 0..=max {
-        // diagonals are visited in steps of 2, so writes to v[idx] (diagonal k)
-        // never collide with reads from v[idx-1] (k-1) or v[idx+1] (k+1) —
-        // those diagonals have opposite parity and still hold their d-1 values.
-        // this lets us mutate v in-place and snapshot the live diagonals only,
-        // instead of cloning the entire v-vector into the trace.
-        let mut k = -d;
-        while k <= d {
-            let idx = (k + offset) as usize;
-            let take_down = k == -d || (k != d && v[idx - 1] < v[idx + 1]);
-            let mut x = if take_down {
-                v[idx + 1]
-            } else {
-                v[idx - 1] + 1
-            };
-            let mut y = x - k;
-
-            while x < n && y < m && a[x as usize] == b[y as usize] {
-                x += 1;
-                y += 1;
-            }
-            v[idx] = x;
-
-            if x >= n && y >= m {
-                trace.push(TraceSnapshot::capture(d, &v, offset));
-                return Ok(backtrack_ops(a, b, &trace));
-            }
-            k += 2;
-        }
-        trace.push(TraceSnapshot::capture(d, &v, offset));
-    }
-
-    Err(DiffError::SesNotConverged {
+    let not_converged = || DiffError::SesNotConverged {
         a_len: a.len(),
         b_len: b.len(),
-    })
+    };
+    let mut search = Search::new(a, b);
+    let start_x = search.snake(0, 0);
+    let start = Frontier {
+        d: 0,
+        low_k: 0,
+        values: vec![start_x],
+    };
+    let stride = (search.n + search.m + PARTS - 1) / PARTS;
+    let scan = search
+        .scan(&start, None, stride)
+        .ok_or_else(not_converged)?;
+
+    // the path's diagonal and furthest x after each edit step.
+    let steps = scan.end_d as usize + 1;
+    let mut path = EditPath {
+        k: vec![0; steps],
+        x: vec![0; steps],
+    };
+    path.x[0] = start_x;
+    path.k[steps - 1] = scan.end_k;
+    path.x[steps - 1] = search.n;
+    search
+        .resolve(&start, scan, &mut path)
+        .ok_or_else(not_converged)?;
+
+    let mut ops = Vec::with_capacity(a.len() + b.len());
+    ops.extend(std::iter::repeat_n(Op::Equal, start_x as usize));
+    for d in 1..steps {
+        let edit_end = if path.k[d - 1] == path.k[d] + 1 {
+            ops.push(Op::Insert);
+            path.x[d - 1]
+        } else {
+            ops.push(Op::Delete);
+            path.x[d - 1] + 1
+        };
+        ops.extend(std::iter::repeat_n(
+            Op::Equal,
+            (path.x[d] - edit_end) as usize,
+        ));
+    }
+    Ok(ops)
 }
 
-fn backtrack_ops(a: &[u64], b: &[u64], trace: &[TraceSnapshot]) -> Vec<Op> {
-    let mut x = a.len() as isize;
-    let mut y = b.len() as isize;
-    let mut rev_ops = Vec::new();
+/// values on diagonals `low_k`, `low_k + 2`, ... after edit step `d`.
+struct Frontier {
+    d: isize,
+    low_k: isize,
+    values: Vec<isize>,
+}
 
-    for d in (1..trace.len()).rev() {
-        let d = d as isize;
-        let k = x - y;
-        let prev = &trace[(d - 1) as usize];
-        let go_down = k == -d || (k != d && prev.get(k - 1) < prev.get(k + 1));
-        let prev_k = if go_down { k + 1 } else { k - 1 };
-        let prev_x = prev.get(prev_k);
-        let prev_y = prev_x - prev_k;
+impl Frontier {
+    fn get(&self, k: isize) -> isize {
+        self.values[((k - self.low_k) / 2) as usize]
+    }
+}
 
-        while x > prev_x && y > prev_y {
-            rev_ops.push(Op::Equal);
-            x -= 1;
-            y -= 1;
+/// the furthest x at a step, and the diagonal each of those paths crossed
+/// at the scan's previous checkpoint.
+struct Checkpoint {
+    reach: Frontier,
+    origins: Frontier,
+}
+
+/// a forward search over a range of edit steps.
+struct Scan {
+    end_d: isize,
+    end_k: isize,
+    /// the diagonal the path to the end crossed at the last checkpoint.
+    end_origin: isize,
+    checkpoints: Vec<Checkpoint>,
+}
+
+/// the diagonal and furthest x of the path after each edit step.
+struct EditPath {
+    k: Vec<isize>,
+    x: Vec<isize>,
+}
+
+struct Search<'a> {
+    a: &'a [u64],
+    b: &'a [u64],
+    n: isize,
+    m: isize,
+    offset: isize,
+    /// the furthest x on each diagonal, updated in place one step at a time.
+    v: Vec<isize>,
+    /// for each diagonal, the diagonal its path crossed at the last checkpoint.
+    origin: Vec<isize>,
+}
+
+impl<'a> Search<'a> {
+    fn new(a: &'a [u64], b: &'a [u64]) -> Self {
+        let max = (a.len() + b.len()) as isize;
+        let len = (2 * max + 3) as usize;
+        Search {
+            a,
+            b,
+            n: a.len() as isize,
+            m: b.len() as isize,
+            offset: max + 1,
+            v: vec![0; len],
+            origin: vec![0; len],
         }
+    }
 
-        if x == prev_x {
-            rev_ops.push(Op::Insert);
-            y -= 1;
+    fn idx(&self, k: isize) -> usize {
+        (k + self.offset) as usize
+    }
+
+    /// follow equal elements diagonally from (x, x - k).
+    fn snake(&self, mut x: isize, k: isize) -> isize {
+        let mut y = x - k;
+        while x < self.n && y < self.m && self.a[x as usize] == self.b[y as usize] {
+            x += 1;
+            y += 1;
+        }
+        x
+    }
+
+    /// whether a path on diagonal k that reached x is at (n, m).
+    fn finished(&self, x: isize, k: isize) -> bool {
+        x >= self.n && x - k >= self.m
+    }
+
+    /// advance diagonal k to edit step d from the values of step d - 1.
+    ///
+    /// diagonals of one step share a parity, so writing k never disturbs
+    /// k - 1 or k + 1, which still hold step d - 1.
+    fn advance(&mut self, d: isize, k: isize) {
+        let down = k == -d || (k != d && self.v[self.idx(k - 1)] < self.v[self.idx(k + 1)]);
+        let from = if down { k + 1 } else { k - 1 };
+        let x = if down {
+            self.v[self.idx(from)]
         } else {
-            rev_ops.push(Op::Delete);
-            x -= 1;
+            self.v[self.idx(from)] + 1
+        };
+        let x = self.snake(x, k);
+        let (i, j) = (self.idx(k), self.idx(from));
+        self.v[i] = x;
+        self.origin[i] = self.origin[j];
+    }
+
+    fn capture(&self, values: &[isize], d: isize, low: isize, high: isize) -> Frontier {
+        Frontier {
+            d,
+            low_k: low,
+            values: (low..=high)
+                .step_by(2)
+                .map(|k| values[self.idx(k)])
+                .collect(),
         }
     }
 
-    while x > 0 && y > 0 && a[(x - 1) as usize] == b[(y - 1) as usize] {
-        rev_ops.push(Op::Equal);
-        x -= 1;
-        y -= 1;
-    }
-    while x > 0 {
-        rev_ops.push(Op::Delete);
-        x -= 1;
-    }
-    while y > 0 {
-        rev_ops.push(Op::Insert);
-        y -= 1;
+    /// search forward from `start`, keeping a checkpoint every `stride` steps.
+    ///
+    /// with an `end`, only diagonals that can reach it are searched; without
+    /// one, the search runs until a path reaches (n, m).
+    fn scan(
+        &mut self,
+        start: &Frontier,
+        end: Option<(isize, isize)>,
+        stride: isize,
+    ) -> Option<Scan> {
+        for (i, x) in start.values.iter().enumerate() {
+            let k = start.low_k + 2 * i as isize;
+            let i = self.idx(k);
+            self.v[i] = *x;
+            self.origin[i] = k;
+        }
+        if end.is_none() && self.finished(start.values[0], start.low_k) {
+            return Some(Scan {
+                end_d: start.d,
+                end_k: start.low_k,
+                end_origin: start.low_k,
+                checkpoints: Vec::new(),
+            });
+        }
+
+        let mut checkpoints = Vec::new();
+        let last = end.map_or(self.n + self.m, |(d, _)| d);
+        for d in start.d + 1..=last {
+            let (low, high) = match end {
+                Some((end_d, end_k)) => {
+                    let spread = end_d - d;
+                    ((end_k - spread).max(-d), (end_k + spread).min(d))
+                }
+                None => (-d, d),
+            };
+            for k in (low..=high).step_by(2) {
+                self.advance(d, k);
+                let at_end = match end {
+                    Some((end_d, end_k)) => d == end_d && k == end_k,
+                    None => self.finished(self.v[self.idx(k)], k),
+                };
+                if at_end {
+                    return Some(Scan {
+                        end_d: d,
+                        end_k: k,
+                        end_origin: self.origin[self.idx(k)],
+                        checkpoints,
+                    });
+                }
+            }
+            if (d - start.d) % stride == 0 {
+                checkpoints.push(Checkpoint {
+                    reach: self.capture(&self.v, d, low, high),
+                    origins: self.capture(&self.origin, d, low, high),
+                });
+                for k in (low..=high).step_by(2) {
+                    let i = self.idx(k);
+                    self.origin[i] = k;
+                }
+            }
+        }
+        None
     }
 
-    rev_ops.reverse();
-    rev_ops
+    /// fill `path` for the steps a scan from `start` passed, given its end.
+    fn resolve(&mut self, start: &Frontier, scan: Scan, path: &mut EditPath) -> Option<()> {
+        let mut k = scan.end_origin;
+        for checkpoint in scan.checkpoints.iter().rev() {
+            let d = checkpoint.reach.d as usize;
+            path.k[d] = k;
+            path.x[d] = checkpoint.reach.get(k);
+            k = checkpoint.origins.get(k);
+        }
+
+        let mut from = start;
+        let bounds = scan.checkpoints.iter().map(|c| Some(&c.reach));
+        for to in bounds.chain(std::iter::once(None)) {
+            let to_d = to.map_or(scan.end_d, |frontier| frontier.d);
+            let len = to_d - from.d;
+            if len >= 2 {
+                let end = (to_d, path.k[to_d as usize]);
+                let part = self.scan(from, Some(end), (len + PARTS - 1) / PARTS)?;
+                self.resolve(from, part, path)?;
+            }
+            if let Some(frontier) = to {
+                from = frontier;
+            }
+        }
+        Some(())
+    }
 }
 
 #[cfg(test)]
@@ -1546,6 +1688,47 @@ mod tests {
         }
         assert_eq!(ai, a.len());
         assert_eq!(bi, b.len());
+    }
+
+    #[test]
+    fn compute_ops_is_a_shortest_script_across_many_parts() {
+        // long enough to split into parts more than once, repetitive enough
+        // to leave many equally short scripts.
+        let a: Vec<u64> = (0..700u64).map(|i| (i * 7 + i / 13) % 5).collect();
+        let b: Vec<u64> = (0..650u64).map(|i| (i * 3 + i / 11) % 5).collect();
+        let ops = compute_ops(&a, &b).unwrap();
+
+        let (mut ai, mut bi, mut edits) = (0, 0, 0);
+        for op in &ops {
+            match op {
+                Op::Equal => {
+                    assert_eq!(a[ai], b[bi]);
+                    ai += 1;
+                    bi += 1;
+                }
+                Op::Delete => {
+                    ai += 1;
+                    edits += 1;
+                }
+                Op::Insert => {
+                    bi += 1;
+                    edits += 1;
+                }
+            }
+        }
+        assert_eq!((ai, bi), (a.len(), b.len()));
+
+        let mut lcs = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+        for i in 0..a.len() {
+            for j in 0..b.len() {
+                lcs[i + 1][j + 1] = if a[i] == b[j] {
+                    lcs[i][j] + 1
+                } else {
+                    lcs[i][j + 1].max(lcs[i + 1][j])
+                };
+            }
+        }
+        assert_eq!(edits, a.len() + b.len() - 2 * lcs[a.len()][b.len()]);
     }
 
     #[test]
