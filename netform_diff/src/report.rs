@@ -334,17 +334,27 @@ impl LineRenderer for ColoredRenderer {
 /// markdown openers that are significant anywhere in a line, not just at its start.
 const INLINE_MARKDOWN: &[char] = &['\\', '`', '*', '_', '[', ']', '<', '&', '~'];
 
-/// backslash-escape the inline markdown syntax in a run of configuration text.
+/// characters CommonMark reads as a line ending. a line's text can still hold
+/// a lone CR, which would end the list item it is written into.
+const LINE_ENDINGS: &[char] = &['\r', '\n'];
+
+/// backslash-escape the inline markdown syntax in a run of configuration text,
+/// and write line endings as character references so they stay text.
 fn escape_markdown(text: &str) -> Cow<'_, str> {
-    if !text.contains(INLINE_MARKDOWN) {
+    if !text.contains(INLINE_MARKDOWN) && !text.contains(LINE_ENDINGS) {
         return Cow::Borrowed(text);
     }
     let mut out = String::with_capacity(text.len() + 8);
     for c in text.chars() {
-        if INLINE_MARKDOWN.contains(&c) {
-            out.push('\\');
+        match c {
+            '\r' => out.push_str("&#13;"),
+            '\n' => out.push_str("&#10;"),
+            c if INLINE_MARKDOWN.contains(&c) => {
+                out.push('\\');
+                out.push(c);
+            }
+            c => out.push(c),
         }
-        out.push(c);
     }
     Cow::Owned(out)
 }
@@ -352,11 +362,15 @@ fn escape_markdown(text: &str) -> Cow<'_, str> {
 /// wrap text in a code span, widening the backtick fence past the longest run
 /// inside it and padding when the content would otherwise merge with the fence.
 ///
+/// a code span shows a line ending as a space, so line endings are written as
+/// spaces: a raw one would end the block the span sits in.
+///
 /// empty text yields an empty string: CommonMark has no empty code span.
 fn code_span(text: &str) -> String {
     if text.is_empty() {
         return String::new();
     }
+    let text = text.replace(LINE_ENDINGS, " ");
     let longest_run = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
     let fence = "`".repeat(longest_run + 1);
     let pad = text.starts_with('`')
@@ -981,6 +995,21 @@ mod tests {
 
         assert!(report.contains("   - `-` L1: set mtu`  `1500"));
         assert!(report.contains("   - `+` L1: set mtu` `1500"));
+    }
+
+    #[test]
+    fn markdown_keeps_a_lone_cr_inside_its_list_item() {
+        let diff = Diff {
+            edits: vec![
+                insert_edit(&["username x\r\r## Review"]),
+                replace_edit(&["set mtu\r1500"], &["set mtu 1500"]),
+            ],
+            ..Default::default()
+        };
+        let report = format_markdown_report(&diff, "a\r# b", "c", 10);
+
+        assert!(!report.contains('\r'), "raw CR in report: {report:?}");
+        assert!(report.contains(r"   - `+` L1: username x&#13;&#13;## Review"));
     }
 
     #[test]
