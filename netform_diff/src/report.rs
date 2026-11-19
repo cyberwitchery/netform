@@ -50,13 +50,33 @@ impl Palette {
     }
 }
 
+/// show the control characters in configuration text or a label as `\u{..}`
+/// escapes, so a report never carries a byte that moves the cursor, erases
+/// a row or starts a terminal escape sequence. tab is kept as it is.
+fn visible(text: &str) -> Cow<'_, str> {
+    let hidden = |c: char| c.is_control() && c != '\t';
+    if !text.contains(hidden) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        if hidden(c) {
+            out.extend(c.escape_unicode());
+        } else {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
+}
+
 /// format a markdown-oriented human report from a diff result.
 ///
 /// `max_lines_shown` controls how many lines are printed per side of each edit
 /// before the output is truncated with an "and N more" message.
 ///
 /// configuration text and both labels are escaped, so markdown syntax in a
-/// config renders as the literal text the device holds.
+/// config renders as the literal text the device holds, and control
+/// characters other than tab are shown as `\u{..}` escapes.
 pub fn format_markdown_report(
     diff: &Diff,
     left_label: &str,
@@ -65,8 +85,8 @@ pub fn format_markdown_report(
 ) -> String {
     let mut out = String::new();
     out.push_str("# Config Diff Report\n\n");
-    writeln!(out, "- Left: {}", code_span(left_label)).unwrap();
-    writeln!(out, "- Right: {}\n", code_span(right_label)).unwrap();
+    writeln!(out, "- Left: {}", code_span(&visible(left_label))).unwrap();
+    writeln!(out, "- Right: {}\n", code_span(&visible(right_label))).unwrap();
 
     out.push_str("## Stats\n\n");
     writeln!(
@@ -112,14 +132,19 @@ pub fn format_markdown_report(
                 writeln!(
                     out,
                     "- {} [{}] (line {}): {}",
-                    finding.level, finding.code, span.line, finding.message
+                    finding.level,
+                    finding.code,
+                    span.line,
+                    visible(&finding.message)
                 )
                 .unwrap();
             } else {
                 writeln!(
                     out,
                     "- {} [{}]: {}",
-                    finding.level, finding.code, finding.message
+                    finding.level,
+                    finding.code,
+                    visible(&finding.message)
                 )
                 .unwrap();
             }
@@ -152,7 +177,10 @@ pub fn format_unified_diff(
 ///
 /// `color` alone decides: nothing here consults the terminal or the
 /// environment, and [`ColorChoice::Never`] output is byte-for-byte the
-/// [`ColorChoice::Always`] output with every escape removed.
+/// [`ColorChoice::Always`] output with every escape removed. control
+/// characters other than tab in configuration text, findings and labels are
+/// shown as `\u{..}` escapes under either choice, so the only escape sequences
+/// in a report are its own styling.
 ///
 /// the styled roles are:
 /// - `---`/`+++` file headers: bold
@@ -180,13 +208,13 @@ pub fn format_unified_diff_with_color(
     writeln!(
         out,
         "{}",
-        format_args!("--- {left_label}").style(palette.header)
+        format_args!("--- {}", visible(left_label)).style(palette.header)
     )
     .unwrap();
     writeln!(
         out,
         "{}",
-        format_args!("+++ {right_label}").style(palette.header)
+        format_args!("+++ {}", visible(right_label)).style(palette.header)
     )
     .unwrap();
 
@@ -251,8 +279,13 @@ pub fn format_unified_diff_with_color(
             writeln!(
                 out,
                 "{}",
-                format_args!("{} [{}]: {}", finding.level, finding.code, finding.message)
-                    .style(palette.finding)
+                format_args!(
+                    "{} [{}]: {}",
+                    finding.level,
+                    finding.code,
+                    visible(&finding.message)
+                )
+                .style(palette.finding)
             )
             .unwrap();
         }
@@ -305,7 +338,7 @@ impl LineRenderer for ColoredRenderer {
         write!(out, "{}", format_args!("{marker} ").style(plain)).unwrap();
         for span in spans {
             let style = if span.changed { changed } else { plain };
-            write!(out, "{}", span.text.style(style)).unwrap();
+            write!(out, "{}", visible(span.text).style(style)).unwrap();
         }
         writeln!(out).unwrap();
     }
@@ -315,7 +348,7 @@ impl LineRenderer for ColoredRenderer {
         writeln!(
             out,
             "{}",
-            format_args!("{marker} {}", line.text).style(plain)
+            format_args!("{marker} {}", visible(&line.text)).style(plain)
         )
         .unwrap();
     }
@@ -397,10 +430,11 @@ impl LineRenderer for MarkdownRenderer {
     fn inline_line(&self, out: &mut String, side: Side, line: &DiffLine, spans: &[TokenSpan]) {
         write!(out, "{} L{}: ", self.bullet(side), line.span.line).unwrap();
         for span in spans {
-            let text = escape_markdown(span.text);
-            match (span.changed, span.text.trim().is_empty()) {
+            let shown = visible(span.text);
+            let text = escape_markdown(&shown);
+            match (span.changed, shown.trim().is_empty()) {
                 // `**` around whitespace is not emphasis under CommonMark's flanking rules.
-                (true, true) => write!(out, "{}", code_span(span.text)),
+                (true, true) => write!(out, "{}", code_span(&shown)),
                 (true, false) => write!(out, "**{text}**"),
                 (false, _) => write!(out, "{text}"),
             }
@@ -414,7 +448,7 @@ impl LineRenderer for MarkdownRenderer {
             "{} L{}: {}",
             self.bullet(side),
             line.span.line,
-            escape_markdown(&line.text)
+            escape_markdown(&visible(&line.text))
         )
         .unwrap();
     }
@@ -1059,6 +1093,65 @@ mod tests {
         assert!(result.contains("+++ *c.cfg"));
         assert!(result.contains("+ banner motd *** <b>halt</b> ***"));
         assert!(result.contains("- set mtu  1500"));
+    }
+
+    /// a config line that tries to erase the rows above it and draw a decoy.
+    const CONTROL_PAYLOAD: &str = "description x\x1b[2K\x1b[1A\r\x07\x7f\u{9b}2K\tend";
+
+    fn control_diff() -> Diff {
+        Diff {
+            edits: vec![
+                insert_edit(&[CONTROL_PAYLOAD]),
+                replace_edit(&["description x"], &[CONTROL_PAYLOAD]),
+                replace_edit(&["a b"], &["a\rb"]),
+            ],
+            findings: vec![make_finding(
+                FindingLevel::Warning,
+                "diff_unreliable_region",
+                "block `x\x1b[1A` differs",
+            )],
+            ..Default::default()
+        }
+    }
+
+    /// no control character but tab survives from configuration text or labels.
+    fn assert_no_raw_controls(report: &str) {
+        for c in report.chars() {
+            assert!(
+                !c.is_control() || c == '\n' || c == '\t',
+                "raw control {c:?} in report: {report:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unified_shows_control_characters_in_config_text_as_escapes() {
+        let diff = control_diff();
+        let result = plain(&diff, "a\x1b[2J.cfg", "b.cfg", 10);
+
+        assert_no_raw_controls(&result);
+        assert!(
+            result
+                .contains("+ description x\\u{1b}[2K\\u{1b}[1A\\u{d}\\u{7}\\u{7f}\\u{9b}2K\tend\n")
+        );
+        assert!(result.contains("+ a\\u{d}b\n"));
+        assert!(result.contains("--- a\\u{1b}[2J.cfg\n"));
+        assert!(result.contains("block `x\\u{1b}[1A` differs"));
+
+        let colored =
+            format_unified_diff_with_color(&diff, "a\x1b[2J.cfg", "b.cfg", 10, ColorChoice::Always);
+        assert_eq!(strip_ansi(&colored), result);
+    }
+
+    #[test]
+    fn markdown_shows_control_characters_in_config_text_as_escapes() {
+        let diff = control_diff();
+        let report = format_markdown_report(&diff, "a\x1b[2J.cfg", "b.cfg", 10);
+
+        assert_no_raw_controls(&report);
+        assert!(report.contains("- Left: `a\\u{1b}[2J.cfg`"));
+        assert!(report.contains("L1: description x\\\\u{1b}\\[2K\\\\u{1b}\\[1A\\\\u{d}"));
+        assert!(report.contains("- warning [diff_unreliable_region]: block `x\\u{1b}[1A` differs"));
     }
 
     /// a diff that reaches every styled role, including both truncation markers.
