@@ -10,7 +10,48 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Delete", "Delete", "Insert", "Insert"],
+    "edits": [
+      {
+        "type": "Delete",
+        "at_key": 3179545740801342828,
+        "left_anchor": {"path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 14}},
+        "right_anchor": null,
+        "lines": [
+          {"content_key": 16958469931586995299, "occurrence_key": 3179545740801342828, "text": "interface Eth1", "path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 14}},
+          {"content_key": 16820188710686467839, "occurrence_key": 2096418710422549068, "text": " mtu 9000", "path": [0, 0], "span": {"line": 2, "start_byte": 15, "end_byte": 24}}
+        ]
+      },
+      {
+        "type": "Delete",
+        "at_key": 3771629533702315473,
+        "left_anchor": {"path": [2], "span": {"line": 5, "start_byte": 47, "end_byte": 61}},
+        "right_anchor": null,
+        "lines": [
+          {"content_key": 12199387144618243202, "occurrence_key": 3771629533702315473, "text": "interface Eth3", "path": [2], "span": {"line": 5, "start_byte": 47, "end_byte": 61}},
+          {"content_key": 9994147798929324230, "occurrence_key": 12075306996371555631, "text": " mtu 1500", "path": [2, 0], "span": {"line": 6, "start_byte": 62, "end_byte": 71}}
+        ]
+      },
+      {
+        "type": "Insert",
+        "at_key": 1565826983565814287,
+        "left_anchor": null,
+        "right_anchor": {"path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 14}},
+        "lines": [
+          {"content_key": 6874255984384703843, "occurrence_key": 1565826983565814287, "text": "interface Eth2", "path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 14}},
+          {"content_key": 9078938366065235165, "occurrence_key": 14846310889950302663, "text": " mtu 9000", "path": [0, 0], "span": {"line": 2, "start_byte": 15, "end_byte": 24}}
+        ]
+      },
+      {
+        "type": "Insert",
+        "at_key": 11353740137540179497,
+        "left_anchor": null,
+        "right_anchor": {"path": [2], "span": {"line": 5, "start_byte": 47, "end_byte": 61}},
+        "lines": [
+          {"content_key": 5348121559642915448, "occurrence_key": 11353740137540179497, "text": "interface Eth4", "path": [2], "span": {"line": 5, "start_byte": 47, "end_byte": 61}},
+          {"content_key": 17975743912274940557, "occurrence_key": 2307379303448938193, "text": " mtu 1500", "path": [2, 0], "span": {"line": 6, "start_byte": 62, "end_byte": 71}}
+        ]
+      }
+    ],
     "finding_codes": [
       "diff_unreliable_region",
       "diff_unreliable_region"

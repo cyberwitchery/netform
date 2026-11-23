@@ -9,7 +9,26 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Delete", "Insert"],
+    "edits": [
+      {
+        "type": "Delete",
+        "at_key": 46236698835512757,
+        "left_anchor": {"path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 15}},
+        "right_anchor": null,
+        "lines": [
+          {"content_key": 4679922851398295627, "occurrence_key": 46236698835512757, "text": "hostname edge-1", "path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 15}}
+        ]
+      },
+      {
+        "type": "Insert",
+        "at_key": 18350863150498378430,
+        "left_anchor": null,
+        "right_anchor": {"path": [1], "span": {"line": 2, "start_byte": 27, "end_byte": 42}},
+        "lines": [
+          {"content_key": 2298283199736738849, "occurrence_key": 18350863150498378430, "text": "hostname edge-2", "path": [1], "span": {"line": 2, "start_byte": 27, "end_byte": 42}}
+        ]
+      }
+    ],
     "finding_codes": [
       "diff_unreliable_region",
       "diff_unreliable_region"

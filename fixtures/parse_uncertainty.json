@@ -9,7 +9,7 @@
   },
   "expected": {
     "has_changes": false,
-    "edit_types": [],
+    "edits": [],
     "finding_codes": [
       "unknown_unparsed_construct",
       "unknown_unparsed_construct"

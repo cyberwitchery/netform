@@ -10,7 +10,21 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Replace"],
+    "edits": [
+      {
+        "type": "Replace",
+        "old_at_key": 10137412232556432782,
+        "new_at_key": 10137412232556432782,
+        "left_anchor": {"path": [0, 0, 2], "span": {"line": 5, "start_byte": 118, "end_byte": 157}},
+        "right_anchor": {"path": [0, 0, 2], "span": {"line": 5, "start_byte": 118, "end_byte": 157}},
+        "old_lines": [
+          {"content_key": 6499685182484393779, "occurrence_key": 10137412232556432782, "text": "        set description \"LAN interface\"", "path": [0, 0, 2], "span": {"line": 5, "start_byte": 118, "end_byte": 157}}
+        ],
+        "new_lines": [
+          {"content_key": 6499685182484393779, "occurrence_key": 10137412232556432782, "text": "        set description \"WAN interface\"", "path": [0, 0, 2], "span": {"line": 5, "start_byte": 118, "end_byte": 157}}
+        ]
+      }
+    ],
     "finding_codes": []
   }
 }

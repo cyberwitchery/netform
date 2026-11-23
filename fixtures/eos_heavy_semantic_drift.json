@@ -10,7 +10,26 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Insert", "Delete"],
+    "edits": [
+      {
+        "type": "Insert",
+        "at_key": 13627577667760107867,
+        "left_anchor": {"path": [1], "span": {"line": 2, "start_byte": 17, "end_byte": 36}},
+        "right_anchor": {"path": [1, 3], "span": {"line": 6, "start_byte": 106, "end_byte": 117}},
+        "lines": [
+          {"content_key": 12599976607370307300, "occurrence_key": 13627577667760107867, "text": "   shutdown", "path": [1, 3], "span": {"line": 6, "start_byte": 106, "end_byte": 117}}
+        ]
+      },
+      {
+        "type": "Delete",
+        "at_key": 13381872638463718816,
+        "left_anchor": {"path": [1, 3], "span": {"line": 6, "start_byte": 106, "end_byte": 120}},
+        "right_anchor": null,
+        "lines": [
+          {"content_key": 15515857770836915831, "occurrence_key": 13381872638463718816, "text": "   no shutdown", "path": [1, 3], "span": {"line": 6, "start_byte": 106, "end_byte": 120}}
+        ]
+      }
+    ],
     "finding_codes": []
   }
 }

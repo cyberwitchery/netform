@@ -10,7 +10,21 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Replace"],
+    "edits": [
+      {
+        "type": "Replace",
+        "old_at_key": 12827200930988335652,
+        "new_at_key": 12827200930988335652,
+        "left_anchor": {"path": [2, 0, 4], "span": {"line": 23, "start_byte": 521, "end_byte": 546}},
+        "right_anchor": {"path": [2, 0, 4], "span": {"line": 23, "start_byte": 521, "end_byte": 544}},
+        "old_lines": [
+          {"content_key": 16518186873827870804, "occurrence_key": 12827200930988335652, "text": "        set action accept", "path": [2, 0, 4], "span": {"line": 23, "start_byte": 521, "end_byte": 546}}
+        ],
+        "new_lines": [
+          {"content_key": 16518186873827870804, "occurrence_key": 12827200930988335652, "text": "        set action deny", "path": [2, 0, 4], "span": {"line": 23, "start_byte": 521, "end_byte": 544}}
+        ]
+      }
+    ],
     "finding_codes": []
   }
 }

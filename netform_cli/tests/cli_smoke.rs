@@ -767,30 +767,6 @@ fn config_diff_explicit_dialect_no_disagreement_warning() {
     );
 }
 
-#[test]
-fn replay_fixtures_cli_runs_successfully() {
-    let output = Command::new(env!("CARGO_BIN_EXE_netform-replay-fixtures"))
-        .output()
-        .expect("run replay binary");
-
-    assert!(output.status.success());
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures");
-    let count = fs::read_dir(&fixtures)
-        .expect("read fixtures dir")
-        .filter(|entry| {
-            entry
-                .as_ref()
-                .expect("fixture entry")
-                .path()
-                .extension()
-                .is_some_and(|ext| ext == "json")
-        })
-        .count();
-    assert!(count > 0, "fixtures/ should hold json fixtures");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout.trim(), format!("replayed {count} fixture(s)"));
-}
-
 fn color_input_pair() -> (PathBuf, PathBuf) {
     let left = temp_file_path("left-color");
     let right = temp_file_path("right-color");

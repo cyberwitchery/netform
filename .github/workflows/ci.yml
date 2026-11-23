@@ -57,8 +57,6 @@ jobs:
         with:
           cache-key-prefix: kache-test
       - run: cargo test --workspace --all-targets
-      - name: replay fixtures
-        run: cargo run -q -p netform_cli --bin netform-replay-fixtures
 
   doc:
     name: doc

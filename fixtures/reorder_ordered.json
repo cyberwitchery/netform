@@ -9,7 +9,26 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Delete", "Insert"],
+    "edits": [
+      {
+        "type": "Delete",
+        "at_key": 7480331559785332303,
+        "left_anchor": {"path": [0, 0], "span": {"line": 2, "start_byte": 20, "end_byte": 40}},
+        "right_anchor": null,
+        "lines": [
+          {"content_key": 12904662634310727517, "occurrence_key": 7480331559785332303, "text": "  description uplink", "path": [0, 0], "span": {"line": 2, "start_byte": 20, "end_byte": 40}}
+        ]
+      },
+      {
+        "type": "Insert",
+        "at_key": 7480331559785332303,
+        "left_anchor": {"path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 19}},
+        "right_anchor": {"path": [0, 1], "span": {"line": 3, "start_byte": 31, "end_byte": 51}},
+        "lines": [
+          {"content_key": 12904662634310727517, "occurrence_key": 7480331559785332303, "text": "  description uplink", "path": [0, 1], "span": {"line": 3, "start_byte": 31, "end_byte": 51}}
+        ]
+      }
+    ],
     "finding_codes": []
   }
 }

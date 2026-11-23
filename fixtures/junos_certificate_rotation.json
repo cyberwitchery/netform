@@ -10,7 +10,17 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Insert"],
+    "edits": [
+      {
+        "type": "Insert",
+        "at_key": 2871024278836643958,
+        "left_anchor": {"path": [0, 0, 0, 0], "span": {"line": 4, "start_byte": 46, "end_byte": 68}},
+        "right_anchor": {"path": [0, 0, 0, 0, 3], "span": {"line": 8, "start_byte": 188, "end_byte": 216}},
+        "lines": [
+          {"content_key": 567366631461842024, "occurrence_key": 2871024278836643958, "text": "QklTM1RyYWlsaW5nQmxvY2s9PQ==", "path": [0, 0, 0, 0, 3], "span": {"line": 8, "start_byte": 188, "end_byte": 216}}
+        ]
+      }
+    ],
     "finding_codes": []
   }
 }

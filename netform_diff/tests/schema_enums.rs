@@ -136,7 +136,7 @@ fn finding_codes_match_the_codes_each_output_emits() {
 }
 
 #[test]
-fn fixture_edit_types_match_the_edit_tags() {
+fn edit_types_match_the_edit_tags() {
     let edits = [
         Edit::Insert {
             at_key: None,
@@ -165,13 +165,23 @@ fn fixture_edit_types_match_the_edit_tags() {
         }
     }
 
-    assert_eq!(
-        schema_enum(
-            "fixture.schema.json",
-            "/properties/expected/properties/edit_types/items/enum"
-        ),
-        serde_names(&edits)
-    );
+    let diff = schema("diff.schema.json");
+    let tags = diff["$defs"]["edit"]["oneOf"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|variant| {
+            let pointer = variant["$ref"]
+                .as_str()
+                .expect("$ref")
+                .trim_start_matches('#');
+            diff.pointer(&format!("{pointer}/properties/type/const"))
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("{pointer} has no type const"))
+                .to_string()
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(tags, serde_names(&edits));
 }
 
 #[test]

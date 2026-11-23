@@ -25,13 +25,13 @@
     "order_policy": { "$ref": "order-policy.schema.json" },
     "expected": {
       "type": "object",
-      "required": ["has_changes", "edit_types", "finding_codes"],
+      "required": ["has_changes", "edits", "finding_codes"],
       "additionalProperties": false,
       "properties": {
         "has_changes": { "type": "boolean" },
-        "edit_types": {
+        "edits": {
           "type": "array",
-          "items": { "type": "string", "enum": ["Insert", "Delete", "Replace"] }
+          "items": { "$ref": "diff.schema.json#/$defs/edit" }
         },
         "finding_codes": {
           "type": "array",

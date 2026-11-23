@@ -10,8 +10,20 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": [
-      "Replace"
+    "edits": [
+      {
+        "type": "Replace",
+        "old_at_key": 4149621759126719356,
+        "new_at_key": 17253995748819490355,
+        "left_anchor": {"path": [0, 0], "span": {"line": 2, "start_byte": 25, "end_byte": 54}},
+        "right_anchor": {"path": [0, 0], "span": {"line": 2, "start_byte": 25, "end_byte": 53}},
+        "old_lines": [
+          {"content_key": 2590081151997374123, "occurrence_key": 4149621759126719356, "text": "  set community NO-EXPORT-SET", "path": [0, 0], "span": {"line": 2, "start_byte": 25, "end_byte": 54}}
+        ],
+        "new_lines": [
+          {"content_key": 13008742107648452209, "occurrence_key": 17253995748819490355, "text": "  set community CUSTOMER-SET", "path": [0, 0], "span": {"line": 2, "start_byte": 25, "end_byte": 53}}
+        ]
+      }
     ],
     "finding_codes": []
   }
