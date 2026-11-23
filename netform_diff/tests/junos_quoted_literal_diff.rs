@@ -1,6 +1,6 @@
 //! a Junos certificate rotation is a value change inside the block that holds
-//! it, not structural churn across the file (see `junos_literal_region` in
-//! netform_dialect_junos).
+//! it, not structural churn across the file (see
+//! `netform_dialects::junos::literal_region`).
 
 use netform_dialects::junos::parse;
 use netform_diff::{

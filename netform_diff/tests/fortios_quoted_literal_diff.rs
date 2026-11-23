@@ -1,6 +1,6 @@
 //! a FortiOS certificate rotation is a value change inside one `edit` entry,
-//! not structural churn across the file (see `fortios_literal_region` in
-//! netform_dialect_fortios).
+//! not structural churn across the file (see
+//! `netform_dialects::fortios::literal_region`).
 
 use netform_dialects::fortios::parse;
 use netform_diff::{
