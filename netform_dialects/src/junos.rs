@@ -72,6 +72,14 @@ impl Dialect for JunosDialect {
     fn comment_region(&self, raw: &str) -> Option<LiteralTerminator> {
         comment_region(raw)
     }
+
+    fn quotes_delimit_values(&self) -> bool {
+        true
+    }
+
+    fn annotations(&self) -> &[&str] {
+        ANNOTATIONS
+    }
 }
 
 /// recognize a Junos line whose double-quoted value is still open at the end of
@@ -128,6 +136,9 @@ fn classify_junos_trivia(raw: &str) -> TriviaKind {
 
 const PUNCTUATION: &[char] = &['{', '}', ';'];
 
+/// the marks Junos puts before a statement without changing which statement it is.
+const ANNOTATIONS: &[&str] = &["inactive:", "protect:"];
+
 /// the well-known Junos top-level stanza names, each keyed by its own name.
 pub(crate) const STANZA_NAMES: &[&str] = &[
     "interfaces",
@@ -152,7 +163,7 @@ fn junos_key_hint(parsed: Option<&ParsedLineParts>) -> Option<String> {
     let mut tokens = std::iter::once(&parsed.head)
         .chain(&parsed.args)
         .map(String::as_str)
-        .skip_while(|token| matches!(*token, "inactive:" | "protect:"));
+        .skip_while(|token| ANNOTATIONS.contains(token));
     let head = tokens.next()?;
     let args = tokens.collect::<Vec<_>>();
 

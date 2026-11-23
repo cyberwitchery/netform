@@ -1,5 +1,5 @@
 //! a FortiOS multi-line quoted value is opaque free text, not configuration
-//! (see `fortios_literal_region`).
+//! (see `netform_dialects::fortios::literal_region`).
 
 use netform_dialects::fortios::parse;
 use netform_ir::{Document, Node, NodeId, TriviaKind};

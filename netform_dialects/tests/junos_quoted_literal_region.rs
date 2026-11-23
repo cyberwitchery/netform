@@ -1,5 +1,5 @@
 //! a Junos multi-line quoted value is opaque text, so its body neither opens
-//! nor closes blocks (see `junos_literal_region`).
+//! nor closes blocks (see `netform_dialects::junos::literal_region`).
 
 use netform_dialects::junos::parse;
 use netform_ir::{Document, LineNode, Node, NodeId, TriviaKind};
