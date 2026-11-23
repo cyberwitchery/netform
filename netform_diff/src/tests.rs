@@ -1452,3 +1452,15 @@ fn inserts_into_a_block_only_the_right_side_has_get_no_left_anchor() {
         ]
     );
 }
+
+#[test]
+fn a_document_serialized_before_dialect_properties_fails_to_load() {
+    let json = serde_json::to_value(parse_junos("system {\n    host-name r1;\n}\n")).unwrap();
+    for field in ["quotes_delimit_values", "annotations"] {
+        let mut old = json.clone();
+        old["metadata"].as_object_mut().unwrap().remove(field);
+
+        let err = serde_json::from_value::<netform_ir::Document>(old).unwrap_err();
+        assert_eq!(err.to_string(), format!("missing field `{field}`"));
+    }
+}

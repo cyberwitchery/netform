@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use netform_ir::{BlockNode, DialectHint, Document, LineNode, Node, NodeId, Path, TriviaKind};
+use netform_ir::{BlockNode, Document, LineNode, Node, NodeId, Path, TriviaKind};
 use xxhash_rust::xxh3::Xxh3Default;
 
 use crate::model::{
@@ -25,12 +25,12 @@ pub(crate) struct Cut {
 }
 
 #[derive(Debug, Default)]
-struct KeyAllocator {
+struct KeyAllocator<'d> {
     counters: HashMap<u64, u64>,
-    annotations: &'static [&'static str],
+    annotations: &'d [String],
 }
 
-impl KeyAllocator {
+impl KeyAllocator<'_> {
     fn next_keys(
         &mut self,
         parent_signature: u64,
@@ -73,7 +73,7 @@ pub(crate) fn flatten_document(
 ) -> (ComparisonView, Vec<Cut>) {
     let mut out = Flattened::default();
     let mut keys = KeyAllocator {
-        annotations: annotations(doc),
+        annotations: &doc.metadata.annotations,
         ..KeyAllocator::default()
     };
     let mut path = Vec::new();
@@ -109,7 +109,7 @@ struct Flattened {
 /// compute keys for a line and push a [`ComparisonLine`] onto the output.
 fn push_comparison_line(
     out: &mut Vec<ComparisonLine>,
-    keys: &mut KeyAllocator,
+    keys: &mut KeyAllocator<'_>,
     parent_signature: u64,
     kind: KeyKind,
     line: &netform_ir::LineNode,
@@ -150,13 +150,13 @@ fn flatten_node(
     parent_signature: u64,
     path: &mut Vec<usize>,
     out: &mut Flattened,
-    keys: &mut KeyAllocator,
+    keys: &mut KeyAllocator<'_>,
     options: &NormalizeOptions,
 ) {
     let Some(node) = doc.node(node_id) else {
         return;
     };
-    let quoted_values = quotes_delimit_values(doc);
+    let quoted_values = doc.metadata.quotes_delimit_values;
 
     match node {
         Node::Line(line) => {
@@ -275,7 +275,7 @@ fn hidden_hash<'d>(
         ordered: bool,
     }
 
-    let quoted_values = quotes_delimit_values(doc);
+    let quoted_values = doc.metadata.quotes_delimit_values;
     let normalize =
         |line: &LineNode| normalize_for_compare(&line.raw, line.trivia, quoted_values, options);
     let mut path = Path(path.to_vec());
@@ -380,31 +380,14 @@ fn update_field(hasher: &mut Xxh3Default, text: Option<&str>) {
     }
 }
 
-/// FortiOS and Junos read `"…"` as a value; elsewhere a quote is plain text.
-fn quotes_delimit_values(doc: &Document) -> bool {
-    match &doc.metadata.dialect_hint {
-        DialectHint::Named(name) => matches!(name.as_str(), "fortios" | "junos"),
-        DialectHint::Generic | DialectHint::Unknown => false,
-    }
-}
-
-/// leading tokens that flag a statement without changing which statement it is.
-fn annotations(doc: &Document) -> &'static [&'static str] {
-    match &doc.metadata.dialect_hint {
-        DialectHint::Named(name) if name == "junos" => &["inactive:", "protect:"],
-        DialectHint::Named(_) | DialectHint::Generic | DialectHint::Unknown => &[],
-    }
-}
-
 /// `text` with its leading `annotations` removed and its indentation kept.
-fn strip_annotations(text: &str, annotations: &[&str]) -> String {
+fn strip_annotations(text: &str, annotations: &[String]) -> String {
     let body = text.trim_start();
     let mut rest = body;
-    while let Some(after) = annotations
-        .iter()
-        .find_map(|annotation| rest.strip_prefix(annotation))
-        .filter(|after| after.starts_with(char::is_whitespace))
-    {
+    while let Some(after) = annotations.iter().find_map(|annotation| {
+        rest.strip_prefix(annotation.as_str())
+            .filter(|after| after.starts_with(char::is_whitespace))
+    }) {
         rest = after.trim_start();
     }
     [&text[..text.len() - body.len()], rest].concat()
@@ -421,7 +404,7 @@ fn key_material_for_line(
     trivia: TriviaKind,
     key_hint: Option<&str>,
     normalized: &str,
-    annotations: &[&str],
+    annotations: &[String],
 ) -> KeyMaterial {
     if trivia == TriviaKind::Content
         && kind != KeyKind::BlockFooter
@@ -1082,5 +1065,34 @@ mod tests {
             view.lines.iter().any(|l| l.normalized == "level-1"),
             "top-level header should be present"
         );
+    }
+
+    #[test]
+    fn quoted_values_and_annotations_come_from_the_dialect() {
+        struct Marked;
+        impl netform_ir::Dialect for Marked {
+            fn classify_trivia(&self, raw: &str) -> TriviaKind {
+                netform_ir::GenericDialect.classify_trivia(raw)
+            }
+            fn parse_parts(&self, raw: &str) -> Option<netform_ir::ParsedLineParts> {
+                netform_ir::GenericDialect.parse_parts(raw)
+            }
+            fn quotes_delimit_values(&self) -> bool {
+                true
+            }
+            fn annotations(&self) -> &[&str] {
+                &["disabled", "disabled:"]
+            }
+        }
+
+        let doc = netform_ir::parse_with_dialect(
+            "motd \"two  spaces\"\nhostname r1\ndisabled: hostname r1\n",
+            &Marked,
+        );
+        let options = NormalizeOptions::new(vec![NormalizationStep::CollapseInternalWhitespace]);
+        let view = build_comparison_view(&doc, &options);
+
+        assert_eq!(view.lines[0].normalized, "motd \"two  spaces\"");
+        assert_eq!(view.lines[1].content_key, view.lines[2].content_key);
     }
 }

@@ -75,6 +75,10 @@ impl Dialect for FortiosDialect {
     fn literal_region(&self, raw: &str) -> Option<LiteralTerminator> {
         literal_region(raw)
     }
+
+    fn quotes_delimit_values(&self) -> bool {
+        true
+    }
 }
 
 /// recognize a FortiOS line whose double-quoted value is still open at the end

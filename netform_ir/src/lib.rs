@@ -94,6 +94,10 @@ pub struct DocumentMetadata {
     pub original_bytes: usize,
     pub line_count: usize,
     pub parse_findings: Vec<ParseFinding>,
+    /// the dialect's [`Dialect::quotes_delimit_values`].
+    pub quotes_delimit_values: bool,
+    /// the dialect's [`Dialect::annotations`].
+    pub annotations: Vec<String>,
 }
 
 /// declared parser dialect used for this document.
@@ -280,6 +284,25 @@ pub trait Dialect {
     fn comment_region(&self, _raw: &str) -> Option<LiteralTerminator> {
         None
     }
+
+    /// report whether a double-quoted `"…"` is one value, as FortiOS and Junos
+    /// write them, rather than plain text.
+    ///
+    /// stored in [`DocumentMetadata`], so a diff can leave the whitespace
+    /// inside a value as written.  the default `false` reads a quote as plain
+    /// text.
+    fn quotes_delimit_values(&self) -> bool {
+        false
+    }
+
+    /// the leading tokens that mark a statement without changing which
+    /// statement it is, as Junos `inactive:` and `protect:`.
+    ///
+    /// stored in [`DocumentMetadata`], so a diff can key a marked statement as
+    /// the same statement unmarked.  the default is none.
+    fn annotations(&self) -> &[&str] {
+        &[]
+    }
 }
 
 /// what closes a multi-line literal region opened by [`Dialect::literal_region`].
@@ -412,6 +435,12 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
         original_bytes: input.len(),
         line_count: 0,
         parse_findings: Vec::new(),
+        quotes_delimit_values: dialect.quotes_delimit_values(),
+        annotations: dialect
+            .annotations()
+            .iter()
+            .map(|annotation| annotation.to_string())
+            .collect(),
     });
 
     let lines = collect_lines(
