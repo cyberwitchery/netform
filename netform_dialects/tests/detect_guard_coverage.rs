@@ -45,17 +45,40 @@ fn no_dialect_interface_type_scores_iosxr_on_slot_shape() {
 
 /// the same entries, at the slot depths their own dialect actually uses, must
 /// still reach that dialect rather than being shadowed by the guard.
+///
+/// a single `interface` line scores below the detection threshold, and only
+/// for a name a vendor's signals spell, case-sensitively, so a bare
+/// `interface {ty}1` reads as generic whatever the guard does. each name is
+/// added to the `interface` lines of its vendor's sample instead, which reach
+/// that vendor on their own.
 #[test]
 fn the_guard_does_not_cost_the_dialects_their_own_interface_names() {
     for (entry, types) in shadowed_vendors() {
+        let own = DialectHint::Named(entry.name.into());
+        let interfaces = entry
+            .sample
+            .lines()
+            .filter(|line| line.starts_with("interface "))
+            .map(|line| format!("{line}\n"))
+            .collect::<String>();
+        assert_eq!(
+            detect_dialect(&interfaces),
+            own,
+            "{}'s sample interfaces",
+            entry.name
+        );
+
         for ty in types {
-            let input = format!("interface {ty}1\n");
-            let got = detect_dialect(&input);
-            assert!(
-                got == DialectHint::Named(entry.name.into()) || got == DialectHint::Generic,
-                "{} carries `{ty}`, and a bare `interface {ty}1` reads as {got:?}",
-                entry.name,
-            );
+            for suffix in ["1", "1/1", "1/0/1"] {
+                let input = format!("{interfaces}interface {ty}{suffix}\n");
+                assert_eq!(
+                    detect_dialect(&input),
+                    own,
+                    "{} carries `{ty}`, and `interface {ty}{suffix}` after its sample interfaces \
+                     pulls detection away from it",
+                    entry.name,
+                );
+            }
         }
     }
 }

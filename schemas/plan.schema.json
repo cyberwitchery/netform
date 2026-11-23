@@ -72,7 +72,7 @@
     },
     "finding_code": {
       "type": "string",
-      "enum": ["missing_anchor"]
+      "enum": ["missing_anchor", "diff_unreliable_region"]
     },
     "finding": {
       "type": "object",

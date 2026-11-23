@@ -131,7 +131,10 @@ fn finding_codes_match_the_codes_each_output_emits() {
     );
     assert_eq!(
         schema_enum("plan.schema.json", "/$defs/finding_code/enum"),
-        set_of(&[finding_code::MISSING_ANCHOR])
+        set_of(&[
+            finding_code::MISSING_ANCHOR,
+            finding_code::DIFF_UNRELIABLE_REGION,
+        ])
     );
 }
 
