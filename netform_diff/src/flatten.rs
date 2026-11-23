@@ -1081,7 +1081,7 @@ mod tests {
                 true
             }
             fn annotations(&self) -> &[&str] {
-                &["disabled:"]
+                &["disabled", "disabled:"]
             }
         }
 

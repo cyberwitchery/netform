@@ -95,10 +95,8 @@ pub struct DocumentMetadata {
     pub line_count: usize,
     pub parse_findings: Vec<ParseFinding>,
     /// the dialect's [`Dialect::quotes_delimit_values`].
-    #[serde(default)]
     pub quotes_delimit_values: bool,
     /// the dialect's [`Dialect::annotations`].
-    #[serde(default)]
     pub annotations: Vec<String>,
 }
 

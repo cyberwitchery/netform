@@ -1454,13 +1454,13 @@ fn inserts_into_a_block_only_the_right_side_has_get_no_left_anchor() {
 }
 
 #[test]
-fn a_document_serialized_before_dialect_properties_still_deserializes() {
-    let mut json = serde_json::to_value(parse_junos("system {\n    host-name r1;\n}\n")).unwrap();
-    let metadata = json["metadata"].as_object_mut().unwrap();
-    metadata.remove("quotes_delimit_values");
-    metadata.remove("annotations");
+fn a_document_serialized_before_dialect_properties_fails_to_load() {
+    let json = serde_json::to_value(parse_junos("system {\n    host-name r1;\n}\n")).unwrap();
+    for field in ["quotes_delimit_values", "annotations"] {
+        let mut old = json.clone();
+        old["metadata"].as_object_mut().unwrap().remove(field);
 
-    let doc: netform_ir::Document = serde_json::from_value(json).unwrap();
-    assert!(!doc.metadata.quotes_delimit_values);
-    assert!(doc.metadata.annotations.is_empty());
+        let err = serde_json::from_value::<netform_ir::Document>(old).unwrap_err();
+        assert_eq!(err.to_string(), format!("missing field `{field}`"));
+    }
 }
