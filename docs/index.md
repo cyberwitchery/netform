@@ -12,6 +12,7 @@ how to use this repo:
 - parse configs into a lossless `Document` with `netform_ir::parse_generic`
 - render with `Document::render()` to preserve exact line text and endings
 - parse as a specific vendor with `netform_dialects::find(name)` and the `parse` on its entry
+- detect the vendor and parse as it in one call with `netform_dialects::auto_parse`
 - compare two documents with `netform_diff::diff_documents`
 - emit unified, markdown, or json reports using `netform_cli`'s `config-diff` (dialect auto-detected, or forced with `--dialect`)
 
