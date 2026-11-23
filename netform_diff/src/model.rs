@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use serde::{Deserialize, Serialize};
 
 use netform_ir::{Path, Span, TriviaKind};
@@ -332,32 +334,13 @@ impl KeyKind {
     }
 }
 
-/// format a `u64` as decimal digits into a stack buffer, returning the slice.
-struct U64Buf {
-    buf: [u8; 20], // u64::MAX = 18446744073709551615 (20 digits)
-    start: usize,
-}
-
-impl U64Buf {
-    fn new(value: u64) -> Self {
-        let mut buf = [0u8; 20];
-        if value == 0 {
-            buf[19] = b'0';
-            return Self { buf, start: 19 };
-        }
-        let mut pos = 20usize;
-        let mut v = value;
-        while v > 0 {
-            pos -= 1;
-            buf[pos] = b'0' + (v % 10) as u8;
-            v /= 10;
-        }
-        Self { buf, start: pos }
-    }
-
-    fn as_bytes(&self) -> &[u8] {
-        &self.buf[self.start..]
-    }
+/// hash the decimal digits of `value` without allocating.
+fn update_decimal(h: &mut xxhash_rust::xxh3::Xxh3Default, value: u64) {
+    let mut buf = [0u8; 20];
+    let mut rest = &mut buf[..];
+    write!(rest, "{value}").expect("a u64 has at most 20 decimal digits");
+    let unused = rest.len();
+    h.update(&buf[..buf.len() - unused]);
 }
 
 /// derive a content key from parent signature, key kind, trivia, and normalized text.
@@ -372,7 +355,7 @@ pub fn derive_content_key(
 ) -> u64 {
     let mut h = xxhash_rust::xxh3::Xxh3Default::new();
     h.update(b"p=");
-    h.update(U64Buf::new(parent_signature).as_bytes());
+    update_decimal(&mut h, parent_signature);
     h.update(b"|k=");
     h.update(kind.as_bytes());
     h.update(b"|t=");
@@ -388,9 +371,9 @@ pub fn derive_content_key(
 pub fn derive_occurrence_key(content_key: u64, ordinal: u64) -> u64 {
     let mut h = xxhash_rust::xxh3::Xxh3Default::new();
     h.update(b"c=");
-    h.update(U64Buf::new(content_key).as_bytes());
+    update_decimal(&mut h, content_key);
     h.update(b"|o=");
-    h.update(U64Buf::new(ordinal).as_bytes());
+    update_decimal(&mut h, ordinal);
     h.digest()
 }
 
@@ -557,79 +540,65 @@ mod tests {
     }
 
     #[test]
-    fn u64buf_matches_display() {
-        for &v in &[0, 1, 9, 10, 42, 99, 100, 999, 12345, u64::MAX] {
-            assert_eq!(
-                std::str::from_utf8(U64Buf::new(v).as_bytes()).unwrap(),
-                v.to_string(),
-            );
-        }
-    }
-
-    /// reference implementation: build the canonical string, hash once (pins the
-    /// incremental hasher to the same format).
-    fn derive_content_key_reference(
-        parent_signature: u64,
-        kind: KeyKind,
-        trivia: TriviaKind,
-        normalized_for_key: &str,
-    ) -> u64 {
-        let canonical = format!(
-            "p={parent_signature}|k={:?}|t={}|n={}",
-            kind,
-            crate::normalize::trivia_tag(trivia),
-            normalized_for_key
-        );
-        xxhash_rust::xxh3::xxh3_64(canonical.as_bytes())
-    }
-
-    fn derive_occurrence_key_reference(content_key: u64, ordinal: u64) -> u64 {
-        let canonical = format!("c={content_key}|o={ordinal}");
-        xxhash_rust::xxh3::xxh3_64(canonical.as_bytes())
-    }
-
-    #[test]
-    fn content_key_matches_reference_implementation() {
-        let cases: &[(u64, KeyKind, TriviaKind, &str)] = &[
-            (0, KeyKind::Line, TriviaKind::Content, "permit any"),
+    fn derived_keys_are_stable() {
+        // keys reach diff.json and plan.json, so the hashed bytes must not change.
+        let content: &[(u64, KeyKind, TriviaKind, &str, u64)] = &[
+            (
+                0,
+                KeyKind::Line,
+                TriviaKind::Content,
+                "permit any",
+                18420076534913794359,
+            ),
             (
                 12345,
                 KeyKind::BlockHeader,
                 TriviaKind::Blank,
                 "interface Ethernet0",
+                14754298625020664521,
             ),
-            (u64::MAX, KeyKind::BlockFooter, TriviaKind::Comment, "!"),
-            (42, KeyKind::Line, TriviaKind::Unknown, ""),
+            (
+                u64::MAX,
+                KeyKind::BlockFooter,
+                TriviaKind::Comment,
+                "!",
+                9519631589348862540,
+            ),
+            (
+                42,
+                KeyKind::Line,
+                TriviaKind::Unknown,
+                "",
+                17961706057184716800,
+            ),
             (
                 999,
                 KeyKind::Line,
                 TriviaKind::Content,
                 "a line with spaces and special chars: <>!@#$%",
+                15485602688197948486,
             ),
         ];
-        for &(parent, kind, trivia, text) in cases {
+        for &(parent, kind, trivia, text, expected) in content {
             assert_eq!(
                 derive_content_key(parent, kind, trivia, text),
-                derive_content_key_reference(parent, kind, trivia, text),
-                "mismatch for parent={parent}, kind={kind:?}, trivia={trivia:?}, text={text:?}"
+                expected,
+                "parent={parent}, kind={kind:?}, trivia={trivia:?}, text={text:?}"
             );
         }
-    }
 
-    #[test]
-    fn occurrence_key_matches_reference_implementation() {
-        let cases: &[(u64, u64)] = &[
-            (0, 1),
-            (12345, 2),
-            (u64::MAX, u64::MAX),
-            (42, 0),
-            (999_999_999, 100),
+        let occurrence: &[(u64, u64, u64)] = &[
+            (0, 1, 4451606278898456854),
+            (12345, 2, 14900276132558513184),
+            (u64::MAX, u64::MAX, 9254440888460041157),
+            (42, 0, 698606325178909277),
+            (999_999_999, 100, 4815748428849385786),
         ];
-        for &(content_key, ordinal) in cases {
+        for &(content_key, ordinal, expected) in occurrence {
             assert_eq!(
                 derive_occurrence_key(content_key, ordinal),
-                derive_occurrence_key_reference(content_key, ordinal),
-                "mismatch for content_key={content_key}, ordinal={ordinal}"
+                expected,
+                "content_key={content_key}, ordinal={ordinal}"
             );
         }
     }
