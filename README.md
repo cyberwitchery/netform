@@ -6,7 +6,7 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 
 - `netform_ir`: core config intermediate representation (ir), parser, and lossless renderer.
 - `netform_diff`: normalization, diff engine, report formatting, and plan/report primitives.
-- `netform_cli`: `config-diff` and replay binaries.
+- `netform_cli`: the `config-diff` binary.
 - `netform_dialects`: the registry of every vendor netform parses, one module per vendor.
 
 ## features

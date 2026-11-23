@@ -15,7 +15,30 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": ["Delete", "Insert"],
+    "edits": [
+      {
+        "type": "Delete",
+        "at_key": 12676312516038633270,
+        "left_anchor": {"path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 30}},
+        "right_anchor": null,
+        "lines": [
+          {"content_key": 191312240016956017, "occurrence_key": 12676312516038633270, "text": "ip access-list extended ACL-IN", "path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 30}},
+          {"content_key": 818314339323240823, "occurrence_key": 17481152471517473605, "text": " permit tcp any any eq 443", "path": [0, 0], "span": {"line": 2, "start_byte": 31, "end_byte": 57}},
+          {"content_key": 3169880823517034742, "occurrence_key": 7494542347954765275, "text": " permit tcp any any eq 80", "path": [0, 1], "span": {"line": 3, "start_byte": 58, "end_byte": 83}}
+        ]
+      },
+      {
+        "type": "Insert",
+        "at_key": 591125150076594891,
+        "left_anchor": null,
+        "right_anchor": {"path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 31}},
+        "lines": [
+          {"content_key": 14183441985632536944, "occurrence_key": 591125150076594891, "text": "ip access-list extended ACL-OUT", "path": [0], "span": {"line": 1, "start_byte": 0, "end_byte": 31}},
+          {"content_key": 16052889914492902826, "occurrence_key": 6648930559947625516, "text": " permit tcp any any eq 80", "path": [0, 0], "span": {"line": 2, "start_byte": 32, "end_byte": 57}},
+          {"content_key": 6856692120320567361, "occurrence_key": 18221662153613545447, "text": " permit tcp any any eq 443", "path": [0, 1], "span": {"line": 3, "start_byte": 58, "end_byte": 84}}
+        ]
+      }
+    ],
     "finding_codes": [
       "diff_unreliable_region"
     ]

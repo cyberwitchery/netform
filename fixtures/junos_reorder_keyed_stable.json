@@ -17,9 +17,33 @@
   },
   "expected": {
     "has_changes": true,
-    "edit_types": [
-      "Replace",
-      "Replace"
+    "edits": [
+      {
+        "type": "Replace",
+        "old_at_key": 15634988099709375664,
+        "new_at_key": 15634988099709375664,
+        "left_anchor": {"path": [2], "span": {"line": 10, "start_byte": 156, "end_byte": 180}},
+        "right_anchor": {"path": [2], "span": {"line": 10, "start_byte": 156, "end_byte": 190}},
+        "old_lines": [
+          {"content_key": 6292941736271162495, "occurrence_key": 15634988099709375664, "text": "set system time-zone UTC", "path": [2], "span": {"line": 10, "start_byte": 156, "end_byte": 180}}
+        ],
+        "new_lines": [
+          {"content_key": 6292941736271162495, "occurrence_key": 15634988099709375664, "text": "set system time-zone Europe/Berlin", "path": [2], "span": {"line": 10, "start_byte": 156, "end_byte": 190}}
+        ]
+      },
+      {
+        "type": "Replace",
+        "old_at_key": 3308186438563692086,
+        "new_at_key": 3308186438563692086,
+        "left_anchor": {"path": [3], "span": {"line": 11, "start_byte": 181, "end_byte": 242}},
+        "right_anchor": {"path": [3], "span": {"line": 11, "start_byte": 191, "end_byte": 252}},
+        "old_lines": [
+          {"content_key": 16514135386831145490, "occurrence_key": 3308186438563692086, "text": "set routing-options static route 0.0.0.0/0 next-hop 192.0.2.1", "path": [3], "span": {"line": 11, "start_byte": 181, "end_byte": 242}}
+        ],
+        "new_lines": [
+          {"content_key": 16514135386831145490, "occurrence_key": 3308186438563692086, "text": "set routing-options static route 0.0.0.0/0 next-hop 192.0.2.9", "path": [3], "span": {"line": 11, "start_byte": 191, "end_byte": 252}}
+        ]
+      }
     ],
     "finding_codes": []
   }

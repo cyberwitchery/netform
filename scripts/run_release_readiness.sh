@@ -38,29 +38,26 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "[1/8] format"
+echo "[1/7] format"
 cargo fmt --all --check
 
-echo "[2/8] clippy"
+echo "[2/7] clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-echo "[3/8] tests"
+echo "[3/7] tests"
 cargo test --workspace --all-targets
 
-echo "[4/8] doctests"
+echo "[4/7] doctests"
 cargo test --workspace --doc
 
-echo "[5/8] docs build"
+echo "[5/7] docs build"
 RUSTDOCFLAGS="--cfg docsrs" cargo doc --workspace --all-features --no-deps
 
-echo "[6/8] fixture replay"
-cargo run -q -p netform_cli --bin netform-replay-fixtures
-
-echo "[7/8] coverage gate"
+echo "[6/7] coverage gate"
 cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 80
 
 if [[ "${WITH_MIRI}" -eq 1 ]]; then
-  echo "[8/8] miri subset"
+  echo "[7/7] miri subset"
   ./scripts/run_miri.sh
 fi
 

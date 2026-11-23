@@ -340,7 +340,6 @@ dependencies = [
  "netform_dialects",
  "netform_diff",
  "netform_ir",
- "serde",
  "serde_json",
 ]
 
