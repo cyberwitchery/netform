@@ -6,7 +6,8 @@
 //! - a lossless renderer (`Document::render`)
 //!
 //! the parser is intentionally conservative:
-//! - it only uses indentation as a structural cue
+//! - structure comes from indentation, plus the terminators, keyword nesting, and literal and
+//!   comment regions a `Dialect` declares
 //! - unknown patterns are preserved as regular lines
 //! - no input lines are dropped
 //!
@@ -24,7 +25,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Range;
 
-/// stable arena identifier for a node in a [`Document`].
+/// arena index of a node in a [`Document`]. stable within that document, but not across
+/// documents: diffs address nodes by [`Path`] instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub usize);
 
@@ -143,7 +145,7 @@ impl Document {
         id
     }
 
-    /// insert a node into the arena and return its stable [`NodeId`].
+    /// insert a node into the arena and return its [`NodeId`] in this document.
     pub fn insert_node(&mut self, node: Node) -> NodeId {
         let id = NodeId(self.arena.len());
         self.arena.push(node);

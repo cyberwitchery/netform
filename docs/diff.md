@@ -33,15 +33,19 @@ each comparable line carries:
 - normalized text (for matching)
 - original text (for reporting)
 - `content_key` (semantic hash key)
-- `occurrence_key` (stable disambiguation hash)
+- `occurrence_key` (hash of `content_key` and the line's ordinal among the document's lines that
+  share it, which tells duplicate lines apart)
 - `Path` (node path)
 - `Span` (line + byte offsets)
 - trivia classification
 - optional dialect-provided `key_hint` used for keyed-stable matching when available
 
+both keys are hashes that can change between releases, so compare them only between outputs of the
+same version.
+
 ## edits
 
-v1 emits grouped edit-script operations:
+`Diff.edits` holds grouped edit-script operations:
 
 - `Insert`
 - `Delete`

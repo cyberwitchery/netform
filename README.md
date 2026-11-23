@@ -12,8 +12,8 @@ vendor-agnostic, lossless config parsing and diffing for network configs.
 ## features
 
 - lossless round-trip: parse -> render preserves original text
-- indentation-based structural grouping with conservative fallback
-- stable node ids and path addressing for diff output
+- block structure from indentation, plus each dialect's terminators (FortiOS `end`/`next`, Junos `}`), keyword nesting (FortiOS `config`/`edit`) and literal regions (banners, multi-line quoted values)
+- node ids that are stable within one parsed document, and diff output that addresses lines by their path in it
 - configurable normalization (comments, blank lines, whitespace)
 - deterministic line-based edits with spans and stats
 - unified or markdown reports plus machine-readable `diff.json` / `plan.json`
@@ -82,6 +82,9 @@ usage:
 config-diff [OPTIONS] <FILE_A> <FILE_B>
 ```
 
+either file may be `-` to read it from stdin, labelled `<stdin>` in the report. given for both, stdin
+is read once and used as both sides.
+
 options:
 
 - `--dialect <auto|generic|eos|fortios|iosxe|iosxr|junos|nxos>`: parser profile (default: `auto`, detected from content; falls back to `generic` and warns when the two files disagree)
@@ -95,9 +98,9 @@ options:
 - `--trim-trailing-whitespace`: drop trailing whitespace in comparison view
 - `--normalize-leading-whitespace`: normalize indentation in comparison view
 - `--json`: print machine-readable `Diff` json instead of a report
-- `--plan-json`: print machine-readable `Plan` json instead of a report
-- `--color` / `--no-color`: force or disable colored output.  without either flag, colors are on only when stdout is a TTY; a non-empty `NO_COLOR` environment variable disables them, and `--color` overrides it
-- `--no-exit-code`: exit 0 even when configs differ (by default, config-diff exits 1 on drift, like `diff(1)`; exit 2 means an I/O or serialization error)
+- `--plan-json`: print machine-readable `Plan` json instead of a report; wins over `--json` when both are given
+- `--color` / `--no-color`: force or disable colored output. only the unified report is colored. without either flag, colors are on only when stdout is a TTY; a non-empty `NO_COLOR` environment variable disables them, and `--color` overrides it
+- `--no-exit-code`: exit 0 even when configs differ (by default, config-diff exits 1 on drift, like `diff(1)`). exit 2 means an I/O, diff or serialization error, or a usage error such as an unknown flag, and is never suppressed
 
 examples:
 

@@ -19,7 +19,7 @@
   - `footer`: optional closing `LineNode` for delimiter-terminated dialects (FortiOS `end`/`next`, Junos `}`/`};`, IOS XR `end-policy`/`end-set`)
   - `kind_label`: optional label (reserved for future semantic tagging)
 
-## parser behavior (v1)
+## parser behavior
 
 - indentation is the structural signal, except for a dialect that also nests by keyword (FortiOS, below)
 - a content line opens a block when the next content or comment line is more indented
@@ -36,5 +36,6 @@
 
 ## round-trip guarantee
 
-renderer emits line `raw + line_ending` in original traversal order.
-for valid `Document` output from `parse_generic`, `parse(render(x)) == x` at text level.
+renderer emits line `raw + line_ending` in original traversal order, so a parsed document renders
+back to its input byte for byte: `render(parse(text)) == text`. the tests check this for
+`parse_generic` on random input and for each vendor's parser on sample configurations.
