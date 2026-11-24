@@ -20,11 +20,12 @@ and runs them in this order, whatever the order of the flags:
 applied steps are recorded in `Diff.normalization_steps`. normalized text is only compared: reports
 and plans print each line as written.
 
-no step changes or drops literal text, such as a banner's body or the lines a multi-line quoted
-value continues on. on FortiOS and Junos the whitespace steps also leave a quoted value as it is on
-a line it shares with configuration; whitespace between words and after a closing quote is still
-normalized. the other dialects treat a quote as plain text. with this FortiOS `a.conf`, and a
-`b.conf` that has single spaces in both `set` lines, only the quoted value is reported:
+no step changes or drops literal text, such as the body lines of a multi-line banner or the lines a
+multi-line quoted value continues on; the `banner` line itself is normalized. on FortiOS and Junos
+the whitespace steps also leave a quoted value as it is on a line it shares with configuration;
+whitespace between words and after a closing quote is still normalized. the other dialects treat a
+quote as plain text. with this FortiOS `a.conf`, and a `b.conf` that has single spaces in both `set`
+lines, only the quoted value is reported:
 
 ```text
 config firewall policy
@@ -69,10 +70,19 @@ what each reports, the same at the top level and inside blocks:
 | a line moves into a sibling block | deleted under one, inserted under the other | same | same |
 | a repeated identical line gains or loses a copy | one insert or one delete | same | same |
 
-a key that appears more than once on both sides also gets an `ambiguous_key_match` finding. at the
-top level, under every policy, siblings that do not line up in order are also flagged
-`diff_unreliable_region` whenever a top-level line is added, removed or changed; inside a block
-they are not.
+a key that appears more than once on both sides also gets an `ambiguous_key_match` finding. keys are
+counted within one parent block, except a block header's key hint, which is counted across the whole
+file, so FortiOS `edit 1` under both `config firewall policy` and `config firewall address` gets the
+finding under every policy.
+
+at the top level, a sibling that an in-order pass cannot pair on its key (on its text under
+`unordered`), that is an added, removed, moved or re-keyed line, is itself flagged
+`diff_unreliable_region` when that leaves an edit: one finding per run of such siblings, at the
+run's first line. `ordered` decides run by run, `unordered` and `keyed-stable` for all such siblings
+at once, so there a reorder next to an edit is flagged too. a line that keeps its key is paired and
+not flagged: EOS `ntp server 10.0.0.1 prefer` changed to `ntp server 10.0.0.1` is one replace with
+no finding under `ordered` and `keyed-stable`, and a flagged delete and insert under `unordered`.
+inside a block nothing is flagged this way.
 
 which of several candidate siblings pairs with which, and so which lines a change is reported
 against, is not specified yet and can change between releases.
@@ -86,7 +96,10 @@ comments and blank lines included. an empty PATH (`:unordered`) names the top le
 the whole file.
 
 the flag may be repeated. each level takes the policy of the longest PATH that names it or one of
-its ancestors, whatever the order of the flags, and `--order-policy` where none does.
+its ancestors (of the first flag, if that PATH is given twice), and `--order-policy` where none
+does. under an `ordered` level, though, a run of siblings that do not pair is compared under the
+policy of its first sibling's own path, so an override on a line with no children can change how the
+run it starts is reported; like the pairing rules, this is not specified yet.
 
 with this `a.cfg`, and a `b.cfg` that swaps the interface's two lines, `ordered` reports the swap
 and an override on `interface Ethernet1` (path `1`) ignores it:
@@ -158,11 +171,12 @@ codes. each has a `code`, a `level` (`warning` or `info`), a `message` and, wher
 `path` and a `span`.
 
 - `ambiguous_key_match` (diff.json): a key appears more than once on both sides, so which copy
-  paired with which is a guess.
+  paired with which may be a guess. a block header's key hint counts across the whole file (see
+  order policy).
 - `unknown_unparsed_construct` (diff.json): a parse finding, below.
-- `diff_unreliable_region` (diff.json and plan.json): in diff.json, top-level siblings that do not
-  line up in order (see order policy), or a block nested too deep to compare line by line (see plan
-  output). plan.json repeats the second kind where its lines differ.
+- `diff_unreliable_region` (diff.json and plan.json): in diff.json, a top-level sibling that does
+  not pair in order where that leaves an edit (see order policy), or a block nested too deep to
+  compare line by line (see plan output). plan.json repeats the second kind where its lines differ.
 - `missing_anchor` (plan.json): an edit the plan cannot place in the left-hand file, which gets no
   action.
 
