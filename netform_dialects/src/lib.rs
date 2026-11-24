@@ -166,6 +166,16 @@ pub fn find(name: &str) -> Option<&'static DialectEntry> {
     entries().find(|entry| entry.name == name)
 }
 
+/// the parser a [`DialectHint`] names: the entry [`find`] resolves for
+/// [`DialectHint::Named`], else [`GENERIC`].
+pub fn for_hint(hint: &DialectHint) -> &'static DialectEntry {
+    match hint {
+        DialectHint::Named(name) => find(name),
+        DialectHint::Generic | DialectHint::Unknown => None,
+    }
+    .unwrap_or(&GENERIC)
+}
+
 /// every registered vendor's name.
 pub fn names() -> impl Iterator<Item = &'static str> {
     REGISTRY.iter().map(|entry| entry.name)
@@ -188,10 +198,17 @@ pub fn detect_dialect(input: &str) -> DialectHint {
     detect::detect_dialect(input, &tables)
 }
 
+/// parse `input` as the vendor [`detect_dialect`] picks, or with [`GENERIC`]
+/// when no vendor is a confident match.  the document's
+/// `metadata.dialect_hint` names the parser that ran.
+pub fn auto_parse(input: &str) -> Document {
+    (for_hint(&detect_dialect(input)).parse)(input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::parse_parts_with_punctuation;
+    use netform_ir::{Node, parse_parts_with_punctuation};
     use rules::{ArgGuard, KeyRuleAction};
 
     #[test]
@@ -207,6 +224,20 @@ mod tests {
     fn every_entry_is_reachable_by_name() {
         for entry in entries() {
             assert_eq!(find(entry.name), Some(entry));
+        }
+    }
+
+    #[test]
+    fn for_hint_resolves_named_entries_and_falls_back_to_generic() {
+        for entry in entries() {
+            assert_eq!(for_hint(&DialectHint::Named(entry.name.into())), entry);
+        }
+        for hint in [
+            DialectHint::Generic,
+            DialectHint::Unknown,
+            DialectHint::Named("bogus".into()),
+        ] {
+            assert_eq!(for_hint(&hint), &GENERIC, "{hint:?}");
         }
     }
 
@@ -248,6 +279,68 @@ mod tests {
                 "{} sample no longer detects as itself",
                 entry.name,
             );
+        }
+    }
+
+    /// the key hint of the first root node's header (if block) or the node
+    /// itself (if line).
+    fn first_root_key_hint(doc: &Document) -> Option<String> {
+        let id = *doc.roots.first()?;
+        match doc.node(id)? {
+            Node::Block(b) => b.header.key_hint.clone(),
+            Node::Line(l) => l.key_hint.clone(),
+        }
+    }
+
+    #[test]
+    fn auto_parse_dispatches_to_the_detected_dialect() {
+        let cases: &[(&str, DialectHint, Option<&str>)] = &[
+            (
+                "\
+interfaces {
+    ge-0/0/0 {
+        mtu 9216;
+    }
+}
+",
+                DialectHint::Named("junos".into()),
+                Some("interfaces"),
+            ),
+            (
+                "\
+feature bgp
+feature interface-vlan
+feature lacp
+interface Ethernet1/1
+  description uplink
+  no shutdown
+",
+                DialectHint::Named("nxos".into()),
+                Some("feature:bgp"),
+            ),
+            (
+                "\
+interface Ethernet1
+   description uplink-spine-a
+   mtu 9214
+   ip address 192.0.2.2/31
+   no shutdown
+ip access-list ACL-EDGE-IN
+   10 permit tcp 10.10.1.0/24 any eq https
+   20 permit tcp 10.10.1.0/24 any eq ssh
+   90 deny ip any any log
+",
+                DialectHint::Named("eos".into()),
+                Some("interface:ethernet:1"),
+            ),
+            // the generic parser produces no key hints.
+            ("hostname router\n", DialectHint::Generic, None),
+        ];
+        for (input, dialect, hint) in cases {
+            let doc = auto_parse(input);
+            assert_eq!(&doc.metadata.dialect_hint, dialect, "{input}");
+            assert_eq!(first_root_key_hint(&doc).as_deref(), *hint, "{input}");
+            assert_eq!(doc.render(), *input, "{input}");
         }
     }
 

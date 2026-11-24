@@ -11,7 +11,7 @@ use netform_diff::{
     OrderPolicyConfig, OrderPolicyOverride, build_plan, diff_documents, format_markdown_report,
     format_unified_diff_with_color,
 };
-use netform_ir::{DialectHint, Document};
+use netform_ir::DialectHint;
 
 #[derive(Debug, Parser)]
 #[command(name = "config-diff")]
@@ -103,15 +103,6 @@ enum CliDialect {
     Fixed(&'static DialectEntry),
 }
 
-/// the parser for a detected dialect: the named vendor's, else generic.
-fn detected(hint: &DialectHint) -> &'static DialectEntry {
-    match hint {
-        DialectHint::Named(name) => netform_dialects::find(name),
-        DialectHint::Generic | DialectHint::Unknown => None,
-    }
-    .unwrap_or(&netform_dialects::GENERIC)
-}
-
 /// accept `auto` and every name `netform_dialects::find` resolves.
 fn dialect_value_parser() -> impl clap::builder::TypedValueParser<Value = CliDialect> {
     let choices: Vec<&'static str> = std::iter::once("auto")
@@ -170,29 +161,28 @@ fn main() {
         (a_text, a_label, b_text, b_label)
     };
 
-    let resolved_dialect = match cli.dialect {
+    let parse_both = |entry: &DialectEntry| ((entry.parse)(&a_text), (entry.parse)(&b_text));
+    let (a_doc, b_doc) = match cli.dialect {
         CliDialect::Auto => {
-            let a_hint = netform_dialects::detect_dialect(&a_text);
-            let b_hint = netform_dialects::detect_dialect(&b_text);
+            let a_doc = netform_dialects::auto_parse(&a_text);
+            let b_doc = netform_dialects::auto_parse(&b_text);
+            let (a_hint, b_hint) = (&a_doc.metadata.dialect_hint, &b_doc.metadata.dialect_hint);
             if a_hint == b_hint {
-                CliDialect::Fixed(detected(&a_hint))
+                (a_doc, b_doc)
             } else {
-                // disagreement: fall back to Generic rather than risk
-                // parsing two files with different grammars.
+                // disagreement: fall back to Generic rather than diff two
+                // files parsed with different grammars.
                 eprintln!(
                     "config-diff: warning: auto-detected dialects disagree ({} vs {}), \
                      falling back to generic (use --dialect to override)",
-                    hint_label(&a_hint),
-                    hint_label(&b_hint),
+                    hint_label(a_hint),
+                    hint_label(b_hint),
                 );
-                CliDialect::Fixed(&netform_dialects::GENERIC)
+                parse_both(&netform_dialects::GENERIC)
             }
         }
-        other => other,
+        CliDialect::Fixed(entry) => parse_both(entry),
     };
-
-    let a_doc = parse_config(&a_text, resolved_dialect);
-    let b_doc = parse_config(&b_text, resolved_dialect);
 
     let mut steps = Vec::new();
     if cli.ignore_comments {
@@ -320,92 +310,9 @@ fn read_input(path: &Path) -> (String, String) {
     }
 }
 
-/// parse input with automatic dialect detection and full dialect dispatch.
-///
-/// runs dialect detection on the input and dispatches to the detected
-/// vendor's parser so that trivia classification, tokenization, and key hints
-/// are dialect-aware.
-/// falls back to the generic parser when no dialect is detected with
-/// sufficient confidence.
-#[cfg(test)]
-fn auto_parse(input: &str) -> Document {
-    parse_config(input, CliDialect::Auto)
-}
-
-fn parse_config(input: &str, dialect: CliDialect) -> Document {
-    let entry = match dialect {
-        CliDialect::Auto => detected(&netform_dialects::detect_dialect(input)),
-        CliDialect::Fixed(entry) => entry,
-    };
-    (entry.parse)(input)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netform_ir::Node;
-
-    /// helper: return the key hint of the first root node's header (if block)
-    /// or the node itself (if line).
-    fn first_root_key_hint(doc: &Document) -> Option<String> {
-        let id = *doc.roots.first()?;
-        match doc.node(id)? {
-            Node::Block(b) => b.header.key_hint.clone(),
-            Node::Line(l) => l.key_hint.clone(),
-        }
-    }
-
-    #[test]
-    fn auto_parse_dispatches_to_the_detected_dialect() {
-        let cases: &[(&str, DialectHint, Option<&str>)] = &[
-            (
-                "\
-interfaces {
-    ge-0/0/0 {
-        mtu 9216;
-    }
-}
-",
-                DialectHint::Named("junos".into()),
-                Some("interfaces"),
-            ),
-            (
-                "\
-feature bgp
-feature interface-vlan
-feature lacp
-interface Ethernet1/1
-  description uplink
-  no shutdown
-",
-                DialectHint::Named("nxos".into()),
-                Some("feature:bgp"),
-            ),
-            (
-                "\
-interface Ethernet1
-   description uplink-spine-a
-   mtu 9214
-   ip address 192.0.2.2/31
-   no shutdown
-ip access-list ACL-EDGE-IN
-   10 permit tcp 10.10.1.0/24 any eq https
-   20 permit tcp 10.10.1.0/24 any eq ssh
-   90 deny ip any any log
-",
-                DialectHint::Named("eos".into()),
-                Some("interface:ethernet:1"),
-            ),
-            // the generic parser produces no key hints.
-            ("hostname router\n", DialectHint::Generic, None),
-        ];
-        for (input, dialect, hint) in cases {
-            let doc = auto_parse(input);
-            assert_eq!(&doc.metadata.dialect_hint, dialect, "{input}");
-            assert_eq!(first_root_key_hint(&doc).as_deref(), *hint, "{input}");
-            assert_eq!(doc.render(), *input, "{input}");
-        }
-    }
 
     #[test]
     fn parse_policy_override_accepts_path_and_policy() {
