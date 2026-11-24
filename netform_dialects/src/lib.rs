@@ -25,6 +25,11 @@
 //! );
 //! ```
 
+// compiles the README's examples as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 pub mod detect;
 pub mod ios_like;
 pub mod rules;

@@ -20,6 +20,11 @@
 //! assert!(diff.has_changes);
 //! ```
 
+// compiles the README's examples as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 mod engine;
 mod findings;
 mod flatten;

@@ -21,6 +21,11 @@
 //! assert_eq!(doc.render(), input);
 //! ```
 
+// compiles the README's examples as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Range;
