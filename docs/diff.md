@@ -78,11 +78,13 @@ finding under every policy.
 at the top level, a sibling that an in-order pass cannot pair on its key (on its text under
 `unordered`), that is an added, removed, moved or re-keyed line, is itself flagged
 `diff_unreliable_region` when that leaves an edit: one finding per run of such siblings, at the
-run's first line. `ordered` decides run by run, `unordered` and `keyed-stable` for all such siblings
-at once, so there a reorder is flagged too when any other such sibling leaves an edit. a line that
-keeps its key is paired and not flagged: EOS `ntp server 10.0.0.1 prefer` changed to
-`ntp server 10.0.0.1` is one replace with no finding under `ordered` and `keyed-stable`, and a
-flagged delete and insert under `unordered`. inside a block nothing is flagged this way.
+run's first line in the left-hand file, or in the right-hand file when the run has no line on the
+left, as for an added line. the finding does not say which. `ordered` decides run by run,
+`unordered` and `keyed-stable` for all such siblings at once, so there a reorder is flagged too when
+any other such sibling leaves an edit. a line that keeps its key and its place is paired and not
+flagged: EOS `ntp server 10.0.0.1 prefer` changed to `ntp server 10.0.0.1` is one replace with no
+finding under `ordered` and `keyed-stable`, and a flagged delete and insert under `unordered`.
+inside a block nothing is flagged this way.
 
 which of several candidate siblings pairs with which, and so which lines a change is reported
 against, is not specified yet and can change between releases.
@@ -175,8 +177,9 @@ codes. each has a `code`, a `level` (`warning` or `info`), a `message` and, wher
   order policy).
 - `unknown_unparsed_construct` (diff.json): a parse finding, below.
 - `diff_unreliable_region` (diff.json and plan.json): in diff.json, a top-level sibling that does
-  not pair in order where that leaves an edit (see order policy), or a block nested too deep to
-  compare line by line (see plan output). plan.json repeats the second kind where its lines differ.
+  not pair in order where that leaves an edit, at a path in either file (see order policy), or a
+  block nested too deep to compare line by line (see plan output). plan.json repeats the second kind
+  where its lines differ.
 - `missing_anchor` (plan.json): an edit the plan cannot place in the left-hand file, which gets no
   action.
 
