@@ -78,8 +78,9 @@ struct Cli {
 
     /// suppress exit code 1 when configs differ.  by default config-diff
     /// exits 1 when the configs differ (like `diff(1)`).  pass this flag
-    /// to exit 0 instead.  exit code 2 (I/O or serialization error) is
-    /// never suppressed.
+    /// to exit 0 instead.  exit code 2 means an I/O, diff or serialization
+    /// error, or a usage error such as an unknown flag, and is never
+    /// suppressed.
     #[arg(long)]
     no_exit_code: bool,
 }

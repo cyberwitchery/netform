@@ -51,7 +51,7 @@ echo "[4/7] doctests"
 cargo test --workspace --doc
 
 echo "[5/7] docs build"
-RUSTDOCFLAGS="--cfg docsrs" cargo doc --workspace --all-features --no-deps
+cargo doc --workspace --all-features --no-deps
 
 echo "[6/7] coverage gate"
 cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 80
