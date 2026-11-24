@@ -79,10 +79,10 @@ at the top level, a sibling that an in-order pass cannot pair on its key (on its
 `unordered`), that is an added, removed, moved or re-keyed line, is itself flagged
 `diff_unreliable_region` when that leaves an edit: one finding per run of such siblings, at the
 run's first line. `ordered` decides run by run, `unordered` and `keyed-stable` for all such siblings
-at once, so there a reorder next to an edit is flagged too. a line that keeps its key is paired and
-not flagged: EOS `ntp server 10.0.0.1 prefer` changed to `ntp server 10.0.0.1` is one replace with
-no finding under `ordered` and `keyed-stable`, and a flagged delete and insert under `unordered`.
-inside a block nothing is flagged this way.
+at once, so there a reorder is flagged too when any other such sibling leaves an edit. a line that
+keeps its key is paired and not flagged: EOS `ntp server 10.0.0.1 prefer` changed to
+`ntp server 10.0.0.1` is one replace with no finding under `ordered` and `keyed-stable`, and a
+flagged delete and insert under `unordered`. inside a block nothing is flagged this way.
 
 which of several candidate siblings pairs with which, and so which lines a change is reported
 against, is not specified yet and can change between releases.
