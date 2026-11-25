@@ -565,13 +565,6 @@ mod tests {
                 9519631589348862540,
             ),
             (
-                42,
-                KeyKind::Line,
-                TriviaKind::Unknown,
-                "",
-                17961706057184716800,
-            ),
-            (
                 999,
                 KeyKind::Line,
                 TriviaKind::Content,

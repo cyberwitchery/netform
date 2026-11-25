@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use netform_ir::{Document, Node, Path, Span};
+use netform_ir::{Document, Path, Span};
 
 use crate::flatten::{Cut, MAX_NESTING_DEPTH, content_counts, extracted_key_counts};
 use crate::model::{
@@ -280,8 +280,6 @@ pub(crate) fn collect_findings(
         &ctx.b_span_line_first_index,
         &mut findings,
     );
-    collect_unknown_block_findings(a_doc, "left", &mut findings);
-    collect_unknown_block_findings(b_doc, "right", &mut findings);
     collect_ambiguity_findings(a_view, ctx, &mut findings);
     collect_extracted_key_ambiguity_findings(a_view, ctx, &mut findings);
     collect_fallback_alignment_findings(fallback_contexts, &mut findings);
@@ -353,38 +351,6 @@ fn collect_parse_findings(
     }
 }
 
-fn collect_unknown_block_findings(doc: &Document, side: &str, out: &mut Vec<Finding>) {
-    let mut path = Vec::new();
-    let mut open = HashSet::new();
-    let mut stack = vec![(None, doc.roots.iter().enumerate())];
-    while let Some((_, siblings)) = stack.last_mut() {
-        let Some((idx, &node_id)) = siblings.next() else {
-            if let Some((Some(block), _)) = stack.pop() {
-                open.remove(&block);
-            }
-            path.pop();
-            continue;
-        };
-        path.push(idx);
-        let Some(Node::Block(block)) = doc.node(node_id).filter(|_| !open.contains(&node_id))
-        else {
-            path.pop();
-            continue;
-        };
-        open.insert(node_id);
-        if block.kind_label.as_deref() == Some("unknown") {
-            out.push(Finding {
-                code: finding_code::UNKNOWN_UNPARSED_CONSTRUCT.to_string(),
-                level: FindingLevel::Warning,
-                message: format!("{side} document has an unknown block"),
-                path: Some(Path(path.clone())),
-                span: Some(block.header.span.clone()),
-            });
-        }
-        stack.push((Some(node_id), block.children.iter().enumerate()));
-    }
-}
-
 fn collect_ambiguity_findings(a_view: &ComparisonView, ctx: &DiffContext, out: &mut Vec<Finding>) {
     let mut entries: Vec<_> = ctx.ambiguous_content_keys.iter().collect();
     entries.sort_unstable_by_key(|&(&k, _)| k);
@@ -447,7 +413,7 @@ fn collect_truncation_findings(truncated: &[TruncatedRegion], out: &mut Vec<Find
 mod tests {
     use super::*;
     use crate::model::ComparisonLine;
-    use netform_ir::{BlockNode, LineNode, ParseFinding, Span, TriviaKind};
+    use netform_ir::{ParseFinding, Span, TriviaKind};
 
     fn make_line(content_key: u64, key_hint: Option<&str>) -> ComparisonLine {
         ComparisonLine {
@@ -646,99 +612,6 @@ mod tests {
         assert_eq!(out[0].path.as_ref().unwrap().0, vec![0]);
         assert_eq!(out[1].path.as_ref().unwrap().0, vec![0]);
         assert_eq!(out[2].path.as_ref().unwrap().0, vec![2]);
-    }
-
-    #[test]
-    fn unknown_block_findings_emitted() {
-        let mut doc = Document::default();
-        let child = doc.insert_node(Node::Line(LineNode {
-            raw: "  child".to_string(),
-            line_ending: "\n".to_string(),
-            span: Span {
-                line: 2,
-                start_byte: 10,
-                end_byte: 17,
-            },
-            parsed: None,
-            key_hint: None,
-            trivia: TriviaKind::Content,
-        }));
-        doc.insert_root(Node::Block(BlockNode {
-            header: LineNode {
-                raw: "header".to_string(),
-                line_ending: "\n".to_string(),
-                span: Span {
-                    line: 1,
-                    start_byte: 0,
-                    end_byte: 6,
-                },
-                parsed: None,
-                key_hint: None,
-                trivia: TriviaKind::Content,
-            },
-            children: vec![child],
-            footer: None,
-            kind_label: Some("unknown".to_string()),
-        }));
-        let mut out = Vec::new();
-
-        collect_unknown_block_findings(&doc, "right", &mut out);
-
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].code, finding_code::UNKNOWN_UNPARSED_CONSTRUCT);
-        assert_eq!(out[0].path, Some(Path(vec![0])));
-        assert_eq!(
-            out[0].span,
-            Some(Span {
-                line: 1,
-                start_byte: 0,
-                end_byte: 6,
-            })
-        );
-        assert!(out[0].message.contains("right"));
-        assert!(out[0].message.contains("unknown block"));
-    }
-
-    #[test]
-    fn unknown_block_findings_reach_any_depth() {
-        let line = |raw: &str| LineNode {
-            raw: raw.to_string(),
-            line_ending: "\n".to_string(),
-            span: Span {
-                line: 1,
-                start_byte: 0,
-                end_byte: 0,
-            },
-            parsed: None,
-            key_hint: None,
-            trivia: TriviaKind::Content,
-        };
-        let block = |children, kind_label: Option<&str>| {
-            Node::Block(BlockNode {
-                header: line("block"),
-                children,
-                footer: None,
-                kind_label: kind_label.map(str::to_string),
-            })
-        };
-        let mut doc = Document::default();
-        doc.insert_root(Node::Line(line("before")));
-        let mut chain = doc.insert_node(Node::Line(line("leaf")));
-        chain = doc.insert_node(block(vec![chain], Some("unknown")));
-        for _ in 1..100_000 {
-            chain = doc.insert_node(block(vec![chain], None));
-        }
-        doc.roots.push(chain);
-        let leaf = doc.insert_node(Node::Line(line("leaf")));
-        doc.insert_root(block(vec![leaf], Some("unknown")));
-        let mut out = Vec::new();
-
-        collect_unknown_block_findings(&doc, "left", &mut out);
-
-        let mut deep = vec![0; 100_000];
-        deep[0] = 1;
-        let paths = out.into_iter().map(|f| f.path).collect::<Vec<_>>();
-        assert_eq!(paths, vec![Some(Path(deep)), Some(Path(vec![2]))]);
     }
 
     #[test]

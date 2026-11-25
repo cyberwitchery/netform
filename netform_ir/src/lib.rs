@@ -60,7 +60,6 @@ pub enum TriviaKind {
     Blank,
     Comment,
     Content,
-    Unknown,
     /// free-text body of a multi-line literal region (see [`Dialect::literal_region`]):
     /// never tokenized or key-hinted, inert for block structure, compared verbatim.
     Literal,
@@ -83,7 +82,6 @@ pub struct BlockNode {
     pub header: LineNode,
     pub children: Vec<NodeId>,
     pub footer: Option<LineNode>,
-    pub kind_label: Option<String>,
 }
 
 /// arena node variant.
@@ -96,7 +94,6 @@ pub enum Node {
 /// document metadata attached during parsing.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct DocumentMetadata {
-    pub source_name: Option<String>,
     pub dialect_hint: DialectHint,
     pub original_bytes: usize,
     pub line_count: usize,
@@ -437,7 +434,6 @@ impl Dialect for GenericDialect {
 /// - preserve all lines even when structure is uncertain
 pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
     let mut doc = Document::new(DocumentMetadata {
-        source_name: None,
         dialect_hint: dialect.dialect_hint(),
         original_bytes: input.len(),
         line_count: 0,
@@ -551,7 +547,6 @@ pub fn parse_with_dialect<D: Dialect>(input: &str, dialect: &D) -> Document {
                 header: line.into_line_node(),
                 children: Vec::new(),
                 footer: None,
-                kind_label: None,
             });
             let id = doc.insert_node(block);
             attach_node(&mut doc, &parent_stack, id);

@@ -594,7 +594,6 @@ mod tests {
                 key_hint: None,
                 trivia: TriviaKind::Content,
             }),
-            kind_label: None,
         }));
 
         let _ = block_id;
@@ -638,7 +637,6 @@ mod tests {
                 },
                 children: Vec::new(),
                 footer: None,
-                kind_label: None,
             }));
         }
 
@@ -695,7 +693,6 @@ mod tests {
             },
             children: Vec::new(),
             footer: None,
-            kind_label: None,
         }));
 
         let view = build_comparison_view(&doc, &default_opts());
@@ -732,7 +729,6 @@ mod tests {
             },
             children: vec![child_a],
             footer: None,
-            kind_label: None,
         }));
 
         let mut doc_b = Document::default();
@@ -755,7 +751,6 @@ mod tests {
             },
             children: vec![child_b],
             footer: None,
-            kind_label: None,
         }));
 
         let view_a = build_comparison_view(&doc_a, &default_opts());
@@ -799,7 +794,6 @@ mod tests {
             },
             children: vec![child_a, child_b],
             footer: None,
-            kind_label: None,
         }));
 
         let view = build_comparison_view(&doc, &default_opts());
@@ -821,7 +815,6 @@ mod tests {
             },
             children: Vec::new(),
             footer: None,
-            kind_label: None,
         }));
 
         let view = build_comparison_view(&doc, &default_opts());
@@ -852,7 +845,6 @@ mod tests {
                 key_hint: None,
                 trivia: TriviaKind::Content,
             }),
-            kind_label: None,
         }));
 
         let view = build_comparison_view(&doc, &default_opts());
@@ -935,7 +927,6 @@ mod tests {
                 },
                 children: vec![current_child],
                 footer: None,
-                kind_label: None,
             }));
         }
 
@@ -1005,7 +996,6 @@ mod tests {
             },
             children: vec![bogus_id],
             footer: None,
-            kind_label: None,
         }));
 
         let view = build_comparison_view(&doc, &default_opts());
@@ -1045,7 +1035,6 @@ mod tests {
                 },
                 children: vec![inner],
                 footer: None,
-                kind_label: None,
             }));
         }
         doc.roots.push(inner);

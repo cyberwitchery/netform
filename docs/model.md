@@ -12,12 +12,11 @@
   - `span`: line number and byte offsets in source text
   - `parsed`: optional `head` + `args` tokenization
   - `key_hint`: optional dialect-provided identity hint for keyed diffing
-  - `trivia`: `Blank`, `Comment`, `Content`, `Literal`, or `Unknown`
+  - `trivia`: `Blank`, `Comment`, `Content`, or `Literal`
 - `BlockNode`:
   - `header`: a `LineNode`
   - `children`: `NodeId` list
   - `footer`: optional closing `LineNode` for delimiter-terminated dialects (FortiOS `end`/`next`, Junos `}`/`};`, IOS XR `end-policy`/`end-set`)
-  - `kind_label`: optional label (reserved for future semantic tagging)
 
 ## parser behavior
 
