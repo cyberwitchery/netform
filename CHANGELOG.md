@@ -11,6 +11,7 @@
 - `cargo install netform_cli` no longer installs `netform-replay-fixtures`, which could not run once installed because the published crate has no fixtures. the fixtures in `fixtures/` now replay under `cargo test`, and a fixture's `expected` pins its full edits in `edits`, as `--json` writes them, instead of their type names in `edit_types`, so a changed anchor, key, span or line text fails it too. `fixture.schema.json` checks each edit against `diff.schema.json`
 - `plan.schema.json` now accepts the `diff_unreliable_region` finding `--plan-json` reports for a block nested under 127 or more blocks whose lines differ. a plan finding's `code` could only be `missing_anchor`, so such a plan failed validation against it
 - `config-diff --help` now says that exit code 2 also covers diff errors and usage errors such as an unknown flag, not only I/O and serialization errors. the exit codes themselves are unchanged
+- `BlockNode.kind_label`, `TriviaKind::Unknown` and `DocumentMetadata.source_name` are removed from `netform_ir`. no parser set them, so a parsed document never had a kind label, `Unknown` trivia or a source name. the diff's `unknown_unparsed_construct` warning for a block labelled `"unknown"`, which only a hand-built document could have, is removed with them. parse findings are still reported under that code, and `config-diff` output is unchanged
 
 ## [0.10.3] - 2026-11-04
 

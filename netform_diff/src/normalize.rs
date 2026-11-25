@@ -102,7 +102,6 @@ pub(crate) fn trivia_tag(kind: TriviaKind) -> &'static str {
         TriviaKind::Blank => "blank",
         TriviaKind::Comment => "comment",
         TriviaKind::Content => "content",
-        TriviaKind::Unknown => "unknown",
         TriviaKind::Literal => "literal",
     }
 }
